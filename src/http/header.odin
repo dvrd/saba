@@ -1,4 +1,4 @@
-package main
+package http
 
 import "core:bytes"
 import "core:fmt"
@@ -15,11 +15,6 @@ Header :: struct {
 	host:            string,
 	accept_encoding: []Encoding,
 	connection:      string,
-}
-
-Request :: struct {
-	header: Header,
-	body:   []byte,
 }
 
 HttpMethod :: enum {
@@ -87,13 +82,6 @@ Encoding :: enum {
 	Br,
 	ZStd,
 	Identity,
-}
-
-parse_request :: proc(content: []byte) -> Request {
-	header, content_length, ok := parse_header(content)
-	body := content[len(content) - content_length:]
-
-	return Request{header, body}
 }
 
 parse_header :: proc(content: []byte) -> (header: Header, content_length: int, ok: bool) {

@@ -15,9 +15,6 @@ main :: proc() {
 		log.error("Could not create server")
 		os.exit(1)
 	}
-	log.infof("Listening on http://{}", http.to_string(server.endpoint))
-	for {
-		err := http.handle_connection(server)
-		if err != nil do log.error(err)
-	}
+	defer http.destroy_server(server)
+	http.listen(server)
 }

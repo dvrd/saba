@@ -7,7 +7,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
-APP_SRC := filepath.join({os.get_current_directory(), "app"})
+APP_SRC := os.get_current_directory()
 
 Request :: struct {
 	header: Header,
@@ -21,31 +21,33 @@ parse_request :: proc(content: []byte) -> Request {
 	return Request{header, body}
 }
 
-handle_request :: proc(
-	connection: net.TCP_Socket,
-	connection_endpoint: net.Endpoint,
-) -> net.Network_Error {
-	defer net.close(connection)
+handle_request :: proc(conn: ^Connection) -> net.Network_Error {
+	defer net.close(conn.client)
 
 	buf: [4096]byte
-	bits := net.recv_tcp(connection, buf[:]) or_return
-	if bits > 0 do log.infof("Received request")
+	bits := net.recv_tcp(conn.client, buf[:]) or_return
+	if bits == 0 do return nil
 
+	log.infof("Received request")
 	fmt.println("---------------------")
 	fmt.println(cast(string)buf[:bits])
 	fmt.println("---------------------")
-
 	request := parse_request(buf[:bits])
 
-	return handle_response(connection, request)
+	return handle_response(conn, request)
 }
 
-handle_response :: proc(connection: net.TCP_Socket, req: Request) -> net.Network_Error {
+allowed := map[string](struct {}) {
+	"index.html"  = {},
+	"htmx.min.js" = {},
+}
+
+handle_response :: proc(conn: ^Connection, req: Request) -> net.Network_Error {
 	log.info("Sending response")
 
 	file_name, ok := net.percent_decode(req.header.route, context.temp_allocator)
 	if !ok {
-		return send_not_found(connection)
+		return send_not_found(conn.client)
 	}
 
 	full_path := filepath.join({APP_SRC, file_name}, context.temp_allocator)
@@ -53,11 +55,15 @@ handle_response :: proc(connection: net.TCP_Socket, req: Request) -> net.Network
 		full_path = filepath.join({APP_SRC, "index.html"}, context.temp_allocator)
 	}
 
+	if filepath.base(full_path) not_in allowed {
+		return send_forbidden(conn.client)
+	}
+
 	// Try to open the requested file and if file not exist, response is 404 Not Found
 	fd, errno := os.open(full_path)
 	defer os.close(fd)
 	if (errno != os.ERROR_NONE) {
-		return send_not_found(connection)
+		return send_not_found(conn.client)
 	}
 
 	// Get file size for Content-Length
@@ -79,10 +85,10 @@ handle_response :: proc(connection: net.TCP_Socket, req: Request) -> net.Network
 	strings.write_bytes(&response_builder, data)
 
 	res := strings.to_string(response_builder)
-	fmt.println("----------------------")
-	fmt.println(res)
-	fmt.println("----------------------")
-	bits, err := net.send(connection, transmute([]byte)res)
+	// fmt.println("----------------------")
+	// fmt.println(res)
+	// fmt.println("----------------------")
+	bits, err := net.send(conn.client, transmute([]byte)res)
 
 	free_all(context.temp_allocator)
 

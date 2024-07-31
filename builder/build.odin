@@ -30,7 +30,7 @@ build_base :: proc() {
 }
 
 run_app :: proc() {
-	if !os.exists(BASE_TARGET) do build_base()
+	// if !os.exists(BASE_TARGET) do build_base()
 
 	log.debug("Executing binary at:", COMPILED_BINARY)
 	err := cmd.launch({COMPILED_BINARY})

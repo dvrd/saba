@@ -1,0 +1,78 @@
+package server
+
+import "core:encoding/json"
+import "core:log"
+import "core:mem"
+import "core:strings"
+
+CRLF :: "\r\n"
+HTTP_HEADERS_END :: CRLF + CRLF
+HTTP_VERSION :: "HTTP/1.1"
+
+WEBSOCKET_GUID: string : "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+// Request fields borrow the connection's buffers and remain valid during routing.
+Header :: struct {
+	name:  string,
+	value: string,
+}
+
+MAX_PATH_PARAMETERS :: 8
+
+Path_Parameter :: struct {
+	name:  string,
+	value: string,
+}
+
+Request :: struct {
+	allocator:            mem.Allocator,
+	method:               string,
+	path:                 string,
+	query:                string,
+	version:              string,
+	headers:              []Header,
+	body:                 []u8,
+	content_length:       int,
+	has_content_length:   bool,
+	path_parameters:      [MAX_PATH_PARAMETERS]Path_Parameter,
+	path_parameter_count: int,
+}
+
+header_value :: proc(request: ^Request, name: string) -> string {
+	for header in request.headers {
+		if strings.equal_fold(header.name, name) do return header.value
+	}
+
+	return ""
+}
+
+// Returns .None on success. The handler chooses the HTTP response on failure.
+read_json :: proc(request: ^Request, input: ^$T) -> HTTP_Status {
+	content_type := header_value(request, "Content-Type")
+
+	if separator := strings.index(content_type, ";"); separator >= 0 {
+		content_type = content_type[:separator]
+	}
+
+	if !strings.equal_fold(strings.trim_space(content_type), "application/json") {
+		return .Unsupported_Media_Type
+	}
+
+	if !request.has_content_length {
+		return .Length_Required
+	}
+
+	err := json.unmarshal(request.body, input, allocator = request.allocator)
+
+	if err == .Out_Of_Memory {
+		log.error("Could not allocate JSON request data:", err)
+
+		return .Internal_Server_Error
+	}
+
+	if err != nil {
+		return .Bad_Request
+	}
+
+	return .None
+}

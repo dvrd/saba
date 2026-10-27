@@ -113,6 +113,8 @@ Declare DOM event handlers on elements with event props. Define behavior as name
 functions, then connect them using `onClick` or `onSubmit`:
 
 ```jsx
+import { pageActions } from "/__saba/dom.js";
+
 export function Example() {
   const actions = pageActions();
   const { request, notice } = actions;
@@ -132,9 +134,38 @@ export function Example() {
 }
 ```
 
+All reusable helpers are exported by `/__saba/dom.js`; applications do not
+provide copies in `web/utils`:
+
+```js
+import {
+  api, pageActions, notice,
+  validateForm, validateInput, revalidateInput, validatePassword,
+  readSessionData, writeSessionData, queryParams,
+} from '/__saba/dom.js';
+```
+
+`api(path, { method, body, abort, messages })` sends same-origin requests, encodes
+JSON or URLSearchParams, and handles cancellation, a 20-second timeout, HTTP
+errors, malformed JSON, and network failures. Successful non-JSON replies return
+`null`. Optional `messages` maps server error codes to application-specific text;
+HTTP errors retain their `status` and `code`. The runtime contains no application
+endpoints or authentication error codes.
+
+`notice(message, kind, target)` accepts an element or ref and updates its text,
+visibility, kind, and focus. Its default target is `#form-status`.
+`validateForm(form)` also accepts an element or ref. Form helpers trim email
+fields, expose accessible field errors, and validate required fields and
+passwords. `validatePassword(value, { newPassword })` returns error text or an
+empty string; new passwords require 12 characters and all passwords have a
+1,024-byte UTF-8 limit.
+
 `pageActions()` captures its component lifetime and locates the local status notice
 when needed. Nested modules use `pageActions(parentActions)` for their own
 cancellation handle while inheriting the parent transport and status notice.
+A root can supply an application transport with `pageActions({ request: appApi })`;
+its children inherit that transport without global configuration. For example,
+`appApi` can call `api(path, { ...options, messages: applicationMessages })`.
 `Form` owns submission behavior. Its `onSubmit(values, form)` callback receives
 validated form values and the native form element. It trims email addresses,
 prevents browser navigation and duplicate submissions, shows errors, and restores
@@ -155,11 +186,11 @@ that does not use `request`, such as Web Crypto. Pages and components declare ev
 props; native listener installation belongs to the DOM runtime. Non-DOM abort
 listeners remain inside the request transport.
 
-`web/utils/navigation.js` shares post-login destinations, provider names, fragment-token
-removal, and link-token shape checks. Pages still own endpoint selection,
+Applications own post-login destinations, provider names, fragment-token
+removal, and authentication token shape checks. Pages also own endpoint selection,
 confirmation rules, and their success behavior.
 
-`readSessionData(key)` from `web/utils/storage.js` reads optional JSON session
+`readSessionData(key)` from `/__saba/dom.js` reads optional JSON session
 state. Missing data, malformed JSON, and inaccessible storage return `null`;
 callers explicitly test `value !== null` for presence and validate the decoded
 value for their invitation or OAuth flow. The helper returns data, not a boolean.
@@ -176,7 +207,7 @@ OAuth or invitation flows; failed writes are not silently ignored.
 writeSessionData('app.group-invite', { token, created: Date.now() });
 ```
 
-`queryParams()` from `web/utils/navigation.js` returns `URLSearchParams` for
+`queryParams()` from `/__saba/dom.js` returns `URLSearchParams` for
 both the query string and hash. Hash values take precedence for `get`; repeated
 values are retained for `getAll`. Use `queryParams('search')` or
 `queryParams('hash')` when a flow requires a specific source. OAuth reads the
@@ -351,6 +382,7 @@ From the Saba repository root:
 
 ```sh
 odin test . -warnings-as-errors
+node --test javascript/utilities_test.mjs
 ```
 
 These tests cover the JSX transformer. Applications should additionally exercise

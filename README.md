@@ -294,6 +294,7 @@ transformer tests from the repository root:
 ```sh
 odin check . -no-entry-point -warnings-as-errors
 odin test . -warnings-as-errors
+node --test javascript/utilities_test.mjs
 ```
 
 Consumers should test their own routes and handlers against the shared package.

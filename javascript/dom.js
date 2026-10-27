@@ -452,3 +452,282 @@ export function defineStyle(id, css) {
   document.head.append(style);
   styles.set(id, css);
 }
+
+// Optional persisted state may be missing, malformed, or inaccessible.
+export function readSessionData(key) {
+  try {
+    return JSON.parse(sessionStorage.getItem(key));
+  } catch {
+    return null;
+  }
+}
+
+// Writes are required for flows such as OAuth; failure must stop the operation.
+export function writeSessionData(key, value) {
+  try {
+    sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    throw new Error(
+      "We couldn’t save your progress in this browser. Allow site storage and try again.",
+    );
+  }
+}
+
+// Hash values come first; repeated values remain available through getAll().
+export function queryParams(source = "all") {
+  if (source === "search") return new URLSearchParams(location.search);
+  if (source === "hash") return new URLSearchParams(location.hash.slice(1));
+
+  if (source !== "all") throw new TypeError('Unknown URL parameter source.');
+  return new URLSearchParams([
+    ...queryParams("hash"),
+    ...queryParams("search"),
+  ]);
+}
+
+
+// Return the field error, or an empty string when the password is valid.
+export function validatePassword(value, { newPassword = false } = {}) {
+  if (newPassword && [...value].length < 12) {
+    return "Use at least 12 characters for your password.";
+  }
+  if (new TextEncoder().encode(value).length > 1024) {
+    return "Your password is too long. Use a shorter one.";
+  }
+  return "";
+}
+
+function validate(field) {
+  if (field.disabled) return true;
+
+  let message = "";
+
+  if (field.validity.valueMissing) {
+    message =
+      field.type === "email"
+        ? "Enter your email address."
+        : "Complete this field.";
+  } else if (field.validity.typeMismatch) {
+    message = "Enter a valid email address.";
+  } else if (
+    field.dataset.newPassword !== undefined ||
+    field.autocomplete?.includes("password")
+  ) {
+    message = validatePassword(field.value, {
+      newPassword: field.dataset.newPassword !== undefined,
+    });
+  }
+
+  field.setAttribute("aria-invalid", String(Boolean(message)));
+
+  const error = field.form?.querySelector(
+    `#${CSS.escape(`${field.id}-error`)}`,
+  );
+
+  if (error) {
+    error.textContent = message;
+    error.hidden = !message;
+  }
+
+  return !message;
+}
+
+export function validateInput(event) {
+  validate(event.currentTarget);
+}
+
+export function revalidateInput(event) {
+  const field = event.currentTarget;
+  if (field.getAttribute("aria-invalid") === "true") validate(field);
+}
+
+export function validateForm(form) {
+  form = resolveElement(form);
+  const fields = [...form.querySelectorAll("input")].filter(
+    (field) => field.type !== "hidden",
+  );
+
+  fields
+    .filter((field) => field.type === "email")
+    .forEach((field) => {
+      field.value = field.value.trim();
+    });
+
+  const valid = fields.map(validate);
+  if (valid.includes(false)) {
+    fields[valid.indexOf(false)].focus();
+    return false;
+  }
+
+  return true;
+}
+
+function getHeaders(body) {
+  const headers = { Accept: "application/json" };
+
+  if (body !== undefined) {
+    headers["Content-Type"] =
+      body instanceof URLSearchParams
+        ? "application/x-www-form-urlencoded"
+        : "application/json";
+  }
+
+  return headers;
+}
+
+function isJsonResponse(response) {
+  return response.headers.get("Content-Type")?.includes("application/json");
+}
+
+export async function api(
+  path,
+  { method = "GET", body, abort, messages = {} } = {},
+) {
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort(abort.reason);
+
+  if (abort?.aborted) {
+    forwardAbort();
+  } else {
+    abort?.addEventListener("abort", forwardAbort, { once: true });
+  }
+
+  const timeout = setTimeout(() => controller.abort(), 20000);
+
+  try {
+    const response = await fetch(path, {
+      method,
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: getHeaders(body),
+      body:
+        body === undefined || body instanceof URLSearchParams
+          ? body
+          : JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    const data = isJsonResponse(response) ? await response.json() : null;
+
+    if (abort?.aborted) throw abort.reason;
+
+    if (!response.ok) {
+      const error = new Error(
+        messages[data?.error] ||
+          (response.status === 429
+            ? "Too many attempts. Wait a minute, then try again."
+            : "We couldn’t complete that right now. Please try again."),
+      );
+      error.status = response.status;
+      error.code = data?.error;
+      throw error;
+    }
+
+    return data;
+  } catch (error) {
+    if (abort?.aborted) throw error;
+
+    if (error.name === "AbortError") {
+      throw new Error("That took too long. Please try again.");
+    }
+
+    if (error instanceof SyntaxError) {
+      throw new Error(
+        "We couldn’t read the server’s response. Please try again.",
+      );
+    }
+
+    if (error instanceof TypeError) {
+      throw new Error(
+        "We couldn’t connect. Check your connection and try again.",
+      );
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    abort?.removeEventListener("abort", forwardAbort);
+  }
+}
+
+export function notice(
+  message,
+  kind = "success",
+  target = document.querySelector("#form-status"),
+) {
+  if (!target) return;
+  target = resolveElement(target);
+  target.textContent = message;
+  target.dataset.kind = kind;
+  target.hidden = false;
+
+  if (target.isConnected) {
+    target.focus();
+  } else {
+    queueMicrotask(() => {
+      if (target.isConnected) target.focus();
+    });
+  }
+}
+
+// Each caller gets its own lifetime; nested modules inherit the page's notice.
+export function pageActions(parent) {
+  const scope = lifetime();
+
+  const abort = parent?.abort
+    ? AbortSignal.any([scope.abort, parent.abort])
+    : scope.abort;
+
+  const showNotice = (message, kind) => {
+    if (abort.aborted) return;
+
+    const root = scope.root;
+    const target = root?.matches?.("#form-status")
+      ? root
+      : root?.querySelector?.("#form-status");
+
+    if (target) {
+      notice(message, kind, target);
+    } else {
+      parent?.notice?.(message, kind);
+    }
+  };
+
+  const request = (path, options = {}) => {
+    const requestAbort = options.abort
+      ? AbortSignal.any([abort, options.abort])
+      : abort;
+
+    const transport = parent?.request || api;
+
+    return transport(path, { ...options, abort: requestAbort });
+  };
+
+  const run = (callback) => {
+    return scope.run(async () => {
+      if (abort.aborted) return;
+      try {
+        return await callback({ abort });
+      } catch (error) {
+        showNotice(error.message, "error");
+      }
+    });
+  };
+
+  const action =
+    (callback, errorMessage = (error) => error.message) =>
+    async (event) => {
+      const button = event.currentTarget;
+      if (abort.aborted || button.disabled) return;
+      button.disabled = true;
+      try {
+        await callback(event);
+      } catch (error) {
+        showNotice(errorMessage(error), "error");
+      } finally {
+        if (!abort.aborted) button.disabled = false;
+      }
+    };
+
+  return { abort, request, notice: showNotice, run, action };
+}

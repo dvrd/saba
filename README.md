@@ -286,6 +286,44 @@ after a server restart. This preserves full-page live reload; it does not replac
 individual JavaScript modules. When disabled, responses pass through unchanged
 and the application router receives requests for both reload paths.
 
+
+## Backend development reload
+
+Call `develop` before opening database connections or other application resources:
+
+```odin
+when DEV_MODE {
+    handled, success := server.develop(server.Development {
+        package_directory = "src",
+        shared_packages = {"saba", "auth", "kakunou"},
+        build_arguments = {"-define:DEV_MODE=true"},
+    })
+    if handled {
+        if !success do os.exit(1)
+        return
+    }
+}
+```
+
+The supervisor initially launches the current executable. Child processes return
+`handled=false` and run normal startup. It watches application/shared package
+sources and embedded JS, JSON, SQL, HTML, CSS, C and header files. Documentation,
+Git metadata, and generated outputs are ignored. Saves settle across two 250 ms
+scans before a build. `ODIN` can select a compiler; otherwise it uses `odin`. Rebuilds default to
+`-o:none` for short edit cycles; an explicit `-o:` in `build_arguments` overrides
+that default. Successful rebuilds print their elapsed compilation time.
+
+Successful builds replace the child after checking for edits made during
+compilation. Failed builds leave the current child serving and retry on the next
+edit. Build output lives in a temporary directory. Working directory, arguments,
+and environment are preserved; applications must forward their compile definitions
+through `build_arguments`. Existing browser reload clients reconnect and refresh
+after restart. Runtime state restarts, while external databases remain in place.
+Ctrl+C/SIGTERM stops child processes and removes temporary builds. A startup crash
+is logged and waits for an edit; the utility does not undo database migrations.
+This development-only supervisor supports macOS and Linux and must not be enabled
+in production.
+
 ## Development
 
 This repository is independent of the consuming application. Run its internal

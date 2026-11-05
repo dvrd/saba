@@ -1,5 +1,6 @@
 package server
 
+import async "shared:async"
 import db "shared:kakunou"
 
 import "core:log"
@@ -10,6 +11,7 @@ import "core:thread"
 import "core:time"
 
 DEFAULT_MAX_CONNECTIONS :: 64
+DEFAULT_WORKERS :: 4
 
 Server :: struct {
 	address:              string,
@@ -23,12 +25,21 @@ Server :: struct {
 	pages:                Page_Mount,
 	development:          bool,
 	hot_reload_directory: string,
+	// Zero selects four workers; serve participates as one worker.
+	workers:              int,
+	// Optional caller-owned shutdown and endpoint control.
+	control:              ^Server_Control,
 }
 
 Server_Runtime :: struct {
 	config:             Server,
 	logger:             log.Logger,
-	workers:            sync.Wait_Group,
+	executor:           async.Runtime,
+	accept_task:        async.Task,
+	listener:           async.Socket,
+	accept_retry:       async.Deadline,
+	connection_limit:   int,
+	listener_failed:    bool,
 	active_connections: int,
 	reload:             Reload_State,
 	modules:            []Module_Cache,
@@ -39,13 +50,22 @@ Server_Runtime :: struct {
 // The database and handler must remain valid while the server handles requests.
 // Returns false on startup failure or an unrecoverable listener error.
 serve :: proc(config: Server) -> bool {
+	if !claim_server(config.control) {
+		log.error("Server control is already in use"); return false
+	}
+	defer release_server(config.control)
 	if config.handler == nil {
 		log.error("Server requires a request handler")
 
 		return false
 	}
-	if config.max_connections < 0 {
-		log.error("Server connection limit must not be negative")
+	if config.workers < 0 {
+		log.error("Server worker count must not be negative"); return false
+	}
+	workers := config.workers
+	if workers == 0 do workers = DEFAULT_WORKERS
+	if config.max_connections < 0 || config.max_connections == max(int) {
+		log.error("Server connection limit is out of range")
 		return false
 	}
 	limit := config.max_connections
@@ -82,27 +102,49 @@ serve :: proc(config: Server) -> bool {
 		return false
 	}
 
-	listener, err := net.listen_tcp(net.Endpoint{address, config.port})
-	if err != nil {
-		log.error("Could not start server:", err)
-
+	runtime, allocation_error := new(Server_Runtime)
+	if allocation_error != nil {
+		log.error("Could not allocate server runtime:", allocation_error); return false
+	}
+	defer free(runtime)
+	runtime^ = Server_Runtime {
+		config           = config,
+		logger           = context.logger,
+		modules          = modules,
+		assets           = assets,
+		pages            = pages,
+		connection_limit = limit,
+	}
+	if err := async.init(
+		&runtime.executor,
+		{workers = workers, task_capacity = limit + 1, io_capacity = limit + 1},
+	); err.kind != .None {
+		log.error("Could not initialize server runtime:", err)
 		return false
 	}
-	defer net.close(listener)
-
-	endpoint, endpoint_err := net.bound_endpoint(listener)
-	if endpoint_err != nil {
-		log.error("Could not obtain listening address:", endpoint_err)
-
-		return false
+	defer {
+		unpublish_server(config.control)
+		async.destroy(&runtime.executor)
 	}
-
-	runtime := Server_Runtime {
-		config  = config,
-		logger  = context.logger,
-		modules = modules,
-		assets  = assets,
-		pages   = pages,
+	runtime.accept_task = {
+		resume = accept_connections,
+		data   = runtime,
+	}
+	if err := async.register(&runtime.executor, &runtime.accept_task); err.kind != .None {
+		log.error("Could not register listener task:", err); return false
+	}
+	listener, listen_error := async.listen(
+		&runtime.executor,
+		&runtime.accept_task,
+		{address, config.port},
+	)
+	if listen_error.kind != .None {
+		log.error("Could not start server:", listen_error); return false
+	}
+	runtime.listener = listener
+	endpoint, endpoint_error := async.bound_endpoint(listener)
+	if endpoint_error.kind != .None {
+		log.error("Could not obtain listening address:", endpoint_error); return false
 	}
 	watcher: ^thread.Thread
 
@@ -113,9 +155,6 @@ serve :: proc(config: Server) -> bool {
 			thread.join(watcher)
 			thread.destroy(watcher)
 		}
-
-		// Workers borrow the runtime, so keep it alive until they return.
-		sync.wait_group_wait(&runtime.workers)
 	}
 
 	if config.development {
@@ -137,64 +176,84 @@ serve :: proc(config: Server) -> bool {
 		}
 	}
 
+	publish_server(config.control, &runtime.executor, endpoint)
+	async.wake(&runtime.executor, &runtime.accept_task)
 	log.infof("listening on http://localhost:%d", endpoint.port)
+	err := async.run(&runtime.executor)
+	if err.kind != .None && !(err.kind == .Stopping && server_stop_requested(config.control)) {
+		log.error("Server runtime failed:", err)
+		return false
+	}
+	return !runtime.listener_failed
+}
 
-	for {
-		client, _, accept_err := net.accept_tcp(listener)
-		if accept_err != nil {
-			log.error("Could not accept connection:", accept_err)
-
-			#partial switch accept_err {
-			case .Invalid_Argument, .Unsupported_Socket, .Not_Listening:
-				return false
+@(private)
+accept_connections :: proc(data: rawptr) -> async.Resume_Result {
+	runtime := cast(^Server_Runtime)data
+	context.logger = runtime.logger
+	if runtime.accept_retry.at != 0 {
+		err := async.sleep_until(&runtime.executor, runtime.accept_retry)
+		if err.kind == .Pending do return .Waiting
+		if err.kind != .None do return .Done
+		runtime.accept_retry = {}
+	}
+	for _ in 0 ..< 32 {
+		if async.cancelled(&runtime.accept_task) do return .Done
+		client, err := async.accept(runtime.listener)
+		if err.kind == .Pending do return .Waiting
+		if err.kind == .Cancelled || err.kind == .Closed do return .Done
+		if err.kind != .None {
+			log.error("Could not accept connection:", err)
+			cause, _ := err.network_cause.(net.Accept_Error)
+			if err.kind != .Network_Error ||
+			   cause == .Invalid_Argument ||
+			   cause == .Unsupported_Socket ||
+			   cause == .Not_Listening {
+				runtime.listener_failed = true
+				async.shutdown(&runtime.executor)
+				return .Done
 			}
-
-			time.sleep(100 * time.Millisecond)
-
-			continue
+			runtime.accept_retry = async.deadline_after(&runtime.executor, 100 * time.Millisecond)
+			if async.sleep_until(&runtime.executor, runtime.accept_retry).kind == .Pending do return .Waiting
+			return .Yield
 		}
-
-		blocking_err := net.set_blocking(client, false)
-		if blocking_err != nil {
-			log.error(
-				"Could not configure nonblocking connection:",
-				blocking_err,
-				"| socket:",
-				client,
-			)
-			net.close(client)
-
-			continue
+		if sync.atomic_load(&runtime.active_connections) >= runtime.connection_limit {
+			reject_connection(client); continue
 		}
-
-		// Only the accept loop increments; workers can only release capacity.
-		if sync.atomic_load(&runtime.active_connections) >= limit {
-			reject_connection(client)
-			continue
+		task, allocation_error := new(Connection_Task)
+		if allocation_error != nil {
+			reject_connection(client); continue
 		}
+		task^ = {
+			runtime = runtime,
+			native_pending = true,
+			phase = .Adopt,
+			connection = {socket = client, database = runtime.config.database},
+		}
+		if runtime.config.development do task.connection.reload = &runtime.reload
+		init_connection_arena(task)
+		task.task = {
+			resume  = handle_connection,
+			data    = task,
+			on_done = finish_connection,
+		}
+		// Publish fully initialized storage. Adoption happens inside its first
+		// resume, so shutdown can safely dispose even an unexecuted task.
 		sync.atomic_add(&runtime.active_connections, 1)
-
-		sync.wait_group_add(&runtime.workers, 1)
-
-		worker := thread.create_and_start_with_poly_data(
-			Connection_Task{client, &runtime},
-			handle_connection,
-			self_cleanup = true,
-		)
-
-		if worker == nil {
+		if async.spawn(&runtime.executor, &task.task).kind != .None {
 			sync.atomic_sub(&runtime.active_connections, 1)
-			sync.wait_group_done(&runtime.workers)
-
-			log.error("Could not create connection thread | socket:", client)
 			reject_connection(client)
+			mem.dynamic_arena_destroy(&task.arena)
+			free(task)
 		}
 	}
+	return .Yield
 }
 
 @(private)
 reject_connection :: proc(client: net.TCP_Socket) {
 	defer net.close(client)
+	if net.set_blocking(client, false) != nil do return
 	buffer: [RESPONSE_HEADER_LIMIT]u8
 	headers, ready := response_headers(Response{status = .Service_Unavailable}, buffer[:])
 	// Best effort only: waiting for a rejected client would stall acceptance.

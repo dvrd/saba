@@ -22,60 +22,48 @@ PROTOCOL_ERROR :: 1002
 UNSUPPORTED_DATA :: 1003
 INVALID_PAYLOAD_DATA :: 1007
 
-upgrade_websocket :: proc(conn: ^Connection, request: ^Request) -> bool {
+// Returns an accept value borrowing caller storage; no stack-backed value escapes.
+@(private)
+websocket_accept :: proc(request: ^Request, storage: []u8) -> (string, HTTP_Status) {
 	key := header_value(request, "Sec-WebSocket-Key")
 	nonce: [16]byte
 	decoded, decode_error := base64.decode_into_buf(nonce[:], key, options = {.Strict})
-	version := header_value(request, "Sec-WebSocket-Version")
-	upgrade := header_value(request, "Upgrade")
-
 	connection := header_value(request, "Connection")
 	has_upgrade := false
-
 	for token in strings.split_iterator(&connection, ",") {
-		if strings.equal_fold(strings.trim_space(token), "upgrade") {
-			has_upgrade = true
-		}
+		if strings.equal_fold(strings.trim_space(token), "upgrade") do has_upgrade = true
 	}
-
 	if decode_error != nil ||
 	   len(decoded) != len(nonce) ||
-	   version != "13" ||
-	   !strings.equal_fold(upgrade, "websocket") ||
+	   header_value(request, "Sec-WebSocket-Version") != "13" ||
+	   !strings.equal_fold(header_value(request, "Upgrade"), "websocket") ||
 	   !has_upgrade {
-		log.error("Invalid WebSocket upgrade headers | socket:", conn.socket)
-		send_empty_response(conn, .Bad_Request)
-
-		return false
+		return "", .Bad_Request
 	}
-
 	hash: sha1.Context
 	digest: [sha1.DIGEST_SIZE]u8
-
 	sha1.init(&hash)
 	sha1.update(&hash, transmute([]u8)key)
 	sha1.update(&hash, transmute([]u8)WEBSOCKET_GUID)
 	sha1.final(&hash, digest[:])
+	accept, err := base64.encode_into_buf(storage, digest[:])
+	if err != nil do return "", .Internal_Server_Error
+	return string(accept), .None
+}
 
-	accept, encode_err := base64.encode(digest[:])
-	if encode_err != nil {
-		log.error("Could not encode WebSocket handshake:", encode_err, "| socket:", conn.socket)
-		send_empty_response(conn, .Internal_Server_Error)
-
-		return false
+upgrade_websocket :: proc(conn: ^Connection, request: ^Request) -> bool {
+	storage: [28]u8
+	accept, status := websocket_accept(request, storage[:])
+	if status != .None {
+		send_empty_response(conn, status); return false
 	}
-	defer {
-		if free_err := delete(accept); free_err != nil {
-			log.error("Could not free WebSocket accept value:", free_err)
-		}
-	}
-
-	response := Response {
-		status  = .Switching_Protocols,
-		headers = []Header{{"Upgrade", "websocket"}, {"Sec-WebSocket-Accept", string(accept)}},
-	}
-
-	return send_response(conn, response)
+	return send_response(
+		conn,
+		{
+			status = .Switching_Protocols,
+			headers = []Header{{"Upgrade", "websocket"}, {"Sec-WebSocket-Accept", accept}},
+		},
+	)
 }
 
 send_websocket_frame :: proc(conn: ^Connection, opcode: Opcode, payload: []u8) -> bool {

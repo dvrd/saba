@@ -13,7 +13,8 @@ libraries, and `kakunou` for database handles and SQL operations; it never impor
 ## Startup
 
 Install this repository at `$(odin root)/shared/saba` and Kakunou at
-`$(odin root)/shared/kakunou`. SQLite and libcurl must be installed as system
+`$(odin root)/shared/kakunou`, and the async library at
+`$(odin root)/shared/async`. SQLite and libcurl must be installed as system
 libraries. Projects import both through Odin’s built-in shared collection:
 
 ```odin
@@ -52,12 +53,43 @@ Database setup and error handling belong to `shared:kakunou` (see its README).
 
 The caller owns the database and logger backing state and keeps them alive while
 `serve` runs. Workers borrow the server runtime and use the configured logger;
-each handled connection closes when its handler returns. Before `serve` returns,
-it stops and joins its watcher and waits for its connection workers to finish.
+each handled connection closes after its response is sent. Before `serve` returns,
+it stops and joins its watcher and waits for its connection tasks and cleanup to finish.
+
+### Worker pool and shutdown
+
+Saba uses `shared:async` for acceptance, request headers/bodies, response writes,
+and its reload WebSocket. A connection is a resumable task; socket waits park the
+task rather than a thread. Request arenas and partial-I/O offsets survive until
+the task finishes, and the runtime closes its socket before final cleanup. Reload
+WebSockets release their HTTP request/response arena after the upgrade, retaining
+only frame state and any prefetched frame bytes.
+
+`Server.workers` selects a fixed pool size. Zero selects four; negative values
+fail startup. The thread calling `serve` is one of those workers. Development
+mode also retains its separate file-watcher thread. Application handlers keep the
+same `Handler` interface and return one `Response`; do not perform raw socket I/O
+or call the synchronous send/read helpers from a handler. The HTTP server still
+sends one response and closes each ordinary connection; keep-alive and chunked
+request bodies are not introduced by this integration.
+
+Handlers, SQLite calls, filesystem access and S3/libcurl operations remain
+synchronous. They occupy their worker while executing. This integration makes
+network waits asynchronous; it does not make arbitrary handler code preemptible.
+
+For application-controlled shutdown, keep a `Server_Control` at a stable address
+and pass its pointer in `Server.control`. Another application thread can call
+`stop_server(&control)`: new admission stops, parked connections are cancelled,
+and running handlers finish cooperatively. `serve` joins the pool before
+returning. A stop requested before listener publication is remembered. A control
+can be reused after `serve` returns, but cannot control concurrent server calls.
+`server_endpoint(&control)` returns the bound endpoint and a publication flag,
+which is useful when `port=0`. Keep control, database, logger and configuration
+storage alive until `serve` returns.
 
 ### Connection capacity
 
-`Server.max_connections` bounds admitted connections before worker creation and
+`Server.max_connections` bounds admitted connections before task creation and
 request-body allocation. Zero selects the default of 64; a positive value sets
 an explicit limit, and negative values fail startup. WebSockets and requests
 waiting for headers or bodies count toward the same limit.
@@ -66,8 +98,7 @@ When full, the listener makes one nonblocking attempt to send `503 Service
 Unavailable` and closes the new socket. Delivery of that response is best effort;
 the listener does not wait for a rejected client to read. Capacity returns after
 the admitted connection's request memory and socket are released, including error
-paths and WebSocket closure. Failure to create a worker releases its reservation
-as well.
+paths and WebSocket closure. Failed task admission releases its reservation as well.
 
 This bounds concurrent request resources; each admitted request still has its own
 body-size and I/O deadlines. For example, 64 simultaneous requests at the app's
@@ -295,7 +326,7 @@ Call `develop` before opening database connections or other application resource
 when DEV_MODE {
     handled, success := server.develop(server.Development {
         package_directory = "src",
-        shared_packages = {"saba", "auth", "kakunou"},
+        shared_packages = {"saba", "async", "auth", "kakunou"},
         build_arguments = {"-define:DEV_MODE=true"},
     })
     if handled {
@@ -327,7 +358,7 @@ in production.
 ## Development
 
 This repository is independent of the consuming application. Run its internal
-transformer tests from the repository root:
+tests from the repository root:
 
 ```sh
 odin check . -no-entry-point -warnings-as-errors
@@ -335,7 +366,19 @@ odin test . -warnings-as-errors
 node --test javascript/utilities_test.mjs
 ```
 
-Consumers should test their own routes and handlers against the shared package.
+Run the loopback integration suite with the installed shared dependencies:
+
+```sh
+python3 tests/async_server.py
+python3 tests/async_server.py --sanitize thread
+python3 tests/async_server.py --sanitize address
+```
+
+Set `ODIN` to select the compiler. The suite checks fragmented uploads, retained
+HTTP error statuses, backpressure, bounded threads with idle connections,
+capacity recovery, assets/JSX/pages, reload WebSockets, deadlines and graceful
+shutdown. It creates and cleans up only its own temporary files and processes.
+Consumers should also test their own routes and handlers against the shared package.
 
 ## S3 storage
 

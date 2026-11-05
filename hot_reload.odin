@@ -32,15 +32,6 @@ reload_client_response :: proc(request: ^Request) -> Response {
 	)
 }
 
-handle_reload_upgrade :: proc(conn: ^Connection, request: ^Request) -> bool {
-	if match_route(request, "GET", "/__reload") {
-		if upgrade_websocket(conn, request) do process_websocket_control_frames(conn)
-
-		return true
-	}
-
-	return false
-}
 
 reload_html_response :: proc(response: Response) -> bool {
 	if response.status != .None && response.status != .OK do return false
@@ -59,7 +50,13 @@ reload_html_response :: proc(response: Response) -> bool {
 	return false
 }
 
-inject_reload_client :: proc(html: []u8) -> (injected: []u8, ok: bool) {
+inject_reload_client :: proc(
+	html: []u8,
+	allocator := context.allocator,
+) -> (
+	injected: []u8,
+	ok: bool,
+) {
 	if strings.contains(string(html), RELOAD_CLIENT_TAG) do return nil, true
 
 	position := strings.index(string(html), "</head>")
@@ -69,11 +66,7 @@ inject_reload_client :: proc(html: []u8) -> (injected: []u8, ok: bool) {
 		return nil, false
 	}
 
-	development_html, allocation_err := make(
-		[]u8,
-		len(html) + len(RELOAD_CLIENT_TAG),
-		context.allocator,
-	)
+	development_html, allocation_err := make([]u8, len(html) + len(RELOAD_CLIENT_TAG), allocator)
 	if allocation_err != nil {
 		log.error("Could not allocate development HTML:", allocation_err)
 

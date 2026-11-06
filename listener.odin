@@ -43,6 +43,7 @@ Server :: struct {
 	// Optional caller-owned shutdown and endpoint control.
 	control:              ^Server_Control,
 	timeouts:             Timeout_Config,
+	keep_alive:           Keep_Alive_Config,
 	observability:        Observability_Config,
 	// Zero selects five seconds; repeated drain calls never extend the deadline.
 	drain_timeout:        time.Duration,
@@ -68,6 +69,8 @@ Server_Runtime :: struct {
 	observability_mutex:                     sync.Mutex,
 	metrics:                                 Request_Metrics,
 	next_request_id:                         u64,
+	keep_alive_mutex:                        sync.Mutex,
+	keep_alive_idle_tasks:                   ^Connection_Task,
 	reload:                                  Reload_State,
 	modules:                                 []Module_Cache,
 	assets:                                  []Asset_Cache,
@@ -86,6 +89,10 @@ serve :: proc(config: Server) -> bool {
 	}
 	initial, maximum, workers, valid := server_limits(config)
 	if !valid do return false
+	if !keep_alive_valid(config.keep_alive) {
+		log.error("Invalid keep-alive request count or idle timeout")
+		return false
+	}
 	if !timeouts_valid(config.timeouts) {
 		log.error("Invalid server timeouts: durations must be between zero and MAX_SERVER_TIMEOUT")
 		return false

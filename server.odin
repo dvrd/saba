@@ -21,6 +21,7 @@ Handler :: #type proc(conn: ^Connection, request: ^Request) -> Response
 Connection_Phase :: enum {
 	Adopt,
 	Headers,
+	Idle,
 	Body,
 	Dispatch,
 	Write,
@@ -39,6 +40,9 @@ Connection_Task :: struct {
 	arena:                              mem.Dynamic_Arena,
 	phase, after_write:                 Connection_Phase,
 	finish_after_write:                 bool,
+	reuse_after_write, idle_registered: bool,
+	requests_completed:                int,
+	idle_previous, idle_next:          ^Connection_Task,
 	deadline:                           async.Deadline,
 	header_deadline:                    async.Deadline,
 	header_read_deadline:               time.Tick,
@@ -66,6 +70,7 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 	context.logger = task.runtime.logger
 	context.temp_allocator = mem.dynamic_arena_allocator(&task.arena)
 	for _ in 0 ..< CONNECTION_STEP_LIMIT {
+		if task.runtime.config.keep_alive.enabled && task.phase != .Write && async.cancelled(&task.task) do return .Done
 		switch task.phase {
 		case .Adopt:
 			// adopt consumes the descriptor even on failure. Queued tasks
@@ -81,6 +86,14 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 			task.deadline = async.deadline_after(&task.runtime.executor, task.runtime.timeouts.idle)
 			conn.read_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.idle)
 			task.phase = .Headers
+		case .Idle:
+			if server_is_draining(task.runtime) do return .Done
+			n, err := async.read(task.socket, task.header, task.deadline)
+			if err.kind == .Pending do return .Waiting
+			// Idle timeout/EOF has no admitted request and emits no extra event.
+			if err.kind != .None || n == 0 do return .Done
+			if !keep_alive_begin_request(task,n) do return .Done
+			continue
 		case .Headers:
 			if deadline_expired(conn.read_deadline) {
 				if task.observed do task.event.outcome = .Timeout
@@ -177,7 +190,14 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 			if !queue_response(task, response) do return .Done
 		case .Write:
 			if task.output_index == len(task.output) {
-				task.response_finished = true
+				if !task.websocket_established {
+					task.response_finished = true
+					task.requests_completed += 1
+					if task.reuse_after_write {
+						if !keep_alive_next_request(task) do return .Done
+						continue
+					}
+				}
 				if task.finish_after_write do return .Done
 				task.phase = task.after_write
 				if task.phase == .WebSocket_Header {
@@ -217,6 +237,7 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 	allocator := mem.dynamic_arena_allocator(&task.arena)
 	raw := string(task.header[:task.header_used])
 	end := strings.index(raw, HTTP_HEADERS_END)
+	if task.observed do task.event.bytes_received = u64(end + len(HTTP_HEADERS_END))
 	// Allocate header entries only after a request arrives, rather than
 	// retaining the maximum table for every idle connection.
 	count := min(strings.count(raw[:end], CRLF), REQUEST_HEADER_COUNT_LIMIT)
@@ -255,6 +276,7 @@ task_read :: proc(task: ^Connection_Task, destination: []u8) -> (int, async.Erro
 	buffered := task.connection.read_buffer
 	if len(buffered) > 0 {
 		n := copy(destination, buffered)
+		if task.observed && !task.websocket_established do task.event.bytes_received += u64(n)
 		task.connection.read_buffer = buffered[n:]
 		if len(task.connection.read_buffer) == 0 && task.websocket_prefetched != nil {
 			delete(task.websocket_prefetched, rt.heap_allocator())
@@ -313,6 +335,7 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 		if !ok {
 			prepared = {
 				status = .Internal_Server_Error,
+				close_connection = response.close_connection,
 			}
 		} else if injected != nil {
 			prepared.body = injected
@@ -324,7 +347,8 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 		mem.dynamic_arena_allocator(&task.arena),
 	)
 	if allocation_error != nil {observe_failure(task, .Allocation_Error); return false}
-	headers, ok := response_headers(prepared, buffer)
+	task.reuse_after_write = !prepared.close_connection && response_can_reuse(task,prepared.status)
+	headers, ok := response_headers(prepared, buffer,task.reuse_after_write)
 	if !ok {observe_failure(task, .Protocol_Error); return false}
 	task.output = {headers, prepared.body}
 	if task.request.method == "HEAD" do task.output[1] = nil
@@ -379,6 +403,7 @@ dispatch_request :: proc(task: ^Connection_Task) -> Response {
 @(private)
 finish_connection :: proc(data: rawptr) {
 	task := cast(^Connection_Task)data
+	keep_alive_leave_idle(task)
 	observe_finish(task)
 	if task.native_pending do net.close(task.connection.socket)
 	// The runtime has already closed adopted sockets and removed readiness.

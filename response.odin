@@ -14,6 +14,8 @@ Response :: struct {
 	status:  HTTP_Status,
 	headers: []Header,
 	body:    []u8,
+	// Force close even when bounded keep-alive is enabled.
+	close_connection: bool,
 }
 
 // Copies the header list out of the caller's stack into the request arena.
@@ -42,7 +44,7 @@ http_field_value :: proc(value: string) -> bool {
 	return http.header_value_valid(value)
 }
 
-response_headers :: proc(response: Response, buffer: []u8) -> (data: []u8, ok: bool) {
+response_headers :: proc(response: Response, buffer: []u8, keep_alive: bool = false) -> (data: []u8, ok: bool) {
 	status := response.status
 	if status == .None do status = .OK
 
@@ -88,7 +90,7 @@ response_headers :: proc(response: Response, buffer: []u8) -> (data: []u8, ok: b
 		count += 1
 	}
 
-	generated[count] = {"Connection", "Upgrade" if status == .Switching_Protocols else "close"}
+	generated[count] = {"Connection", "Upgrade" if status == .Switching_Protocols else ("keep-alive" if keep_alive else "close")}
 	count += 1
 
 	groups := [2][]Header{response.headers, generated[:count]}

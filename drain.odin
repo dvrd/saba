@@ -78,6 +78,7 @@ request_runtime_drain :: proc(runtime: ^Server_Runtime, timeout: time.Duration) 
 		runtime.drain_deadline = deadline
 	}
 	sync.unlock(&runtime.drain_mutex)
+	wake_keep_alive_connections(runtime)
 	// The listener task closes its own socket, avoiding races with running accept.
 	async.wake(&runtime.executor, &runtime.accept_task)
 }

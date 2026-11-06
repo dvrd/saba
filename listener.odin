@@ -42,6 +42,10 @@ Server :: struct {
 	workers:              int,
 	// Optional caller-owned shutdown and endpoint control.
 	control:              ^Server_Control,
+	timeouts:             Timeout_Config,
+	observability:        Observability_Config,
+	// Zero selects five seconds; repeated drain calls never extend the deadline.
+	drain_timeout:        time.Duration,
 }
 
 Server_Runtime :: struct {
@@ -51,12 +55,19 @@ Server_Runtime :: struct {
 	accept_task:                             async.Task,
 	listener:                                async.Socket,
 	accept_retry:                            async.Deadline,
+	drain_mutex:                             sync.Mutex,
+	draining:                                bool,
+	drain_deadline:                          async.Deadline,
 	capacity_mutex:                          sync.Mutex,
 	capacity_state:                          Connection_Capacity,
 	capacity_retry_at, capacity_warning_at:  time.Tick,
 	capacity_retry_pending, capacity_warned: bool,
 	listener_failed:                         bool,
 	active_connections:                      int,
+	timeouts:                                Resolved_Timeouts,
+	observability_mutex:                     sync.Mutex,
+	metrics:                                 Request_Metrics,
+	next_request_id:                         u64,
 	reload:                                  Reload_State,
 	modules:                                 []Module_Cache,
 	assets:                                  []Asset_Cache,
@@ -70,8 +81,15 @@ serve :: proc(config: Server) -> bool {
 		log.error("Server control is already in use"); return false
 	}
 	defer release_server(config.control)
+	if !drain_duration_valid(config.drain_timeout) {
+		log.error("Invalid server drain_timeout"); return false
+	}
 	initial, maximum, workers, valid := server_limits(config)
 	if !valid do return false
+	if !timeouts_valid(config.timeouts) {
+		log.error("Invalid server timeouts: durations must be between zero and MAX_SERVER_TIMEOUT")
+		return false
+	}
 
 	module_arena: mem.Dynamic_Arena
 	mem.dynamic_arena_init(&module_arena)
@@ -111,6 +129,7 @@ serve :: proc(config: Server) -> bool {
 	defer free(runtime)
 	runtime^ = Server_Runtime {
 		config = config,
+		timeouts = resolve_timeouts(config.timeouts),
 		logger = context.logger,
 		modules = modules,
 		assets = assets,
@@ -198,6 +217,7 @@ serve :: proc(config: Server) -> bool {
 accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 	runtime := cast(^Server_Runtime)data
 	context.logger = runtime.logger
+	if server_is_draining(runtime) do return drain_connections(runtime)
 	if runtime.accept_retry.at != 0 {
 		err := async.sleep_until(&runtime.executor, runtime.accept_retry)
 		if err.kind == .Pending do return .Waiting
@@ -206,6 +226,7 @@ accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 	}
 	for _ in 0 ..< ACCEPT_BATCH_LIMIT {
 		if async.cancelled(&runtime.accept_task) do return .Done
+		if server_is_draining(runtime) do return drain_connections(runtime)
 		client, err := async.accept(runtime.listener)
 		if err.kind == .Pending do return .Waiting
 		if err.kind == .Cancelled || err.kind == .Closed do return .Done
@@ -243,6 +264,13 @@ reject_connection :: proc(client: net.TCP_Socket) {
 
 @(private)
 server_admit_connection :: proc(runtime: ^Server_Runtime, client: net.TCP_Socket) {
+	// Reserve admission before the drain cutoff. Only this accept task publishes
+	// connections, so the drain monitor cannot overtake an accepted reservation.
+	// Do not hold the mutex across allocation or application logging callbacks.
+	sync.lock(&runtime.drain_mutex)
+	allowed := !runtime.draining
+	sync.unlock(&runtime.drain_mutex)
+	if !allowed {reject_connection(client); return}
 	if !server_capacity_admit(runtime) {
 		reject_connection(client); return
 	}
@@ -255,7 +283,7 @@ server_admit_connection :: proc(runtime: ^Server_Runtime, client: net.TCP_Socket
 		runtime = runtime,
 		native_pending = true,
 		phase = .Adopt,
-		connection = {socket = client, database = runtime.config.database},
+		connection = {socket = client, database = runtime.config.database, _timeouts = runtime.timeouts},
 	}
 	if runtime.config.development do task.connection.reload = &runtime.reload
 	init_connection_arena(task)

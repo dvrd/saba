@@ -15,6 +15,7 @@ Connection :: struct {
 	read_deadline:  time.Tick,
 	write_deadline: time.Tick,
 	reload:         ^Reload_State,
+	_timeouts:      Resolved_Timeouts,
 }
 
 deadline_expired :: proc(deadline: time.Tick) -> bool {

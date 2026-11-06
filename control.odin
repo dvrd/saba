@@ -2,6 +2,7 @@ package server
 
 import "core:net"
 import "core:sync"
+import "core:time"
 
 import async "shared:async"
 
@@ -15,6 +16,9 @@ Server_Control :: struct {
 	_server:                  ^Server_Runtime,
 	_endpoint:                net.Endpoint,
 	_in_use, _stop_requested: bool,
+	_ever_published: bool,
+	_drain_requested, _drain_default_requested: bool,
+	_drain_timeout: time.Duration,
 }
 
 // A request made before the listener is published is remembered. Shutdown
@@ -54,8 +58,12 @@ release_server :: proc(control: ^Server_Control) {
 	control._runtime = nil
 	control._server = nil
 	control._endpoint = {}
+	control._ever_published = false
 	control._in_use = false
 	control._stop_requested = false
+	control._drain_requested = false
+	control._drain_default_requested = false
+	control._drain_timeout = 0
 }
 
 @(private)
@@ -67,10 +75,16 @@ publish_server :: proc(
 	if control == nil do return
 	sync.lock(&control._mutex)
 	defer sync.unlock(&control._mutex)
+	control._ever_published = true
 	control._runtime = &runtime.executor
 	control._server = runtime
 	control._endpoint = endpoint
-	if control._stop_requested do async.shutdown(&runtime.executor)
+	if control._stop_requested {
+		async.shutdown(&runtime.executor)
+	} else if control._drain_requested {
+		if control._drain_default_requested do request_runtime_drain(runtime, 0)
+		if control._drain_timeout > 0 do request_runtime_drain(runtime, control._drain_timeout)
+	}
 }
 
 @(private)
@@ -87,5 +101,5 @@ server_stop_requested :: proc(control: ^Server_Control) -> bool {
 	if control == nil do return false
 	sync.lock(&control._mutex)
 	defer sync.unlock(&control._mutex)
-	return control._stop_requested
+	return control._stop_requested || control._drain_requested
 }

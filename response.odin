@@ -153,7 +153,9 @@ send_response :: proc(conn: ^Connection, response: Response, request_method: str
 	headers, ok := response_headers(prepared, buffer[:])
 	if !ok do return false
 
-	conn.write_deadline = time.tick_add(time.tick_now(), RESPONSE_SEND_TIMEOUT)
+	duration := conn._timeouts.response
+	if duration == 0 do duration = RESPONSE_SEND_TIMEOUT
+	conn.write_deadline = time.tick_add(time.tick_now(), duration)
 
 	if !send_bytes(conn, headers, "HTTP response headers") do return false
 

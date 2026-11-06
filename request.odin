@@ -9,7 +9,6 @@ import "core:time"
 REQUEST_HEADER_LIMIT :: 8192
 REQUEST_HEADER_COUNT_LIMIT :: 128
 REQUEST_BODY_LIMIT :: 4096
-REQUEST_BODY_TIMEOUT :: 5 * time.Second
 
 http_token :: proc(value: string) -> bool {
 	return http.header_name_valid(value)
@@ -50,8 +49,9 @@ read_request_body :: proc(
 
 	request.body = buffer[:request.content_length]
 	previous_deadline := conn.read_deadline
-	conn.read_deadline = time.tick_add(time.tick_now(), REQUEST_BODY_TIMEOUT)
-	if request.content_length > REQUEST_BODY_LIMIT do conn.read_deadline = time.tick_add(time.tick_now(), 30 * time.Second)
+	timeouts := conn._timeouts
+	if timeouts.body == 0 do timeouts = resolve_timeouts({})
+	conn.read_deadline = time.tick_add(time.tick_now(), body_timeout(timeouts, request.content_length))
 	defer conn.read_deadline = previous_deadline
 	used := 0
 

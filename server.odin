@@ -10,9 +10,6 @@ import "core:time"
 
 import async "shared:async"
 
-REQUEST_HEADER_TIMEOUT :: 5 * time.Second
-RESPONSE_SEND_TIMEOUT :: 5 * time.Second
-
 @(private)
 CONNECTION_STEP_LIMIT :: 32
 @(private)
@@ -43,6 +40,11 @@ Connection_Task :: struct {
 	phase, after_write:                 Connection_Phase,
 	finish_after_write:                 bool,
 	deadline:                           async.Deadline,
+	header_deadline:                    async.Deadline,
+	header_read_deadline:               time.Tick,
+	observed, observation_finished, response_finished: bool,
+	observed_at:                        time.Tick,
+	event:                              Request_Event,
 	initial_header:                     [512]u8,
 	header:                             []u8,
 	header_used, body_used:             int,
@@ -72,12 +74,16 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 			socket, err := async.adopt(&task.runtime.executor, &task.task, conn.socket)
 			if err.kind != .None do return .Done
 			task.socket = socket
+			observe_start(task)
 			task.header = task.initial_header[:]
-			task.deadline = async.deadline_after(&task.runtime.executor, REQUEST_HEADER_TIMEOUT)
-			conn.read_deadline = time.tick_add(time.tick_now(), REQUEST_HEADER_TIMEOUT)
+			task.header_deadline = async.deadline_after(&task.runtime.executor, task.runtime.timeouts.header)
+			task.header_read_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.header)
+			task.deadline = async.deadline_after(&task.runtime.executor, task.runtime.timeouts.idle)
+			conn.read_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.idle)
 			task.phase = .Headers
 		case .Headers:
 			if deadline_expired(conn.read_deadline) {
+				if task.observed do task.event.outcome = .Timeout
 				if !queue_response(task, {status = .Request_Timeout}) do return .Done
 				continue
 			}
@@ -97,21 +103,33 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 					min(len(task.header) * 2, REQUEST_HEADER_LIMIT),
 					context.temp_allocator,
 				)
-				if allocation_error != nil do return .Done
+				if allocation_error != nil {observe_failure(task, .Allocation_Error); return .Done}
 				copy(grown, task.header)
 				task.header = grown
 			}
 			n, err := async.read(task.socket, task.header[task.header_used:], task.deadline)
 			if err.kind == .Pending do return .Waiting
 			if err.kind == .Timeout {
+				observe_io_error(task, err)
 				if !queue_response(task, {status = .Request_Timeout}) do return .Done
 				continue
 			}
-			if err.kind != .None do return .Done
+			if err.kind != .None {
+				observe_io_error(task, err)
+				return .Done
+			}
+			if n > 0 {
+				if task.observed do task.event.bytes_received += u64(n)
+				if task.header_used == 0 {
+					task.deadline = task.header_deadline
+					conn.read_deadline = task.header_read_deadline
+				}
+			}
 			task.header_used += n
 		case .Body:
 			if task.body_used == len(task.request.body) {
 				if deadline_expired(conn.read_deadline) {
+					if task.observed do task.event.outcome = .Timeout
 					if !queue_response(task, {status = .Request_Timeout}) do return .Done
 				} else {
 					conn.read_deadline = {}
@@ -122,14 +140,19 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 			n, err := task_read(task, task.request.body[task.body_used:])
 			if err.kind == .Pending do return .Waiting
 			if err.kind == .Timeout {
+				observe_io_error(task, err)
 				if !queue_response(task, {status = .Request_Timeout}) do return .Done
 				continue
 			}
 			if err.kind == .Peer_Closed {
+				observe_io_error(task, err)
 				if !queue_response(task, {status = .Bad_Request}) do return .Done
 				continue
 			}
-			if err.kind != .None do return .Done
+			if err.kind != .None {
+				observe_io_error(task, err)
+				return .Done
+			}
 			task.body_used += n
 		case .Dispatch:
 			if conn.reload != nil && match_route(&task.request, "GET", "/__reload") {
@@ -154,6 +177,7 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 			if !queue_response(task, response) do return .Done
 		case .Write:
 			if task.output_index == len(task.output) {
+				task.response_finished = true
 				if task.finish_after_write do return .Done
 				task.phase = task.after_write
 				if task.phase == .WebSocket_Header {
@@ -174,7 +198,11 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 			)]
 			n, err := async.write(task.socket, chunk, task.deadline)
 			if err.kind == .Pending do return .Waiting
-			if err.kind != .None do return .Done
+			if task.observed && n > 0 do task.event.bytes_sent += u64(n)
+			if err.kind != .None {
+				observe_io_error(task, err)
+				return .Done
+			}
 			task.output_offset += n
 		case .WebSocket_Header, .WebSocket_Frame:
 			result := resume_reload_websocket(task)
@@ -193,11 +221,16 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 	// retaining the maximum table for every idle connection.
 	count := min(strings.count(raw[:end], CRLF), REQUEST_HEADER_COUNT_LIMIT)
 	headers, header_error := make([]Header, count, allocator)
-	if header_error != nil do return false
+	if header_error != nil {observe_failure(task, .Allocation_Error); return false}
 	request, status := parse_request(raw, headers)
 	task.request = request
 	task.request.allocator = allocator
-	if status != .None do return queue_response(task, {status = status})
+	task.request.request_id = task.event.request_id
+	task.request._observe = task.observed
+	if status != .None {
+		observe_failure(task, .Protocol_Error)
+		return queue_response(task, {status = status})
+	}
 	task.connection.read_buffer = task.header[end + len(HTTP_HEADERS_END):task.header_used]
 	limit := REQUEST_BODY_LIMIT
 	if task.runtime.config.request_body_limit != nil {
@@ -207,10 +240,9 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 		return queue_response(task, {status = .Content_Too_Large})
 	}
 	body, body_error := make([]u8, request.content_length, allocator)
-	if body_error != nil do return false
+	if body_error != nil {observe_failure(task, .Allocation_Error); return false}
 	task.request.body = body
-	duration := REQUEST_BODY_TIMEOUT
-	if request.content_length > REQUEST_BODY_LIMIT do duration = 30 * time.Second
+	duration := body_timeout(task.runtime.timeouts, request.content_length)
 	task.deadline = async.deadline_after(&task.runtime.executor, duration)
 	task.connection.read_deadline = time.tick_add(time.tick_now(), duration)
 	task.phase = .Body
@@ -230,7 +262,9 @@ task_read :: proc(task: ^Connection_Task, destination: []u8) -> (int, async.Erro
 		}
 		return n, {}
 	}
-	return async.read(task.socket, destination, task.deadline)
+	n, err := async.read(task.socket, destination, task.deadline)
+	if task.observed && n > 0 && !task.websocket_established do task.event.bytes_received += u64(n)
+	return n, err
 }
 
 @(private)
@@ -246,6 +280,7 @@ init_connection_arena :: proc(task: ^Connection_Task) {
 
 @(private)
 release_upgrade_request :: proc(task: ^Connection_Task) -> bool {
+	observe_finish(task)
 	buffered := task.connection.read_buffer
 	if len(buffered) > 0 {
 		saved, err := make([]u8, len(buffered), rt.heap_allocator())
@@ -288,14 +323,20 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 		RESPONSE_HEADER_LIMIT,
 		mem.dynamic_arena_allocator(&task.arena),
 	)
-	if allocation_error != nil do return false
+	if allocation_error != nil {observe_failure(task, .Allocation_Error); return false}
 	headers, ok := response_headers(prepared, buffer)
-	if !ok do return false
+	if !ok {observe_failure(task, .Protocol_Error); return false}
 	task.output = {headers, prepared.body}
 	if task.request.method == "HEAD" do task.output[1] = nil
 	task.output_index, task.output_offset = 0, 0
-	task.deadline = async.deadline_after(&task.runtime.executor, RESPONSE_SEND_TIMEOUT)
-	task.connection.write_deadline = time.tick_add(time.tick_now(), RESPONSE_SEND_TIMEOUT)
+	task.deadline = async.deadline_after(&task.runtime.executor, task.runtime.timeouts.response)
+	task.connection.write_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.response)
+	if task.observed {
+		task.event.status = prepared.status
+		if task.event.status == .None do task.event.status = .OK
+		if task.event.status == .Request_Timeout do task.event.outcome = .Timeout
+		if task.event.status == .Request_Header_Fields_Too_Large do task.event.outcome = .Protocol_Error
+	}
 	task.finish_after_write = true
 	task.phase = .Write
 	return true
@@ -338,11 +379,13 @@ dispatch_request :: proc(task: ^Connection_Task) -> Response {
 @(private)
 finish_connection :: proc(data: rawptr) {
 	task := cast(^Connection_Task)data
+	observe_finish(task)
 	if task.native_pending do net.close(task.connection.socket)
 	// The runtime has already closed adopted sockets and removed readiness.
 	delete(task.websocket_prefetched, rt.heap_allocator())
 	mem.dynamic_arena_destroy(&task.arena)
 	sync.atomic_sub(&task.runtime.active_connections, 1)
+	drain_connection_finished(task.runtime)
 	free(task)
 }
 

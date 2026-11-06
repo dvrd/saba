@@ -424,3 +424,27 @@ handler can permit
 5 MiB; larger buffers use the request arena and are
 released when the connection finishes. Bodies above 4096 bytes have a bounded
 30-second read deadline.
+
+## Request deadlines and completion observations
+
+`Server.timeouts` configures total phase budgets with `Timeout_Config{header, body, response, idle}`. Durations must be between zero and `MAX_SERVER_TIMEOUT` (24 hours); invalid values fail before listening. Zero preserves the previous defaults: 5 seconds for headers, 5 seconds for request bodies up to 4 KiB, 30 seconds for larger bodies, and 5 seconds for response writes. An explicit body budget applies to every body size.
+
+Idle limits the wait for the **first request byte**, bounded by the header deadline. The header deadline starts at connection adoption and never resets on progress; body and response deadlines start when those phases begin and likewise never reset. Zero idle uses the header budget. The current HTTP/1 server closes after the response: this does not add keep-alive or streaming idle behavior, and does not change reload WebSocket polling/frame policy. Synchronous body/response helpers use the connection's configured budgets too. Handlers and observers remain cooperative; these settings do not preempt blocking application code.
+
+`Server.observability` is optional. Set `enabled = true` for counters, or provide `on_complete` and caller-owned `data` to enable both counters and callbacks. Zero configuration disables clock/counter/route-label work. `server_metrics(control)` copies thread-safe counters while the runtime is published; after shutdown it returns false. `started`, `completed` and `active` describe successfully adopted HTTP attempts, including idle/partial requests; admission failures remain in capacity statistics. A 101 response completes once at upgrade, so later WebSocket frames are outside HTTP metrics.
+
+Each `Request_Event` contains a generated server-local `u64` ID, normalized method, bounded matched route template, prepared HTTP status, total monotonic duration, received/sent wire-byte counts, and completion outcome. `Request.request_id` is zero when disabled. Incoming request-ID headers are ignored. Methods outside the fixed known set become `OTHER`; routes come from a successful `match_route` template, are omitted above 128 bytes, and remain empty if no template was selected. Never assign an untrusted raw path/query to `Request.route`. There are no raw headers, bodies, credentials or user IDs in automatic events, and counters have fixed status-code slots rather than per-path/ID maps.
+
+Byte counts include successfully read/written HTTP wire bytes, including headers and any read-ahead on this close-after-response connection. Status is the prepared response status, not a promise it was completely delivered; zero means no status was prepared. Inspect outcome to distinguish successful completion from timeout, cancellation, peer closure, I/O, allocation or protocol failure. The `errors` counter counts non-Completed outcomes; use status counters separately for application HTTP failures. Cumulative duration saturates at its representable maximum.
+
+The synchronous completion hook runs exactly once on the finishing worker, before request storage is freed and outside server/runtime locks. Different requests can invoke it concurrently. Keep `data` and its state valid until `serve` returns, make adapters thread-safe, and copy any retained event/strings before returning. Observers can query snapshots and request stop/drain. They must remain fast, avoid blocking, and must not reenter `serve`. No default request logging or external metrics dependency is introduced.
+
+### Measured overhead and limits
+
+A five-repetition, optimized 100,000-attempt **helper lifecycle microbenchmark** on the development machine measured medians of 1.33 ns disabled, 50.41 ns with counters, and 50.66 ns with an empty hook. This excludes HTTP I/O, initialization and real adapter work; it is not an end-to-end latency/throughput or RSS claim. Repeat `observability_overhead_benchmark` with `-define:SABA_OBSERVABILITY_BENCHMARK=true` for local measurements.
+
+Inline bounded state avoids per-request observation allocations but has a fixed layout cost even when disabled. In the measured build, `Connection_Task` grew from 1864 to 2056 bytes (+192, including its connection); `Connection` from 56 to 96 bytes (+40, already included in that task delta); `Server_Runtime` from 1024 to 6008 bytes (+4984 per server). At 4096 simultaneously allocated tasks, the task delta is 768 KiB. These are struct sizes for this change, before other features such as drain; allocator/RSS and other architectures may differ.
+
+### Validation
+
+`tests/observability_timeout.py` builds only an isolated owned loopback fixture. It covers generated IDs and static routes without secret reflection, exact wire bytes, HEAD, slow headers/first-byte idle, partial body deadlines, stalled response writes, exactly-once shutdown cancellation, observer snapshots, and shutdown unpublication; `--sanitize address` is supported. Focused unit tests also exercise disabled operation, defaults/validation, duplicate completion and 4-thread snapshot consistency. The benchmark is an optional explicitly selected test and does not impose timing thresholds.

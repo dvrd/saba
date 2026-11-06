@@ -25,6 +25,11 @@ Path_Parameter :: struct {
 
 Request :: struct {
 	allocator:            mem.Allocator,
+	// Generated ID is zero when observability is disabled. Route is a matched
+	// bounded template; never assign a raw user path or query here.
+	request_id:           u64,
+	route:                string,
+	_observe:             bool,
 	method:               string,
 	path:                 string,
 	query:                string,

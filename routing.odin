@@ -41,6 +41,7 @@ match_route :: proc(request: ^Request, method, pattern: string) -> bool {
 			// Publish captures only after the whole route matches.
 			request.path_parameters = parameters
 			request.path_parameter_count = count
+			if request._observe && len(pattern) <= MAX_EVENT_ROUTE_BYTES do request.route = pattern
 
 			return true
 		}

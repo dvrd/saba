@@ -1,6 +1,7 @@
 package server
 
 import "base:runtime"
+import files "../files"
 import "core:c"
 import "core:crypto/hash"
 import "core:crypto/hmac"
@@ -63,10 +64,12 @@ aws_credentials :: proc() -> (credentials: AWS_Credentials, ok: bool) {
 	if profile == "" do profile = "default"
 	path := os.get_env("AWS_SHARED_CREDENTIALS_FILE", context.temp_allocator)
 	if path == "" do path = fmt.tprintf("%s/.aws/credentials", os.get_env("HOME", context.temp_allocator))
-	if data, error := os.read_entire_file(path, context.temp_allocator); error == nil {
-		if len(data) > 64 * 1024 do return
+	profile_data, read_error := files.read_limited(path, 64 * 1024, context.temp_allocator, erase_on_failure=true)
+	// Oversized, invalid or read-failed profiles must not fall through to metadata.
+	if read_error.kind != .None && read_error.kind != .Open_Failed {return}
+	if read_error.kind == .None {
 		section := ""
-		source := string(data)
+		source := string(profile_data)
 		for line in strings.split_iterator(&source, "\n") {
 			line := strings.trim_space(line)
 			if line == "" || line[0] == '#' || line[0] == ';' do continue

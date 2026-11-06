@@ -1,5 +1,6 @@
 package server
 
+import http "../http"
 import "core:fmt"
 import "core:log"
 import "core:strings"
@@ -38,11 +39,7 @@ make_response :: proc(
 }
 
 http_field_value :: proc(value: string) -> bool {
-	for character in value {
-		if (character < ' ' && character != '\t') || character == 127 do return false
-	}
-
-	return true
+	return http.header_value_valid(value)
 }
 
 response_headers :: proc(response: Response, buffer: []u8) -> (data: []u8, ok: bool) {
@@ -57,7 +54,7 @@ response_headers :: proc(response: Response, buffer: []u8) -> (data: []u8, ok: b
 		return
 	}
 
-	body_forbidden := status < .OK || status == .No_Content || status == .Not_Modified
+	body_forbidden := !http.response_body_allowed(int(status))
 
 	if body_forbidden && len(response.body) != 0 {
 		log.error("HTTP response status does not allow a body:", status)
@@ -129,7 +126,7 @@ response_headers :: proc(response: Response, buffer: []u8) -> (data: []u8, ok: b
 	return
 }
 
-send_response :: proc(conn: ^Connection, response: Response) -> bool {
+send_response :: proc(conn: ^Connection, response: Response, request_method: string = "") -> bool {
 	prepared := response
 	injected: []u8
 
@@ -160,6 +157,7 @@ send_response :: proc(conn: ^Connection, response: Response) -> bool {
 
 	if !send_bytes(conn, headers, "HTTP response headers") do return false
 
+	if request_method == "HEAD" do return true
 	return send_bytes(conn, prepared.body, "HTTP response body")
 }
 

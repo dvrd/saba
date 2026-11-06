@@ -280,6 +280,7 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 	headers, ok := response_headers(prepared, buffer)
 	if !ok do return false
 	task.output = {headers, prepared.body}
+	if task.request.method == "HEAD" do task.output[1] = nil
 	task.output_index, task.output_offset = 0, 0
 	task.deadline = async.deadline_after(&task.runtime.executor, RESPONSE_SEND_TIMEOUT)
 	task.connection.write_deadline = time.tick_add(time.tick_now(), RESPONSE_SEND_TIMEOUT)

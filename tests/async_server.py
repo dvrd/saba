@@ -185,6 +185,21 @@ def production(binary, web, workers):
     pending_readers = []
     with server(binary, web, workers=workers) as s:
         assert s.request()[2] == b'ok'
+        with s.connect() as conn:
+            conn.sendall(b'HEAD /ok HTTP/1.1\r\nHost: localhost\r\n\r\n')
+            head = headers(conn)
+            assert head.startswith(b'HTTP/1.1 200 ')
+            assert b'Content-Length: 2\r\n' in head
+            assert conn.recv(1) == b'', 'HEAD must not transmit the representation body'
+        for fields in [b'', b'Host: localhost\r\nHost: other\r\n', b'Host: user@localhost\r\n']:
+            with s.connect() as conn:
+                conn.sendall(b'GET /ok HTTP/1.1\r\n' + fields + b'\r\n')
+                assert response(conn)[0] == 400
+        for method in [b'PUT', b'DELETE']:
+            with s.connect() as conn:
+                conn.sendall(method + b' /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 3\r\n\r\nabc')
+                assert response(conn)[2] == b'abc'
+        CHECKS.append('shared Host policy rejects missing/duplicate/userinfo authorities; HEAD sends headers only; PUT/DELETE retain exact body framing')
         baseline_threads = thread_count(s.proc.pid)
         for _ in range(24):
             conn = s.connect()

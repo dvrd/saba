@@ -1,21 +1,20 @@
 package server
 
+import http "../http"
+import http1 "../http/v1"
 import "core:encoding/json"
 import "core:log"
 import "core:mem"
 import "core:strings"
 
-CRLF :: "\r\n"
-HTTP_HEADERS_END :: CRLF + CRLF
-HTTP_VERSION :: "HTTP/1.1"
+CRLF :: http1.CRLF
+HTTP_HEADERS_END :: http1.HTTP_HEADERS_END
+HTTP_VERSION :: http1.HTTP_VERSION
 
 WEBSOCKET_GUID: string : "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 // Request fields borrow the connection's buffers and remain valid during routing.
-Header :: struct {
-	name:  string,
-	value: string,
-}
+Header :: http.Header
 
 MAX_PATH_PARAMETERS :: 8
 

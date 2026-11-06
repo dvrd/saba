@@ -7,10 +7,16 @@ import "core:net"
 import "core:strings"
 import "core:sync"
 import "core:time"
+
 import async "shared:async"
 
 REQUEST_HEADER_TIMEOUT :: 5 * time.Second
 RESPONSE_SEND_TIMEOUT :: 5 * time.Second
+
+@(private)
+CONNECTION_STEP_LIMIT :: 32
+@(private)
+RESPONSE_WRITE_CHUNK_BYTES :: 64 * mem.Kilobyte
 
 Handler :: #type proc(conn: ^Connection, request: ^Request) -> Response
 
@@ -57,7 +63,7 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 	conn := &task.connection
 	context.logger = task.runtime.logger
 	context.temp_allocator = mem.dynamic_arena_allocator(&task.arena)
-	for _ in 0 ..< 32 {
+	for _ in 0 ..< CONNECTION_STEP_LIMIT {
 		switch task.phase {
 		case .Adopt:
 			// adopt consumes the descriptor even on failure. Queued tasks
@@ -81,7 +87,9 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 			}
 			if task.header_used == len(task.header) {
 				if len(task.header) == REQUEST_HEADER_LIMIT {
-					if !queue_response(task, {status = .Request_Header_Fields_Too_Large}) do return .Done
+					if !queue_response(task, {status = .Request_Header_Fields_Too_Large}) {
+						return .Done
+					}
 					continue
 				}
 				grown, allocation_error := make(
@@ -161,7 +169,7 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 				continue
 			}
 			chunk := data[task.output_offset:min(
-				task.output_offset + 64 * mem.Kilobyte,
+				task.output_offset + RESPONSE_WRITE_CHUNK_BYTES,
 				len(data),
 			)]
 			n, err := async.write(task.socket, chunk, task.deadline)
@@ -192,8 +200,12 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 	if status != .None do return queue_response(task, {status = status})
 	task.connection.read_buffer = task.header[end + len(HTTP_HEADERS_END):task.header_used]
 	limit := REQUEST_BODY_LIMIT
-	if task.runtime.config.request_body_limit != nil do limit = task.runtime.config.request_body_limit(&task.request)
-	if limit < 0 || request.content_length > limit do return queue_response(task, {status = .Content_Too_Large})
+	if task.runtime.config.request_body_limit != nil {
+		limit = task.runtime.config.request_body_limit(&task.request)
+	}
+	if limit < 0 || request.content_length > limit {
+		return queue_response(task, {status = .Content_Too_Large})
+	}
 	body, body_error := make([]u8, request.content_length, allocator)
 	if body_error != nil do return false
 	task.request.body = body
@@ -293,12 +305,33 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 dispatch_request :: proc(task: ^Connection_Task) -> Response {
 	runtime := task.runtime
 	request := &task.request
-	if task.connection.reload != nil && match_route(request, "GET", "/__reload/client.js") do return reload_client_response(request)
+	if task.connection.reload != nil &&
+	   match_route(request, "GET", "/__reload/client.js") {
+		return reload_client_response(request)
+	}
 	if match_route(request, "GET", JSX_RUNTIME_URL) do return jsx_runtime_response(request)
 	if match_route(request, "GET", PAGE_ENTRY_URL) do return page_entry_response(request)
-	if response, matched := serve_assets(request, runtime.assets, runtime.config.development); matched do return response
-	if response, matched := serve_prepared_modules(request, runtime.modules, runtime.config.development); matched do return response
-	if response, matched := serve_prepared_pages(request, runtime.pages, runtime.config.development); matched do return response
+	if response, matched := serve_assets(
+		request,
+		runtime.assets,
+		runtime.config.development,
+	); matched {
+		return response
+	}
+	if response, matched := serve_prepared_modules(
+		request,
+		runtime.modules,
+		runtime.config.development,
+	); matched {
+		return response
+	}
+	if response, matched := serve_prepared_pages(
+		request,
+		runtime.pages,
+		runtime.config.development,
+	); matched {
+		return response
+	}
 	return runtime.config.handler(&task.connection, request)
 }
 

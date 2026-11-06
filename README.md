@@ -15,7 +15,7 @@ libraries, and `kakunou` for database handles and SQL operations; it never impor
 Install this repository at `$(odin root)/shared/saba` and Kakunou at
 `$(odin root)/shared/kakunou`, and the async library at
 `$(odin root)/shared/async`. SQLite and libcurl must be installed as system
-libraries. Projects import both through Odin’s built-in shared collection:
+libraries. Projects import the server and database packages through Odin’s shared collection:
 
 ```odin
 import server "shared:saba"
@@ -38,6 +38,9 @@ defer db.close(database)
 server.serve(server.Server {
     address = "127.0.0.1",
     port = 8080,
+    initial_connections = 64,
+    max_connections = 4096,
+    workers = 4,
     database = database,
     handler = router,
 })
@@ -89,21 +92,47 @@ storage alive until `serve` returns.
 
 ### Connection capacity
 
-`Server.max_connections` bounds admitted connections before task creation and
-request-body allocation. Zero selects the default of 64; a positive value sets
-an explicit limit, and negative values fail startup. WebSockets and requests
-waiting for headers or bodies count toward the same limit.
+`Server.initial_connections` selects startup storage (default 64, clamped to
+`max_connections`). `Server.max_connections` is the admission ceiling (default
+4,096). Explicit positive maximums keep their hard-limit meaning. To keep a fixed
+capacity, set both fields to the same value. Negative values or an initial value
+above the ceiling fail startup.
 
-When full, the listener makes one nonblocking attempt to send `503 Service
-Unavailable` and closes the new socket. Delivery of that response is best effort;
-the listener does not wait for a rejected client to read. Capacity returns after
-the admitted connection's request memory and socket are released, including error
-paths and WebSocket closure. Failed task admission releases its reservation as well.
+Before admitting a connection that would reach 80% occupancy, the accept task
+doubles capacity, clamped to the ceiling. The async runtime stages the ready
+queue, I/O slots and free-slot storage, then commits all of them together.
+Existing socket tokens, pending I/O, timers and ready-queue order survive;
+workers and thread count do not change. Growth retains the expanded storage.
+Request bodies, response buffers and connection tasks are still allocated only
+for actual connections, not for every reserved slot. Growth temporarily holds
+both old and replacement bookkeeping buffers and briefly locks the scheduler
+and reactor while allocating/copying; it is not a zero-latency operation.
 
-This bounds concurrent request resources; each admitted request still has its own
-body-size and I/O deadlines. For example, 64 simultaneous requests at the app's
-5 MiB upload limit can reserve up to 320 MiB of body buffers, in addition to other
-server memory. Choose a lower connection limit for a smaller memory budget.
+If expansion fails, admission continues within the old capacity. Expansion is
+retried on subsequent admissions at most once per second. At capacity, the
+listener makes one nonblocking best-effort `503 Service Unavailable` send and
+closes the new socket. Existing connections remain active. Their slots return
+after cleanup; a failed new task releases its reservation too.
+
+Successful expansion emits an informational log. Approaching 80% of the ceiling,
+failed expansion, or failed task allocation/admission emits a pressure warning,
+limited to one per ten seconds per server. Warnings report occupancy, current
+capacity, ceiling and failure/rejection counts. These use the configured logger;
+external notification delivery is owned by the application.
+
+`server_capacity(&control)` returns a thread-safe `Connection_Capacity` snapshot
+and publication flag without opening an HTTP connection: active/current/maximum,
+peak occupancy, growth count, growth failures, capacity rejections and admission
+failures. The snapshot is unavailable after unpublication; keep `Server_Control`
+alive until `serve` returns. Custom logging happens outside the capacity lock.
+
+An optional `Server.runtime_allocator` supplies the thread-safe allocator used
+for runtime bookkeeping and worker setup; zero selects the normal heap. Keep
+its backing state alive until `serve` returns. Its
+callbacks must not reenter the server/runtime. The maximum bounds connection
+count rather than total process memory: request limits, response sizes and
+handler allocations still matter when selecting a ceiling.
+
 
 ## Local environment configuration
 
@@ -198,7 +227,8 @@ handler, while unknown URLs continue to it.
 
 When two pages map to the same URL, the directory’s `index.jsx` takes precedence
 over the sibling file, regardless of discovery order. Saba logs a warning naming
-both files, their shared URL, and the selected source; startup continues. Development discovers source changes on requests;
+both files, their shared URL, and the selected source; startup continues. Development discovers
+source changes on requests;
 production snapshots routes and HTML in the same server-owned arena as compiled
 modules. Restart production to load changes. See [JSX components](JSX.md) for the
 frontend layout, page contract, runtime, and authoring examples.
@@ -238,7 +268,8 @@ The server frees its module cache only after its connection workers finish.
 There is no standalone build command or generated asset directory.
 
 Unrelated paths and non-GET methods reach the application handler. Static files
-under an asset mount are handled by `serve_assets` first. The lower-level `serve_modules(request, directory, prefix, development)`
+under an asset mount are handled by `serve_assets` first. The lower-level
+`serve_modules(request, directory, prefix, development)`
 helper remains available for custom routing: it transforms development sources
 or reads existing JavaScript files; it does not own a production cache. Normal
 server applications should use `Server.modules` to get the full startup pipeline.
@@ -384,10 +415,12 @@ Consumers should also test their own routes and handlers against the shared pack
 
 Saba supports private S3 uploads, deletion, and temporary download URLs through
 `s3.odin`. AWS credentials stay on the server and can come from environment
-variables, static local profiles, or EC2/ECS IAM roles. See [S3.md](S3.md) for configuration and bucket permissions.
+variables, static local profiles, or EC2/ECS IAM roles. See [S3.md](S3.md) for configuration and
+bucket permissions.
 
 Applications can set `Server.request_body_limit` to a callback returning a byte
-limit for each parsed request. The default remains 4096 bytes. For example, a picture PUT handler can permit
+limit for each parsed request. The default remains 4096 bytes. For example, a picture PUT
+handler can permit
 5 MiB; larger buffers use the request arena and are
 released when the connection finishes. Bodies above 4096 bytes have a bounded
 30-second read deadline.

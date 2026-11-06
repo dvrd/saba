@@ -1,8 +1,5 @@
 package server
 
-import async "shared:async"
-import db "shared:kakunou"
-
 import "core:log"
 import "core:mem"
 import "core:net"
@@ -10,13 +7,29 @@ import "core:sync"
 import "core:thread"
 import "core:time"
 
-DEFAULT_MAX_CONNECTIONS :: 64
+import async "shared:async"
+import db "shared:kakunou"
+
+DEFAULT_MAX_CONNECTIONS :: 4096
+DEFAULT_INITIAL_CONNECTIONS :: 64
 DEFAULT_WORKERS :: 4
+
+@(private)
+ACCEPT_BATCH_LIMIT :: 32
+@(private)
+ACCEPT_RETRY_INTERVAL :: 100 * time.Millisecond
 
 Server :: struct {
 	address:              string,
 	port:                 int,
+	// Admission ceiling; zero selects DEFAULT_MAX_CONNECTIONS.
 	max_connections:      int,
+	// Startup capacity; zero selects min(64, ceiling). Grows at 80% occupancy.
+	initial_connections:  int,
+	// Optional thread-safe allocator for runtime bookkeeping and worker setup.
+	// Keep its state alive until serve returns; callbacks must not reenter
+	// this server or its async runtime. Zero selects the heap allocator.
+	runtime_allocator:    mem.Allocator,
 	database:             ^db.SQLite_DB,
 	handler:              Handler,
 	request_body_limit:   proc(request: ^Request) -> int,
@@ -32,19 +45,22 @@ Server :: struct {
 }
 
 Server_Runtime :: struct {
-	config:             Server,
-	logger:             log.Logger,
-	executor:           async.Runtime,
-	accept_task:        async.Task,
-	listener:           async.Socket,
-	accept_retry:       async.Deadline,
-	connection_limit:   int,
-	listener_failed:    bool,
-	active_connections: int,
-	reload:             Reload_State,
-	modules:            []Module_Cache,
-	assets:             []Asset_Cache,
-	pages:              Page_Cache,
+	config:                                  Server,
+	logger:                                  log.Logger,
+	executor:                                async.Runtime,
+	accept_task:                             async.Task,
+	listener:                                async.Socket,
+	accept_retry:                            async.Deadline,
+	capacity_mutex:                          sync.Mutex,
+	capacity_state:                          Connection_Capacity,
+	capacity_retry_at, capacity_warning_at:  time.Tick,
+	capacity_retry_pending, capacity_warned: bool,
+	listener_failed:                         bool,
+	active_connections:                      int,
+	reload:                                  Reload_State,
+	modules:                                 []Module_Cache,
+	assets:                                  []Asset_Cache,
+	pages:                                   Page_Cache,
 }
 
 // The database and handler must remain valid while the server handles requests.
@@ -54,22 +70,8 @@ serve :: proc(config: Server) -> bool {
 		log.error("Server control is already in use"); return false
 	}
 	defer release_server(config.control)
-	if config.handler == nil {
-		log.error("Server requires a request handler")
-
-		return false
-	}
-	if config.workers < 0 {
-		log.error("Server worker count must not be negative"); return false
-	}
-	workers := config.workers
-	if workers == 0 do workers = DEFAULT_WORKERS
-	if config.max_connections < 0 || config.max_connections == max(int) {
-		log.error("Server connection limit is out of range")
-		return false
-	}
-	limit := config.max_connections
-	if limit == 0 do limit = DEFAULT_MAX_CONNECTIONS
+	initial, maximum, workers, valid := server_limits(config)
+	if !valid do return false
 
 	module_arena: mem.Dynamic_Arena
 	mem.dynamic_arena_init(&module_arena)
@@ -108,16 +110,21 @@ serve :: proc(config: Server) -> bool {
 	}
 	defer free(runtime)
 	runtime^ = Server_Runtime {
-		config           = config,
-		logger           = context.logger,
-		modules          = modules,
-		assets           = assets,
-		pages            = pages,
-		connection_limit = limit,
+		config = config,
+		logger = context.logger,
+		modules = modules,
+		assets = assets,
+		pages = pages,
+		capacity_state = {current = initial, maximum = maximum},
 	}
 	if err := async.init(
 		&runtime.executor,
-		{workers = workers, task_capacity = limit + 1, io_capacity = limit + 1},
+		{
+			workers = workers,
+			task_capacity = initial + workers + 1,
+			io_capacity = initial + 1,
+			allocator = config.runtime_allocator,
+		},
 	); err.kind != .None {
 		log.error("Could not initialize server runtime:", err)
 		return false
@@ -176,7 +183,7 @@ serve :: proc(config: Server) -> bool {
 		}
 	}
 
-	publish_server(config.control, &runtime.executor, endpoint)
+	publish_server(config.control, runtime, endpoint)
 	async.wake(&runtime.executor, &runtime.accept_task)
 	log.infof("listening on http://localhost:%d", endpoint.port)
 	err := async.run(&runtime.executor)
@@ -197,7 +204,7 @@ accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 		if err.kind != .None do return .Done
 		runtime.accept_retry = {}
 	}
-	for _ in 0 ..< 32 {
+	for _ in 0 ..< ACCEPT_BATCH_LIMIT {
 		if async.cancelled(&runtime.accept_task) do return .Done
 		client, err := async.accept(runtime.listener)
 		if err.kind == .Pending do return .Waiting
@@ -213,39 +220,13 @@ accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 				async.shutdown(&runtime.executor)
 				return .Done
 			}
-			runtime.accept_retry = async.deadline_after(&runtime.executor, 100 * time.Millisecond)
-			if async.sleep_until(&runtime.executor, runtime.accept_retry).kind == .Pending do return .Waiting
+			runtime.accept_retry = async.deadline_after(&runtime.executor, ACCEPT_RETRY_INTERVAL)
+			if async.sleep_until(&runtime.executor, runtime.accept_retry).kind == .Pending {
+				return .Waiting
+			}
 			return .Yield
 		}
-		if sync.atomic_load(&runtime.active_connections) >= runtime.connection_limit {
-			reject_connection(client); continue
-		}
-		task, allocation_error := new(Connection_Task)
-		if allocation_error != nil {
-			reject_connection(client); continue
-		}
-		task^ = {
-			runtime = runtime,
-			native_pending = true,
-			phase = .Adopt,
-			connection = {socket = client, database = runtime.config.database},
-		}
-		if runtime.config.development do task.connection.reload = &runtime.reload
-		init_connection_arena(task)
-		task.task = {
-			resume  = handle_connection,
-			data    = task,
-			on_done = finish_connection,
-		}
-		// Publish fully initialized storage. Adoption happens inside its first
-		// resume, so shutdown can safely dispose even an unexecuted task.
-		sync.atomic_add(&runtime.active_connections, 1)
-		if async.spawn(&runtime.executor, &task.task).kind != .None {
-			sync.atomic_sub(&runtime.active_connections, 1)
-			reject_connection(client)
-			mem.dynamic_arena_destroy(&task.arena)
-			free(task)
-		}
+		server_admit_connection(runtime, client)
 	}
 	return .Yield
 }
@@ -258,4 +239,39 @@ reject_connection :: proc(client: net.TCP_Socket) {
 	headers, ready := response_headers(Response{status = .Service_Unavailable}, buffer[:])
 	// Best effort only: waiting for a rejected client would stall acceptance.
 	if ready do net.send_tcp(client, headers)
+}
+
+@(private)
+server_admit_connection :: proc(runtime: ^Server_Runtime, client: net.TCP_Socket) {
+	if !server_capacity_admit(runtime) {
+		reject_connection(client); return
+	}
+	task, allocation_error := new(Connection_Task)
+	if allocation_error != nil {
+		server_capacity_allocation_failed(runtime)
+		reject_connection(client); return
+	}
+	task^ = {
+		runtime = runtime,
+		native_pending = true,
+		phase = .Adopt,
+		connection = {socket = client, database = runtime.config.database},
+	}
+	if runtime.config.development do task.connection.reload = &runtime.reload
+	init_connection_arena(task)
+	task.task = {
+		resume  = handle_connection,
+		data    = task,
+		on_done = finish_connection,
+	}
+	// Publish fully initialized storage. Adoption happens inside its first
+	// resume, so shutdown can safely dispose even an unexecuted task.
+	sync.atomic_add(&runtime.active_connections, 1)
+	if async.spawn(&runtime.executor, &task.task).kind != .None {
+		sync.atomic_sub(&runtime.active_connections, 1)
+		server_capacity_allocation_failed(runtime)
+		reject_connection(client)
+		mem.dynamic_arena_destroy(&task.arena)
+		free(task)
+	}
 }

@@ -63,10 +63,11 @@ def received_frame(conn):
 
 
 class Server:
-    def __init__(self, binary, web, workers=1, capacity=64, development=False):
+    def __init__(self, binary, web, workers=1, capacity=64, development=False, initial=0, fail_growth=False):
         env = os.environ.copy()
         env.update(SABA_TEST_WEB=str(web), SABA_TEST_WORKERS=str(workers),
-                   SABA_TEST_CAPACITY=str(capacity), SABA_TEST_DEVELOPMENT=str(int(development)))
+                   SABA_TEST_CAPACITY=str(capacity), SABA_TEST_INITIAL=str(initial),
+                   SABA_TEST_FAIL_GROWTH=str(int(fail_growth)), SABA_TEST_DEVELOPMENT=str(int(development)))
         self.on_stopped = None
         self.proc = subprocess.Popen([str(binary)], env=env, stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -134,6 +135,7 @@ class Server:
             if errors:
                 sys.stderr.buffer.write(errors)
             raise
+        self.errors = errors
         if force and errors:
             sys.stderr.buffer.write(errors)
         if not force:
@@ -309,6 +311,99 @@ def capacity(binary, web):
     CHECKS.append('capacity rejection returns best-effort 503 and admission recovers after connection cleanup')
 
 
+def growth_stats(s):
+    status, _, body = s.request('/capacity')
+    assert status == 200, (status, body)
+    return tuple(map(int, body.split(b',')))
+
+
+def growth(binary, web, workers):
+    held = []
+    with server(binary, web, workers=workers, initial=4, capacity=40) as s:
+        baseline_threads = thread_count(s.proc.pid)
+        body = s.connect()
+        body.sendall(b'POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\n\r\nhe')
+        slow = s.connect()
+        slow.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16384)
+        slow.sendall(b'GET /large HTTP/1.1\r\nHost: localhost\r\n\r\n')
+        assert headers(slow).startswith(b'HTTP/1.1 200 ')
+        # With two admitted connections, a stats request is still below 80%.
+        assert growth_stats(s)[0] == 4
+        for _ in range(32):
+            conn = s.connect(); conn.sendall(b'G'); held.append(conn)
+        current, maximum, peak, growths, rejected, failures = growth_stats(s)
+        assert (current, maximum, growths, rejected, failures) == (40, 40, 4, 0, 0)
+        assert peak >= 34
+        if baseline_threads is not None:
+            assert thread_count(s.proc.pid) == baseline_threads
+        body.sendall(b'llo')
+        assert response(body)[2] == b'hello'; body.close()
+        assert exact(slow, 2*1024*1024) == bytes(i % 251 for i in range(2*1024*1024))
+        slow.close()
+        def complete(conn):
+            conn.sendall(b'ET /ok HTTP/1.1\r\nHost: localhost\r\n\r\n')
+            assert response(conn)[2] == b'ok'
+            conn.close()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            list(executor.map(complete, held))
+        assert growth_stats(s)[0] == 40, 'capacity must not shrink after draining'
+        # Cancel sockets left pending after multiple storage replacements.
+        pending = [s.connect() for _ in range(8)]
+        for conn in pending: conn.sendall(b'G')
+        s.on_stopped = lambda: [closed(conn, allow_rejection=True) for conn in pending]
+    assert s.errors.count(b'Connection capacity expanded:') == 4
+    assert s.errors.count(b'Connection capacity pressure: configured ceiling') == 1
+    CHECKS.append(f'workers={workers}: 4->8->16->32->40 growth preserves parked reads, partial bodies, backpressured writes and shutdown; threads stay fixed')
+
+
+def growth_past_previous_default(binary, web):
+    held = []
+    with server(binary, web, workers=4, initial=16, capacity=0) as s:
+        before = thread_count(s.proc.pid)
+        for _ in range(96):
+            conn = s.connect(); conn.sendall(b'G'); held.append(conn)
+        current, maximum, peak, growths, rejected, failures = growth_stats(s)
+        assert (current, maximum, growths, rejected, failures) == (128, 4096, 3, 0, 0)
+        assert peak >= 97
+        if before is not None:
+            assert thread_count(s.proc.pid) == before
+        s.on_stopped = lambda: [closed(conn) for conn in held]
+    CHECKS.append('default ceiling admits 96 parked clients past the former 64 cap, grows 16->32->64->128 with fixed workers, and shuts down cleanly')
+
+
+def growth_failure(binary, web):
+    with server(binary, web, workers=1, initial=4, capacity=16, fail_growth=True) as s:
+        held = []
+        for _ in range(3):
+            conn = s.connect(); conn.sendall(b'G'); held.append(conn)
+        current, _, _, growths, _, failures = growth_stats(s)
+        assert (current, growths, failures) == (4, 0, 1)
+        for _ in range(8):
+            assert growth_stats(s)[0] == 4
+        assert growth_stats(s)[-1] == 1, 'failed growth attempts must be throttled'
+        full = s.connect(); full.sendall(b'G'); held.append(full)
+        assert s.request()[0] == 503
+        held.pop().close()
+        # Admission must recover with the old capacity despite expansion failing.
+        deadline = time.monotonic() + 2
+        while s.request()[0] == 503:
+            assert time.monotonic() < deadline
+            time.sleep(.01)
+        time.sleep(1.05)
+        current, _, _, growths, rejected, failures = growth_stats(s)
+        assert current == 4 and growths == 0 and rejected >= 1 and failures == 2
+        assert s.request('/allow-growth')[0] == 200
+        time.sleep(1.05)
+        current, _, _, growths, _, failures = growth_stats(s)
+        assert (current, growths, failures) == (8, 1, 2), 'expansion must recover after allocation recovers'
+        for conn in held:
+            conn.sendall(b'ET /ok HTTP/1.1\r\nHost: localhost\r\n\r\n')
+            assert response(conn)[2] == b'ok'; conn.close()
+        assert s.request()[2] == b'ok'
+    assert s.errors.count(b'Connection capacity pressure:') == 1
+    CHECKS.append('failed expansion preserves admission and sockets, throttles retry/warnings, then expands after allocator recovery')
+
+
 def development(binary, web):
     held = []
     with server(binary, web, development=True) as s:
@@ -376,6 +471,10 @@ def main():
             (web/'assets/blob.bin').write_bytes(bytes(range(256)))
             production(binary, web, workers)
         capacity(binary, web)
+        for workers in [1, 4]:
+            growth(binary, web, workers)
+        growth_past_previous_default(binary, web)
+        growth_failure(binary, web)
         development(binary, web)
         env = os.environ.copy(); env.update(SABA_TEST_WEB=str(web), SABA_TEST_PRESTOP='1')
         p = subprocess.run([str(binary)], env=env, capture_output=True, timeout=8)

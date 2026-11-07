@@ -24,6 +24,7 @@ Server :: struct {
 	request_body_limit: proc(request:^Request)->int,
 	modules: []Module_Mount,
 	assets: []Asset_Mount,
+	asset_limits: Asset_Limits,
 	pages: Page_Mount,
 	development: bool,
 	hot_reload_directory: string,
@@ -58,8 +59,10 @@ serve :: proc(config:Server)->bool {
 	if !valid do return false
 	application.pages,valid=pages_api.prepare_pages(config.pages,config.development,allocator)
 	if !valid do return false
-	application.assets,valid=assets_api.prepare_assets(config.assets,allocator)
-	if !valid do return false
+	asset_error: assets_api.Asset_Error
+	application.assets,asset_error=assets_api.prepare_assets_bounded(config.assets,config.asset_limits,allocator)
+	if asset_error.kind!=.None {log.errorf("Asset preload failed: %v mount=%d limit=%d observed=%d",asset_error.kind,asset_error.mount_index,asset_error.limit,asset_error.observed);return false}
+	defer assets_api.destroy_assets(&application.assets,allocator)
 	watcher:^thread.Thread
 	defer {
 		sync.atomic_store(&application.reload.stopped,true)

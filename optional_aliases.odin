@@ -10,6 +10,12 @@ import s3 "s3"
 Asset_Mount :: assets.Asset_Mount
 Asset_File :: assets.Asset_File
 Asset_Cache :: assets.Asset_Cache
+Asset_Limits :: assets.Asset_Limits
+Asset_Error :: assets.Asset_Error
+Asset_Error_Kind :: assets.Asset_Error_Kind
+DEFAULT_ASSET_LIMITS :: assets.DEFAULT_ASSET_LIMITS
+prepare_assets_bounded :: assets.prepare_assets_bounded
+destroy_assets :: assets.destroy_assets
 prepare_assets :: assets.prepare_assets
 serve_assets :: assets.serve_assets
 serve_file :: assets.serve_file

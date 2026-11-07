@@ -1,126 +1,128 @@
 package server
 
+import core "core"
+import dev "development"
 import db "shared:kakunou"
-
-import "core:log"
-import "core:mem"
 import "core:net"
-import "core:sys/posix"
 import "core:time"
 
+// Compatibility view: valid only during a synchronous facade handler/helper.
+// Do not retain this pointer. Core handlers receive the real stable connection.
 Connection :: struct {
-	socket:         net.TCP_Socket,
-	database:       ^db.SQLite_DB,
-	read_buffer:    []u8,
-	read_deadline:  time.Tick,
-	write_deadline: time.Tick,
-	reload:         ^Reload_State,
-	_timeouts:      Resolved_Timeouts,
+	socket: net.TCP_Socket,
+	database: ^db.SQLite_DB,
+	read_buffer: []u8,
+	read_deadline,write_deadline:time.Tick,
+	reload:^Reload_State,
+	_transport:^core.Connection,
 }
 
-deadline_expired :: proc(deadline: time.Tick) -> bool {
-	return deadline != time.Tick{} && time.tick_diff(time.tick_now(), deadline) <= 0
+@(private)
+connection_view :: proc(transport:^core.Connection,database:^db.SQLite_DB)->Connection {
+	return {socket=transport.socket,database=database,read_buffer=transport.read_buffer,
+		read_deadline=transport.read_deadline,write_deadline=transport.write_deadline,_transport=transport}
 }
 
-wait_ready :: proc(
-	client: net.TCP_Socket,
-	events: posix.Poll_Event,
-	deadline: time.Tick,
-) -> (
-	ready, timed_out: bool,
-) {
-	descriptor := posix.pollfd {
-		fd     = posix.FD(client),
-		events = events,
-	}
-
-	for {
-		timeout_ms: i32 = -1
-		if deadline != (time.Tick{}) {
-			remaining := time.tick_diff(time.tick_now(), deadline)
-			if remaining <= 0 do return false, true
-
-			// Round up to milliseconds; -1 means no deadline, and zero means no wait.
-			milliseconds := i64(remaining / time.Millisecond + 1)
-			timeout_ms = cast(i32)min(milliseconds, cast(i64)max(i32))
-		}
-
-		descriptor.revents = {}
-		result := posix.poll(&descriptor, 1, timeout_ms)
-		if result < 0 {
-			err := posix.errno()
-			if err == .EINTR do continue
-			log.error("Could not wait for socket readiness:", err, "| socket:", client)
-			return false, false
-		}
-		if result == 0 do continue
-
-		if .NVAL in descriptor.revents {
-			log.error("Invalid socket while waiting for readiness | socket:", client)
-			return false, false
-		}
-
-		// On hangup/error, let recv/send report EOF or the underlying socket error.
-		if descriptor.revents & events != {} ||
-		   .HUP in descriptor.revents ||
-		   .ERR in descriptor.revents {
-			return true, false
-		}
-
-		log.error("Unexpected socket readiness events:", descriptor.revents, "| socket:", client)
-		return false, false
-	}
+@(private)
+connection_writeback :: proc(view:^Connection,transport:^core.Connection) {
+	transport.socket=view.socket
+	transport.read_buffer=view.read_buffer
+	transport.read_deadline=view.read_deadline
+	transport.write_deadline=view.write_deadline
 }
 
-read_connection :: proc(
-	conn: ^Connection,
-	buffer: []u8,
-) -> (
-	received: int,
-	err: net.TCP_Recv_Error,
-) {
-	for {
-		if deadline_expired(conn.read_deadline) do return 0, .Timeout
-
-		if len(conn.read_buffer) > 0 {
-			n := copy(buffer, conn.read_buffer)
-			conn.read_buffer = conn.read_buffer[n:]
-
-			return n, nil
-		}
-
-		n, read_err := net.recv_tcp(conn.socket, buffer)
-		if read_err == .Interrupted do continue
-		if read_err != .Would_Block do return n, read_err
-
-		ready, timed_out := wait_ready(conn.socket, {.IN}, conn.read_deadline)
-		if !ready {
-			if timed_out do return 0, .Timeout
-			return 0, .Unknown
-		}
-	}
+@(private)
+connection_transport :: proc(view:^Connection,local:^core.Connection)->^core.Connection {
+	transport:=view._transport
+	if transport==nil do transport=local
+	connection_writeback(view,transport)
+	return transport
 }
 
-write_connection :: proc(conn: ^Connection, data: []u8) -> (sent: int, err: net.TCP_Send_Error) {
-	for {
-		if deadline_expired(conn.write_deadline) do return sent, .Timeout
-		if sent == len(data) do return sent, nil
+@(private)
+connection_refresh :: proc(view:^Connection,transport:^core.Connection) {
+	view.socket=transport.socket
+	view.read_buffer=transport.read_buffer
+	view.read_deadline=transport.read_deadline
+	view.write_deadline=transport.write_deadline
+}
 
-		// Bound each call so sustained progress cannot bypass the deadline check.
-		chunk := data[sent:min(sent + 64 * mem.Kilobyte, len(data))]
-		n, send_err := net.send_tcp(conn.socket, chunk)
-		sent += n
+read_connection :: proc(conn:^Connection,buffer:[]u8)->(int,net.TCP_Recv_Error) {
+	local:core.Connection
+	io:=connection_transport(conn,&local)
+	n,error:=core.read_connection(io,buffer)
+	connection_refresh(conn,io)
+	return n,error
+}
 
-		if send_err == .Interrupted do continue
-		if send_err == .Would_Block {
-			ready, timed_out := wait_ready(conn.socket, {.OUT}, conn.write_deadline)
-			if !ready {
-				if timed_out do return sent, .Timeout
-				return sent, .Unknown
-			}
-			continue
-		}
-		if send_err != nil do return sent, send_err
-		if n != len(chunk) do return sent, .Connection_Closed
+write_connection :: proc(conn:^Connection,buffer:[]u8)->(int,net.TCP_Send_Error) {
+	local:core.Connection
+	io:=connection_transport(conn,&local)
+	n,error:=core.write_connection(io,buffer)
+	connection_refresh(conn,io)
+	return n,error
+}
+
+send_response :: proc(conn:^Connection,response:Response,request_method:string="")->bool {
+	prepared:=response
+	injected:[]u8
+	if conn.reload!=nil && dev.reload_html_response(response) {
+		ok:bool
+		injected,ok=dev.inject_reload_client(response.body)
+		if !ok {send_empty_response(conn,.Internal_Server_Error);return false}
+		if injected!=nil do prepared.body=injected
 	}
+	defer delete(injected)
+	local:core.Connection
+	io:=connection_transport(conn,&local)
+	result:=core.send_response(io,prepared,request_method)
+	connection_refresh(conn,io)
+	return result
+}
+send_empty_response :: proc(conn:^Connection,status:HTTP_Status)->bool {return send_response(conn,{status=status})}
+read_request_body :: proc(conn:^Connection,request:^Request,buffer:[]u8)->(HTTP_Status,bool) {
+	local:core.Connection
+	io:=connection_transport(conn,&local)
+	status,ok:=core.read_request_body(io,request,buffer)
+	connection_refresh(conn,io)
+	return status,ok
+}
+send_bytes :: proc(conn:^Connection,data:[]u8,operation:string)->bool {
+	local:core.Connection
+	io:=connection_transport(conn,&local)
+	ok:=core.send_bytes(io,data,operation)
+	connection_refresh(conn,io)
+	return ok
+}
+
+upgrade_websocket :: proc(conn:^Connection,request:^Request)->bool {
+	local:core.Connection
+	io:=connection_transport(conn,&local)
+	ok:=dev.upgrade_websocket(io,request)
+	connection_refresh(conn,io)
+	return ok
+}
+
+send_websocket_frame :: proc(conn:^Connection,opcode:Opcode,payload:[]u8)->bool {
+	local:core.Connection
+	io:=connection_transport(conn,&local)
+	ok:=dev.send_websocket_frame(io,opcode,payload)
+	connection_refresh(conn,io)
+	return ok
+}
+
+send_websocket_close :: proc(conn:^Connection,code:u16,reason:string)->bool {
+	local:core.Connection
+	io:=connection_transport(conn,&local)
+	ok:=dev.send_websocket_close(io,code,reason)
+	connection_refresh(conn,io)
+	return ok
+}
+
+read_websocket_bytes :: proc(conn:^Connection,buffer:[]u8)->bool {
+	local:core.Connection
+	io:=connection_transport(conn,&local)
+	ok:=dev.read_websocket_bytes(io,buffer)
+	connection_refresh(conn,io)
+	return ok
 }

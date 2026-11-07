@@ -1,5 +1,10 @@
 # Saba
 
+Choose `shared:saba/core` for the lean server and import only the adapters you need.
+`shared:saba` remains the convenience facade with the existing database, assets,
+pages, development and S3 interface. See [CORE_AND_ADAPTERS.md](CORE_AND_ADAPTERS.md)
+for imports, lifetime rules, migration and measured dependency/layout results.
+
 This Odin package contains the existing HTTP connection handling, request parsing,
 response serialization, status enum, JSON decoding, route matching, WebSocket
 handshake/frame helpers, static assets, file-based pages, JSX transformation,
@@ -14,8 +19,8 @@ libraries, and `kakunou` for database handles and SQL operations; it never impor
 
 Install this repository at `$(odin root)/shared/saba` and Kakunou at
 `$(odin root)/shared/kakunou`, and the async library at
-`$(odin root)/shared/async`. SQLite and libcurl must be installed as system
-libraries. Projects import the server and database packages through Odin’s shared collection:
+`$(odin root)/shared/async`. The convenience facade requires SQLite and libcurl as system
+libraries; the core does not. Projects import the server and database packages through Odin’s shared collection:
 
 ```odin
 import server "shared:saba"

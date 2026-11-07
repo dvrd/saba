@@ -5,7 +5,7 @@ Transformation errors report the filename, one-based line and column, and a
 message. Configure `Server.modules` to enable processing; no separate transformer
 API, Node, or npm dependencies are needed.
 
-Saba owns the browser runtime in `javascript/dom.js`, embeds it into the
+Saba owns the browser runtime in `modules/dom.js`, embeds it into the
 binary with `#load`, and serves it at `/__saba/dom.js` in development and production.
 Applications do not create or copy a runtime file, configure its URL, or register
 its route. This endpoint is reserved and takes precedence over application mounts.

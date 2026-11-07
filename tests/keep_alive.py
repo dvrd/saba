@@ -74,9 +74,9 @@ def closed(conn):
     except ConnectionResetError:pass
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--sanitize',choices=['address','thread']);args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--sanitize',choices=['address','thread']);parser.add_argument('--core',action='store_true',help='exercise identical corpus through lean core');args=parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='saba-keepalive-') as work:
-        binary=Path(work)/'fixture';command=[os.environ['ODIN'],'build',str(SABA/'testdata/keepalive'),'-out:'+str(binary),'-thread-count:1','-warnings-as-errors']
+        binary=Path(work)/'fixture';command=[os.environ['ODIN'],'build',str(SABA/('core/testdata/keepalive' if args.core else 'testdata/keepalive')),'-out:'+str(binary),'-thread-count:1','-warnings-as-errors']
         if args.sanitize:command.append('-sanitize:'+args.sanitize)
         built=subprocess.run(command,capture_output=True,text=True,timeout=90);assert built.returncode==0,built.stdout+built.stderr
         # Disabled means the next already-buffered request is never admitted.

@@ -44,6 +44,52 @@ concurrent request/global memory admission remains host policy. Prefix/path
 validation, containment checks and exclusion of `.jsx` files are preserved.
 The standalone `serve_file` helper is outside mount-preload budgeting.
 
+## HEAD and browser revalidation
+
+Asset mounts, prepared modules, page shells and the built-in module runtime
+scripts accept GET and HEAD. HEAD takes the same routing, representation and
+path-validation path as GET. Response bodies remain borrowed internally so the
+core sender can report the GET `Content-Length`; both core senders suppress
+all body bytes for HEAD.
+
+Production responses use `Cache-Control: no-cache` and a quoted lowercase SHA256
+ETag of the exact representation bytes. This allows storage with revalidation;
+it does not promise that an unversioned URL stays immutable. Hashing currently
+runs on each response, including conditional requests, without copying the body.
+It adds linear CPU work in representation size, within existing asset bounds.
+The public cache structs and existing callable signatures are unchanged.
+
+`If-None-Match` supports weak comparison, comma-separated tags, repeated field
+lines and a standalone wildcard. A matching GET or HEAD returns 304 with the
+same ETag/cache policy and no body or Content-Length. Malformed conditions are
+ignored as a whole, yielding the normal 200 response; a valid prefix never
+causes a partial match. Path validation and existence checks precede conditional
+handling, so a wildcard cannot turn a missing/private resource into a 304.
+This policy uses ETags rather than Last-Modified/date conditions.
+
+Development asset, module and page responses use `Cache-Control: no-store`,
+ignore cache conditions and read/transform current files, including HEAD.
+Page metadata describes the final HTML, including facade hot-reload injection.
+Production caches remain startup snapshots: restart/reprepare to publish changed
+files and validators. Built-in runtime scripts have fixed process bytes and use
+revalidation in either mode. The standalone `serve_file` helper retains its
+existing behavior; `representation_response` exposes this policy to adapters
+that already own complete representation bytes. Streaming and range responses
+remain separate work (OKAMI-77/86).
+
+Validation:
+
+```sh
+../odin test saba/assets -define:ODIN_TEST_THREADS=1 -out:/tmp/assets-tests
+python3 saba/tests/conditional_assets.py --odin "$PWD/../odin"
+python3 saba/tests/conditional_assets.py --odin "$PWD/../odin" --sanitize address
+```
+
+Run from `shared/`. Use one test thread for the assets package because its
+descriptor cleanup tests measure process-wide open files. The loopback harness
+checks actual HEAD/304 framing, independent SHA256 validators, development
+freshness and containment across the facade's asset/module/page routes.
+
 ## Strategy experiment
 
 `tests/benchmark.py` compares the actual bounded preload cache with two diagnostic

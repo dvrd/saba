@@ -16,7 +16,7 @@ serve_assets :: proc(
 	Response,
 	bool,
 ) {
-	if request.method != "GET" do return {}, false
+	if request.method != "GET" && request.method != "HEAD" do return {}, false
 	for cache in caches {
 		if !strings.has_prefix(request.path, cache.mount.prefix) do continue
 		relative, decoded := net.percent_decode(
@@ -43,7 +43,7 @@ serve_assets :: proc(
 			if !found do return not_found(request), true
 			file = cached
 		}
-		return make_response(request, .OK, {{"Content-Type", file.content_type}}, file.body), true
+		return representation_response(request, file.body, file.content_type, development), true
 	}
 	return {}, false
 }

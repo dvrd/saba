@@ -50,7 +50,9 @@ serve_modules :: proc(
 		if has_source do return serve_jsx(request, source), true
 	}
 	if !has_javascript do return not_found(request), true
-	return assets.serve_file(request, javascript, "text/javascript; charset=utf-8"), true
+	body, read_error := os.read_entire_file(javascript, request.allocator)
+	if read_error != nil do return Response{status = .Internal_Server_Error}, true
+	return assets.representation_response(request, body, "text/javascript; charset=utf-8", development), true
 }
 
 @(private = "file")
@@ -71,12 +73,7 @@ serve_jsx :: proc(request: ^Request, source_path: string) -> Response {
 			transmute([]u8)message,
 		)
 	}
-	return make_response(
-		request,
-		.OK,
-		{{"Content-Type", "text/javascript; charset=utf-8"}, {"Cache-Control", "no-store"}},
-		transmute([]u8)output,
-	)
+	return assets.representation_response(request, transmute([]u8)output, "text/javascript; charset=utf-8", true)
 }
 
 // One mount can expose a whole web root or a component subtree.
@@ -108,16 +105,7 @@ serve_prepared_modules :: proc(
 		if invalid do return not_found(request), true
 		output, found := mount.files[relative]
 		if !found do return not_found(request), true
-		return make_response(
-				request,
-				.OK,
-				{
-					{"Content-Type", "text/javascript; charset=utf-8"},
-					{"Cache-Control", "no-cache"},
-				},
-				transmute([]u8)output,
-			),
-			true
+		return assets.representation_response(request, transmute([]u8)output, "text/javascript; charset=utf-8"), true
 	}
 	return {}, false
 }
@@ -130,7 +118,7 @@ module_request :: proc(
 	path: string,
 	invalid, matched: bool,
 ) {
-	if request.method != "GET" ||
+	if (request.method != "GET" && request.method != "HEAD") ||
 	   !strings.has_prefix(prefix, "/") ||
 	   !strings.has_suffix(prefix, "/") ||
 	   !strings.has_prefix(request.path, prefix) {

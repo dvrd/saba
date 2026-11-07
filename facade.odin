@@ -92,10 +92,10 @@ facade_dispatch :: proc(data:rawptr,transport:^core.Connection,request:^Request)
 	if application.config.development {
 		response,matched=dev.handle(&application.reload,request)
 	}
-	if !matched && match_route(request,"GET",modules_api.JSX_RUNTIME_URL) {
+	if !matched && (match_route(request,"GET",modules_api.JSX_RUNTIME_URL) || match_route(request,"HEAD",modules_api.JSX_RUNTIME_URL)) {
 		response,matched=modules_api.jsx_runtime_response(request),true
 	}
-	if !matched && match_route(request,"GET",modules_api.PAGE_ENTRY_URL) {
+	if !matched && (match_route(request,"GET",modules_api.PAGE_ENTRY_URL) || match_route(request,"HEAD",modules_api.PAGE_ENTRY_URL)) {
 		response,matched=modules_api.page_entry_response(request),true
 	}
 	if !matched {response,matched=assets_api.serve_assets(request,application.assets,application.config.development)}

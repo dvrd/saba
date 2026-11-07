@@ -1,6 +1,7 @@
 package saba_pages
 
 import modules "../modules"
+import assets "../assets"
 import "core:fmt"
 import "core:log"
 import "core:mem"
@@ -108,7 +109,7 @@ serve_prepared_pages :: proc(
 	Response,
 	bool,
 ) {
-	if request.method != "GET" || cache.mount.directory == "" do return {}, false
+	if (request.method != "GET" && request.method != "HEAD") || cache.mount.directory == "" do return {}, false
 	path, decoded := net.percent_decode(request.path, request.allocator)
 	if !decoded || !strings.has_prefix(path, "/") || (path != "/" && !module_relative_ok(path[1:])) do return {}, false
 	current := cache
@@ -126,13 +127,7 @@ serve_prepared_pages :: proc(
 		allocator = request.allocator,
 	)
 	html, _ := strings.replace_all(current.shell, "<!--saba:page-->", entry, request.allocator)
-	return make_response(
-			request,
-			.OK,
-			{{"Content-Type", "text/html; charset=utf-8"}},
-			transmute([]u8)html,
-		),
-		true
+	return assets.representation_response(request, transmute([]u8)html, "text/html; charset=utf-8", development), true
 }
 
 @(private)

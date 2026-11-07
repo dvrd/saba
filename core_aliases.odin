@@ -69,3 +69,10 @@ request_deadline :: core.request_deadline
 request_context_status :: core.request_context_status
 request_cancelled :: core.request_cancelled
 discard_response :: core.discard_response
+
+Response_Stream :: core.Response_Stream
+Stream_IO :: core.Stream_IO
+Stream_Step :: core.Stream_Step
+stream_submit :: core.stream_submit
+stream_wait :: core.stream_wait
+streaming_response :: core.streaming_response

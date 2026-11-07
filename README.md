@@ -535,3 +535,77 @@ Run `python3 shared/saba/tests/cancellation.py --odin ./odin --sanitize address`
 keep-alive/teardown, late-response disposal, one-worker stop/drain and observable
 peer failure using owned sockets. This API does not itself add blocking-job
 workers, asynchronous result publication or distributed cancellation.
+
+## Bounded streamed responses and SSE
+
+Set `Response.stream` instead of `body` or `upgrade`. `Response_Stream` provides
+host-owned `data`, a serial bounded/nonblocking `next(data,io)` callback, optional
+`drop(data)`, representation `content_length` (`-1` unknown), byte limits and a
+lifetime timeout. Returning the response transfers producer ownership to the
+async server even when metadata validation or sending fails. A supplied drop runs
+exactly once outside internal locks, after all accepted chunks are released. With
+nil drop, the host retains ownership and keeps producer data alive through serving.
+`discard_response` disposes an unqueued response, including a transferred stream.
+The blocking `send_response` helper rejects/disposes streams; drive them through
+core/facade `serve`. Existing buffered responses and upgrades keep their APIs.
+
+`next` returns one `Stream_Step`:
+
+- **Chunk:** first call `stream_submit(io,&owner)` with a valid nonempty
+  `core:mem/owned.Chunk`. Accepted clears that exact owner; rejection/backpressure
+  leaves it unchanged. Submit only once per callback. Retain and release rejected
+  ownership yourself, including from producer drop. Byte admission charges the
+  entire backing storage, even when the payload is a smaller view.
+- **Waiting:** first arm `stream_wait(io,absolute_deadline)`. Pending means return
+  Waiting. Reuse the absolute deadline after spurious wakes. The helper clamps it
+  to the stream lifetime and rejects stale runtime epochs. Never return Waiting
+  without a successfully armed wait. There is no asynchronous host-job waker yet.
+- **Yield:** bounded preparation remains; reschedule without blocking a worker.
+- **Done:** production ended. Known lengths must match exactly. Unknown lengths
+  emit the final HTTP chunk only after successful production completion.
+- **Failed:** abort the response and close; accepted owners still release once.
+
+IO, its runtime pointer and cancellation handle are borrowed only during the
+callback; copy request inputs and explicitly retain cancellation for other work.
+Callbacks may migrate between workers and must not perform concurrent operations,
+retain IO, touch the socket or block on filesystem/database/network work. Blocking
+job offload remains separate work. An accepted chunk is never polled past: one
+shared `http/exchange` slot retains it until its last partial write completes.
+The producer is called again only after release. This uses the common owned-chunk
+and exchange acceptance/length/teardown contracts, without a full-body copy.
+
+Default retained backing per stream is 64 KiB, configurable up to 1 MiB; default
+total produced-body limit is 8 MiB, separately configurable as a positive i64.
+These are distinct from connection admission, producer-owned rejected buffers,
+request-arena memory, kernel buffers and future global byte/job budgets. The
+request arena remains alive through stream completion, so producer code must use
+releasable chunk owners rather than repeatedly accumulating request allocations.
+Streamed heads are bounded to 128 fields and 8 KiB on wire; header snapshots
+and one-slot bookkeeping are separately allocated. A zero timeout
+inherits the normal response timeout; an explicit positive timeout up to 24 hours
+bounds the whole stream. A configured request-context deadline shortens it.
+Each header/chunk/terminal write also has its own fixed response-write budget,
+clamped to remaining lifetime. Progress does not extend either budget.
+
+Known lengths use Content-Length; unknown lengths use generated HTTP/1 chunk
+framing. HEAD and body-forbidden statuses dispose the producer without polling it
+and transmit no body. Length mismatch, producer failure, timeout, disconnect and
+shutdown close the connection and dispose pending owners. No successful chunked
+terminator is sent after a producer error. Buffered and streamed responses may
+reuse keep-alive serially. Streaming HTML bypasses development reload injection;
+that transformation requires a complete body. Client delivery acknowledgment is
+separate from local acceptance and storage release.
+
+`examples/sse` is a runnable core-only server: build/run it, read its `ready PORT`,
+then use `curl -N http://localhost:PORT/events`; press Enter to stop. It sends four
+UTF-8 events interleaved with four comment heartbeats, uses timer suspension,
+1 KiB chunk backing, a finite 64 KiB body budget and 15-second lifetime. Slow
+readers are bounded by the one-second write budget; cancellation releases pending
+chunks. This demonstrates framing/heartbeat/cancellation rather than event replay,
+Last-Event-ID persistence, authentication or deployment buffering policy. See
+[the EventSource format](https://html.spec.whatwg.org/multipage/server-sent-events.html).
+
+Run `python3 shared/saba/tests/streaming.py --odin ./odin --sanitize address` from
+the Odin root; `--sanitize thread --workers 4` covers worker concurrency. The
+harness tests the actual example as well as independent HTTP decoding, partial
+writes, exact owner release, pipelining, contract errors, timers and slow readers.

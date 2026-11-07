@@ -17,6 +17,7 @@ Response :: struct {
 	close_connection: bool,
 	// Owned optional HTTP/1 upgrade continuation, transferred on handler return.
 	upgrade: Upgrade,
+	stream: Response_Stream,
 }
 
 // Copies the header list out of the caller's stack into the request arena.
@@ -46,6 +47,7 @@ http_field_value :: proc(value: string) -> bool {
 }
 
 response_headers :: proc(response: Response, buffer: []u8, keep_alive: bool = false) -> (data: []u8, ok: bool) {
+	if stream_present(response.stream) do return nil, false
 	status := response.status
 	if status == .None do status = .OK
 
@@ -77,6 +79,10 @@ response_headers :: proc(response: Response, buffer: []u8, keep_alive: bool = fa
 
 send_response :: proc(conn: ^Connection, response: Response, request_method: string = "") -> bool {
 	prepared := response
+	if stream_present(prepared.stream) {
+		discard_response(&prepared)
+		return false
+	}
 	buffer: [RESPONSE_HEADER_LIMIT]u8
 	headers, ok := response_headers(prepared, buffer[:])
 	if !ok do return false
@@ -101,4 +107,5 @@ discard_response :: proc(response:^Response) {
     if response==nil do return
     old:=response^;response^={}
     if old.upgrade.drop!=nil do old.upgrade.drop(old.upgrade.data)
+    if old.stream.drop!=nil do old.stream.drop(old.stream.data)
 }

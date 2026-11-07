@@ -28,6 +28,7 @@ Connection_Phase :: enum {
 	Chunked_Body,
 	Dispatch,
 	Write,
+	Produce,
 	Upgrade,
 }
 
@@ -56,7 +57,8 @@ Connection_Task :: struct {
 	header_used, body_used:             int,
 	request:                            Request,
 	chunked: ^Chunk_Request,
-	output:                             [2][]u8,
+	output:                             [3][]u8,
+	streaming: ^Response_Stream_State,
 	output_index, output_offset:        int,
 	upgrade_established:              bool,
 	upgrade:                          Upgrade,
@@ -219,8 +221,20 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 		case .Dispatch:
 			response := dispatch_request(task)
 			if !queue_response(task, response) do return .Done
+		case .Produce:
+			result := produce_stream(task)
+			if result != .Yield || task.phase == .Produce do return result
+			continue
 		case .Write:
 			if task.output_index == len(task.output) {
+				if task.streaming != nil {
+					produce, ok := stream_write_complete(task)
+					if !ok do return .Done
+					if produce {
+						task.phase = .Produce
+						continue
+					}
+				}
 				if !task.upgrade_established {
 					task.response_finished = true
 					task.requests_completed += 1
@@ -374,6 +388,7 @@ release_upgrade_request :: proc(task: ^Connection_Task) -> bool {
 queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 	prepared := response
 	task.upgrade = response.upgrade
+	if stream_present(response.stream) do return queue_stream_response(task, response)
 	if (task.upgrade.resume != nil || task.upgrade.drop != nil || task.upgrade.data != nil) &&
 		(prepared.status != .Switching_Protocols || task.upgrade.resume == nil) {
 		drop_upgrade(task)
@@ -389,7 +404,7 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 	task.reuse_after_write = !prepared.close_connection && response_can_reuse(task,prepared.status)
 	headers, ok := response_headers(prepared, buffer,task.reuse_after_write)
 	if !ok {observe_failure(task, .Protocol_Error); return false}
-	task.output = {headers, prepared.body}
+	task.output = {headers, prepared.body, nil}
 	if task.request.method == "HEAD" do task.output[1] = nil
 	task.output_index, task.output_offset = 0, 0
 	task.deadline = async.deadline_after(&task.runtime.executor, task.runtime.timeouts.response)
@@ -423,6 +438,7 @@ finish_connection :: proc(data: rawptr) {
 	keep_alive_leave_idle(task)
 	finish_request_context(task)
 	observe_finish(task)
+	drop_response_stream(task)
 	drop_upgrade(task)
 	if task.native_pending do net.close(task.connection.socket)
 	// The runtime has already closed adopted sockets and removed readiness.

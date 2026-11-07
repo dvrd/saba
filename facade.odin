@@ -110,7 +110,7 @@ facade_dispatch :: proc(data:rawptr,transport:^core.Connection,request:^Request)
 		response=application.config.handler(&view,request)
 		connection_writeback(&view,transport)
 	}
-	if application.config.development && dev.reload_html_response(response) {
+	if application.config.development && !core.streaming_response(response) && dev.reload_html_response(response) {
 		body,ok:=dev.inject_reload_client(response.body,request.allocator)
 		if !ok {
 			response.status=.Internal_Server_Error

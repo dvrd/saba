@@ -74,8 +74,8 @@ Production caches remain startup snapshots: restart/reprepare to publish changed
 files and validators. Built-in runtime scripts have fixed process bytes and use
 revalidation in either mode. The standalone `serve_file` helper retains its
 existing behavior; `representation_response` exposes this policy to adapters
-that already own complete representation bytes. Streaming and range responses
-remain separate work (OKAMI-77/86).
+that already own complete representation bytes. The core now supports resumable `Response.stream` producers (OKAMI-77);
+file/range integration remains separate work (OKAMI-86).
 
 Validation:
 

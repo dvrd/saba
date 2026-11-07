@@ -132,6 +132,7 @@ keep_alive_begin_request :: proc(task: ^Connection_Task, count: int) -> bool {
 // no response/body borrow survives the completion callback and this reset.
 @(private)
 keep_alive_next_request :: #force_no_inline proc(task: ^Connection_Task) -> bool {
+	finish_request_context(task)
 	observe_finish(task)
 	if server_is_draining(task.runtime) || async.cancelled(&task.task) do return false
 	remaining := task.connection.read_buffer

@@ -493,3 +493,45 @@ Reproduce with `python3 shared/saba/tests/chunked_requests.py --odin ./odin
 HTTP chunk encoder as well as fragmented/malformed raw wire fixtures. It checks
 all split points, decoded/metadata bounds, EOF, total deadlines, cancellation,
 keep-alive and exact metrics on test-owned loopback sockets.
+
+## Cooperative request lifetime
+
+Handlers receive a borrowed `request.cancellation` context. Poll it with
+`request_cancelled` or inspect `request_context_status`/`request_deadline`.
+`retain_request_context` creates an independently owned handle; release each
+retained handle once through `release_request_context(&owner)`. Releasing the
+same cleared variable again is harmless; copying a handle creates an alias, not
+another reference. Retain before publishing to another thread and keep each
+handle valid while using it. The borrowed request handle must not be released.
+
+Contexts own only a small cancellation node and a reference to shared server
+cancellation state. They retain no request allocator, body, headers, connection,
+socket, runtime, callback data or response. Retained handles can be inspected and
+released after request-arena reset or `serve` returns. Host work must copy its
+inputs into separately owned memory and bound its own outstanding jobs/handles;
+a retained context does not make borrowed request memory safe or publish a result.
+
+The first observed terminal status is stable: Completed, Deadline, Shutdown,
+Peer_Closed or Failed. Successful response completion (or upgrade handoff) ends
+the HTTP request; keep-alive creates a fresh context for each request. Immediate
+stop and drain expiry reach running cooperative handlers even with a single
+worker. I/O failures cancel independently of observability configuration.
+Disconnect is observable when I/O reports it: there is no background peer monitor
+while a synchronous handler runs. Nil contexts are Unavailable, allowing direct
+non-server adapter calls to preserve their existing behavior.
+
+`Server.handler_timeout` optionally sets a monotonic context deadline at handler
+entry; zero preserves the existing absence of a handler deadline. Negative or
+more than 24 hours is invalid. Work must poll cooperatively. A response returned
+after expiry is discarded and replaced by a closing 408; a response returned
+after shutdown is discarded. Discard releases transferred continuations exactly
+once. Context deadlines remain visible to retained work; existing read/write phase
+deadlines continue to govern I/O. Arbitrary blocking work is not forcibly
+preempted, and `serve` still joins running callbacks before returning. Callbacks
+in the header/body-limit stage precede creation of the handler context.
+
+Run `python3 shared/saba/tests/cancellation.py --odin ./odin --sanitize address`
+(or `--sanitize thread`) from the Odin root. It checks retained handles across
+keep-alive/teardown, late-response disposal, one-worker stop/drain and observable
+peer failure using owned sockets. This API does not itself add blocking-job
+workers, asynchronous result publication or distributed cancellation.

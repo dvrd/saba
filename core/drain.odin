@@ -76,6 +76,10 @@ request_runtime_drain :: proc(runtime: ^Server_Runtime, timeout: time.Duration) 
 	if !runtime.draining || deadline.at < runtime.drain_deadline.at {
 		runtime.draining = true
 		runtime.drain_deadline = deadline
+        if runtime.cancellation!=nil {
+            at:=time.tick_add(time.tick_now(),budget)
+            sync.atomic_store(&runtime.cancellation.drain_at,i64(time.tick_diff({},at)))
+        }
 	}
 	sync.unlock(&runtime.drain_mutex)
 	wake_keep_alive_connections(runtime)
@@ -91,13 +95,13 @@ drain_connections :: proc(runtime: ^Server_Runtime) -> async.Resume_Result {
 	deadline := runtime.drain_deadline
 	sync.unlock(&runtime.drain_mutex)
 	if sync.atomic_load(&runtime.active_connections) == 0 {
-		async.shutdown(&runtime.executor)
+		shutdown_runtime(runtime)
 		return .Done
 	}
 	err := async.sleep_until(&runtime.executor, deadline)
 	if err.kind == .Pending do return .Waiting
 	// Deadline expiry or runtime failure cancels residual readers/writers/WS.
-	async.shutdown(&runtime.executor)
+	shutdown_runtime(runtime)
 	return .Done
 }
 

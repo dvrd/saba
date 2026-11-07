@@ -31,6 +31,7 @@ Server :: struct {
 	workers: int,
 	control: ^Server_Control,
 	timeouts: Timeout_Config,
+	handler_timeout:time.Duration,
 	keep_alive: Keep_Alive_Config,
 	observability: Observability_Config,
 	drain_timeout: time.Duration,
@@ -80,7 +81,7 @@ serve :: proc(config:Server)->bool {
 	return core.serve({address=config.address,port=config.port,max_connections=config.max_connections,
 		initial_connections=config.initial_connections,runtime_allocator=config.runtime_allocator,
 		handler=facade_dispatch,handler_data=&application,request_body_limit=config.request_body_limit,
-		workers=config.workers,control=config.control,timeouts=config.timeouts,keep_alive=config.keep_alive,
+		workers=config.workers,control=config.control,timeouts=config.timeouts,handler_timeout=config.handler_timeout,keep_alive=config.keep_alive,
 		observability=config.observability,drain_timeout=config.drain_timeout})
 }
 

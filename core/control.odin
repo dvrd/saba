@@ -28,7 +28,7 @@ stop_server :: proc(control: ^Server_Control) {
 	sync.lock(&control._mutex)
 	defer sync.unlock(&control._mutex)
 	control._stop_requested = true
-	if control._runtime != nil do async.shutdown(control._runtime)
+	if control._server != nil do shutdown_runtime(control._server)
 }
 
 // Return the bound endpoint while the server is published. False means no
@@ -80,7 +80,7 @@ publish_server :: proc(
 	control._server = runtime
 	control._endpoint = endpoint
 	if control._stop_requested {
-		async.shutdown(&runtime.executor)
+		shutdown_runtime(runtime)
 	} else if control._drain_requested {
 		if control._drain_default_requested do request_runtime_drain(runtime, 0)
 		if control._drain_timeout > 0 do request_runtime_drain(runtime, control._drain_timeout)

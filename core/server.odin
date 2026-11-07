@@ -347,6 +347,7 @@ init_connection_arena :: proc(task: ^Connection_Task) {
 
 @(private)
 release_upgrade_request :: proc(task: ^Connection_Task) -> bool {
+	finish_request_context(task)
 	observe_finish(task)
 	buffered := task.connection.read_buffer
 	if len(buffered) > 0 {
@@ -407,13 +408,20 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 
 @(private)
 dispatch_request :: proc(task: ^Connection_Task) -> Response {
-	return task.runtime.config.handler(task.runtime.config.handler_data,&task.connection,&task.request)
+	if !begin_request_context(task) do return Response{status=.Internal_Server_Error,close_connection=true}
+    response:=task.runtime.config.handler(task.runtime.config.handler_data,&task.connection,&task.request)
+    status:=request_context_status(task.request.cancellation)
+    if status==.Active do return response
+    discard_response(&response)
+    observe_failure(task,.Timeout if status==.Deadline else .Cancelled)
+    return Response{status=.Request_Timeout if status==.Deadline else .Service_Unavailable,close_connection=true}
 }
 
 @(private)
 finish_connection :: proc(data: rawptr) {
 	task := cast(^Connection_Task)data
 	keep_alive_leave_idle(task)
+	finish_request_context(task)
 	observe_finish(task)
 	drop_upgrade(task)
 	if task.native_pending do net.close(task.connection.socket)

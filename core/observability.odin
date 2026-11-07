@@ -81,7 +81,14 @@ observe_start :: proc(task: ^Connection_Task) {
 
 @(private)
 observe_io_error :: proc(task: ^Connection_Task, error: async.Error) {
-	if !task.observed do return
+	#partial switch error.kind {
+    case .Timeout: cancel_request_context(task.request.cancellation,.Deadline)
+    case .Cancelled,.Stopping: cancel_request_context(task.request.cancellation,.Shutdown)
+    case .Peer_Closed: cancel_request_context(task.request.cancellation,.Peer_Closed)
+    case .None,.Pending:
+    case: cancel_request_context(task.request.cancellation,.Failed)
+    }
+    if !task.observed do return
 	#partial switch error.kind {
 	case .None, .Pending: return
 	case .Timeout: task.event.outcome = .Timeout

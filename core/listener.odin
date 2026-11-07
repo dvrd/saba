@@ -1,6 +1,7 @@
 package saba_core
 
 import "core:log"
+import rt "base:runtime"
 import "core:mem"
 import "core:net"
 import "core:sync"
@@ -32,6 +33,8 @@ Server :: struct {
 	// Caller-owned state, immutable until serve returns.
 	handler_data:         rawptr,
 	request_body_limit:   proc(request: ^Request) -> int,
+	// Zero leaves synchronous handlers without a deadline. Positive budgets are cooperative.
+	handler_timeout: time.Duration,
 	// Zero selects four workers; serve participates as one worker.
 	workers:              int,
 	// Optional caller-owned shutdown and endpoint control.
@@ -45,6 +48,7 @@ Server :: struct {
 
 Server_Runtime :: struct {
 	config:                                  Server,
+	cancellation: ^Server_Cancellation,
 	logger:                                  log.Logger,
 	executor:                                async.Runtime,
 	accept_task:                             async.Task,
@@ -83,6 +87,7 @@ serve :: proc(config: Server) -> bool {
 		log.error("Invalid keep-alive request count or idle timeout")
 		return false
 	}
+	if config.handler_timeout<0 || config.handler_timeout>MAX_SERVER_TIMEOUT {log.error("Invalid handler timeout");return false}
 	if !timeouts_valid(config.timeouts) {
 		log.error("Invalid server timeouts: durations must be between zero and MAX_SERVER_TIMEOUT")
 		return false
@@ -103,8 +108,13 @@ serve :: proc(config: Server) -> bool {
 		log.error("Could not allocate server runtime:", allocation_error); return false
 	}
 	defer free(runtime)
+    cancellation,ce:=new(Server_Cancellation,rt.heap_allocator())
+    if ce!=nil || cancellation==nil do return false
+    cancellation.references=1
+    defer release_server_cancellation(cancellation)
 	runtime^ = Server_Runtime {
 		config = config,
+		cancellation = cancellation,
 		timeouts = resolve_timeouts(config.timeouts),
 		logger = context.logger,
 		capacity_state = {current = initial, maximum = maximum},
@@ -181,7 +191,7 @@ accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 			   cause == .Unsupported_Socket ||
 			   cause == .Not_Listening {
 				runtime.listener_failed = true
-				async.shutdown(&runtime.executor)
+				shutdown_runtime(runtime)
 				return .Done
 			}
 			runtime.accept_retry = async.deadline_after(&runtime.executor, ACCEPT_RETRY_INTERVAL)

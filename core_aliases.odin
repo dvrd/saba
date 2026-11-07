@@ -60,3 +60,12 @@ not_found :: core.not_found
 match_route :: core.match_route
 path_value :: core.path_value
 status_text :: core.status_text
+
+Request_Context :: core.Request_Context
+Request_Status :: core.Request_Status
+retain_request_context :: core.retain_request_context
+release_request_context :: core.release_request_context
+request_deadline :: core.request_deadline
+request_context_status :: core.request_context_status
+request_cancelled :: core.request_cancelled
+discard_response :: core.discard_response

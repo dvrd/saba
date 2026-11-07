@@ -23,6 +23,8 @@ Path_Parameter :: struct {
 
 Request :: struct {
 	allocator:            mem.Allocator,
+	// Borrowed until handler return; retain explicitly for independently owned work.
+	cancellation: Request_Context,
 	// Generated ID is zero when observability is disabled. Route is a matched
 	// bounded template; never assign a raw user path or query here.
 	request_id:           u64,

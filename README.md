@@ -169,6 +169,11 @@ router :: proc(conn: ^server.Connection, request: ^server.Request) -> server.Res
 ```
 
 For a file response, return `server.serve_file(request, "web/index.html")`.
+
+For opt-in bounded large downloads with single byte ranges, use
+`server.serve_file_stream(request, "downloads", "release.zip")` through the async
+server. See [file/range policy and ownership](assets/README.md#streamed-file-downloads-and-single-byte-ranges),
+including its synchronous filesystem latency and immutable-file requirement.
 The application chooses the path; the helper reads the file into request memory
 and returns a response for the connection worker to send. It defaults to
 `text/html; charset=utf-8`; pass a third argument for other content types, such as
@@ -568,8 +573,10 @@ core/facade `serve`. Existing buffered responses and upgrades keep their APIs.
 IO, its runtime pointer and cancellation handle are borrowed only during the
 callback; copy request inputs and explicitly retain cancellation for other work.
 Callbacks may migrate between workers and must not perform concurrent operations,
-retain IO, touch the socket or block on filesystem/database/network work. Blocking
-job offload remains separate work. An accepted chunk is never polled past: one
+retain IO or touch the socket. Generic producers must not block on host work.
+The opt-in file adapter is an explicit exception for synchronous bounded file
+reads and documents their non-preemptible latency; general blocking job offload
+remains separate work. An accepted chunk is never polled past: one
 shared `http/exchange` slot retains it until its last partial write completes.
 The producer is called again only after release. This uses the common owned-chunk
 and exchange acceptance/length/teardown contracts, without a full-body copy.

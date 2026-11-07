@@ -75,7 +75,85 @@ files and validators. Built-in runtime scripts have fixed process bytes and use
 revalidation in either mode. The standalone `serve_file` helper retains its
 existing behavior; `representation_response` exposes this policy to adapters
 that already own complete representation bytes. The core now supports resumable `Response.stream` producers (OKAMI-77);
-file/range integration remains separate work (OKAMI-86).
+the opt-in file/range adapter is described below.
+
+## Streamed file downloads and single byte ranges
+
+`serve_file_stream(request,root,relative,config)` serves an explicitly selected
+regular file through `Response.stream`. Both `shared:saba/assets` and the facade
+export it and `File_Stream_Config`. It does not preload the file or change
+existing `serve_file`, asset-mount, module or page response behavior. For example,
+from an asynchronous server handler:
+
+```odin
+return server.serve_file_stream(request, "downloads", "release.zip", {
+    max_file_bytes = 2 * 1024 * 1024 * 1024,
+    chunk_bytes = 64 * 1024,
+    etag = `"release-2026-11-07"`,
+})
+```
+
+`root` is host-selected; `relative` is percent-decoded once, then passed through
+asset path validation and canonical containment. Dot/private segments, absolute
+paths, backslashes, `.jsx`, directories and symlinks escaping the root return 404.
+Keep the directory tree trusted and stable while serving: this uses the existing
+resolve/check/open path policy, not an OS capability sandbox against concurrent
+hostile directory replacement. File contents must remain immutable until final
+stream disposal, preferably published as new names with atomic replacement.
+Unexpected truncation terminates the connection instead of reusing an incomplete
+fixed-length response; same-size in-place mutation is outside this contract.
+
+GET supports one `bytes=first-last`, `bytes=first-` or `bytes=-suffix` range.
+Satisfiable ranges return 206, exact Content-Range and Content-Length, and the
+original Content-Type. Unsatisfiable ranges, including any range on an empty
+file or a zero suffix, return 416 with `bytes */size` and an empty body. Ends and
+suffixes larger than the file clamp safely, even beyond machine integer size.
+Malformed/reversed, unknown-unit, multi-range, repeated Range fields and values
+over 1024 bytes are ignored in full, producing the normal 200 response. No multipart
+allocation or per-range work is performed. HEAD ignores Range and describes the
+full GET representation with no body. Other methods return 405 with Allow.
+
+An optional host-supplied strong ETag identifies the exact immutable generation.
+It is cloned into request storage; it is never guessed from timestamps or an
+inode. With a tag, responses use `no-cache` and existing If-None-Match weak/list/
+wildcard handling before range selection. Without a tag, use `no-store`;
+If-None-Match wildcard can still yield 304 for an existing file. If-Range enables
+a partial response only on exact strong-tag equality. Weak, date, unknown,
+malformed or duplicate If-Range conditions cause a full 200. Last-Modified/date
+preconditions and the wider If-Match/If-Unmodified-Since policy remain outside
+this adapter. ETag and explicit Content-Type inputs are capped at 1024 bytes each.
+
+Defaults are a 1 GiB whole-file admission cap and 64 KiB payload buffer per response;
+zero selects defaults, negative limits fail, and chunks are configurable from 1
+byte to 1 MiB. Oversized files/configuration fail with 500 before body allocation.
+One descriptor and a 72-byte producer on the validated Darwin arm64 toolchain own
+one lazy reusable payload allocation of `min(chunk_bytes,response_length)` bytes.
+No payload is allocated/read for HEAD or 304/416. A custom allocator must support
+individual sized frees, worker migration and survival until final drop. The
+core's one-slot exchange charges the whole backing buffer; the buffer is reused
+only after its previous socket use ends. Header failure, cancellation, disconnect,
+timeout and stop release it and close the file exactly once. An unqueued response
+must be passed to `discard_response`; the blocking `send_response` rejects streams.
+
+Open/stat/canonicalization and each bounded read are synchronous filesystem work.
+They can occupy a network worker on a cold, slow or network filesystem and cannot
+be preempted by stream deadlines. Use this opt-in adapter only when the host
+accepts that latency; bounded offload remains OKAMI-91. Socket writes retain the
+core's slow-reader, total-stream and request-context deadlines. Per-file/per-chunk
+bounds exclude OS caches, path/header/request-arena metadata and global concurrent
+admission (OKAMI-122). No zero-copy or throughput improvement is claimed.
+
+```sh
+../odin test http -sanitize:address -out:/tmp/http-range-tests
+../odin test saba/assets -define:ODIN_TEST_THREADS=1 -sanitize:address -out:/tmp/assets-range-tests
+python3 saba/tests/file_ranges.py --odin "$PWD/../odin" --sanitize address
+python3 saba/tests/file_ranges.py --odin "$PWD/../odin" --sanitize thread --workers 4
+```
+
+The owned loopback fixture exercises the facade export, independently decodes
+range bytes/metadata, and tracks all producer/buffer grants and server descriptors.
+It covers large downloads, concurrency, slow readers, disconnects and active
+shutdown. Results are Darwin arm64 only; no Mesa vendored-copy update is implied.
 
 Validation:
 

@@ -19,6 +19,8 @@ destroy_assets :: assets.destroy_assets
 prepare_assets :: assets.prepare_assets
 serve_assets :: assets.serve_assets
 serve_file :: assets.serve_file
+File_Stream_Config :: assets.File_Stream_Config
+serve_file_stream :: assets.serve_file_stream
 Module_Mount :: modules.Module_Mount
 Module_Cache :: modules.Module_Cache
 serve_modules :: modules.serve_modules

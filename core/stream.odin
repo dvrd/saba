@@ -19,8 +19,9 @@ Stream_Step :: enum {
 }
 
 // Returning a stream transfers producer ownership even if head validation/send
-// fails. next/drop run serially outside locks. next must be bounded, nonblocking
-// and may migrate workers. Producer data must survive through drop. An accepted
+// fails. next/drop run serially outside locks and may migrate workers. Producers
+// should do bounded, nonblocking work; the opt-in file adapter documents its
+// synchronous filesystem latency. Producer data must survive through drop. An accepted
 // chunk is released before the next producer call, and before producer drop.
 Response_Stream :: struct {
 	data:            rawptr,

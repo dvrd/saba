@@ -21,11 +21,11 @@ pretend to remove dependencies already imported by the facade.
 | `shared:saba/pages` | Prepared file pages; imports modules |
 | `shared:saba/jsx` | JSX transformation |
 | `shared:saba/development` | Supervisor, watcher, HTML injection, reload WebSocket adapter |
-| `shared:saba/s3` | Existing S3 helpers, still using existing transport/signing implementation |
+| `shared:saba/s3` | Thin compatibility adapter delegating credentials/signing/service I/O to AWS |
 | `shared:saba` | Compatibility facade composing these packages and Kakunou |
 
 Authentication remains in `shared:auth` and continues importing the facade. Core
-does not import auth. Further auth/S3 decoupling is separate work.
+does not import auth. Further auth decoupling is separate work; the optional S3 adapter delegates to AWS.
 
 ## Selecting assets without importing the facade
 

@@ -4,3 +4,6 @@
 *.exe
 .DS_Store
 .cruft/
+
+# Python loopback harness imports
+__pycache__/

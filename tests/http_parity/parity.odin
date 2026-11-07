@@ -13,9 +13,11 @@ request_corpus_matches_shared_parser :: proc(t: ^testing.T) {
 		headers: [128]server.Header
 		protocol_headers: [128]http.Header
 		actual, status := server.parse_request(item.wire, headers[:])
-		expected, shared_status := http1.request_head_decode(item.wire, protocol_headers[:])
-		testing.expectf(t, int(status) == int(item.status), "%s: server status %v, want %v", item.name, status, item.status)
-		testing.expectf(t, int(shared_status) == int(item.status), "%s: shared status %v, want %v", item.name, shared_status, item.status)
+		expected, shared_status := http1.request_head_decode_framed(item.wire, protocol_headers[:])
+		expected_status := item.status
+        if item.name == "chunked unsupported" do expected_status = 0 // Explicit Saba/framed-parser opt-in.
+		testing.expectf(t, int(status) == expected_status, "%s: server status %v, want %v", item.name, status, expected_status)
+		testing.expectf(t, int(shared_status) == expected_status, "%s: shared status %v, want %v", item.name, shared_status, expected_status)
 		if status == .None && shared_status == .None {
 			testing.expect_value(t, actual.method, expected.method)
 			testing.expect_value(t, actual.path, expected.path)

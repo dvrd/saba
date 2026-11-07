@@ -453,3 +453,43 @@ Inline bounded state avoids per-request observation allocations but has a fixed 
 ### Validation
 
 `tests/observability_timeout.py` builds only an isolated owned loopback fixture. It covers generated IDs and static routes without secret reflection, exact wire bytes, HEAD, slow headers/first-byte idle, partial body deadlines, stalled response writes, exactly-once shutdown cancellation, observer snapshots, and shutdown unpublication; `--sanitize address` is supported. Focused unit tests also exercise disabled operation, defaults/validation, duplicate completion and 4-thread snapshot consistency. The benchmark is an optional explicitly selected test and does not impose timing thresholds.
+
+## Bounded chunked request bodies
+
+Core and facade servers accept `Transfer-Encoding: chunked` through the shared
+HTTP/1 framed parser and incremental chunk decoder. The route/body-limit callback
+runs after headers; `request.chunked` is true and the eventual decoded length is
+not yet known. Its returned limit bounds decoded bytes (default 4096). Chunked
+requests additionally have the shared 64 MiB hard envelope. Negative route limits
+reject the request. For this full-body handler API, chunked reads reserve the
+effective body limit plus one bounded decoder/input scratch owner in the request
+arena, even for an empty body; choose route limits accordingly. This does not add
+streaming handlers or separate global byte admission.
+
+Handlers receive only complete decoded `request.body`; `content_length` is then
+its actual length, `chunked=true` and `has_content_length=false` preserve the
+original wire framing. Original headers remain unchanged. `read_json` accepts
+completed chunked bodies. Auth's Saba adapters pass the decoded-length knowledge
+into their transport-independent mapper. Custom adapters that require wire
+Content-Length must explicitly handle `request.chunked` as well.
+
+Chunk/extension/trailer limits are shared with `http/v1`: 1024-byte lines including
+CRLF, 4096 nonempty chunks, 64 KiB total framing metadata, 8192 trailer bytes and
+32 trailer fields. Trailers are validated and discarded, never merged into
+request headers. Size/cap violations return 413, malformed framing/forbidden
+trailers/premature EOF return 400. CL/TE combinations and duplicate transfer
+coding return 400; unsupported codings return 501. Expect remains unsupported
+(417). Errors close the connection, leaving no unread body to become a request.
+
+Unknown-length bodies use the configured total body deadline (default five
+seconds); progress does not extend it. Async reads suspend on the existing task.
+Coalesced bytes after the final trailer remain available for the next keep-alive
+request, and observability accounts only consumed wire bytes, including metadata.
+The blocking `read_request_body` helper also supports chunked input, enforces the
+provided destination capacity and preserves buffered next-request bytes.
+
+Reproduce with `python3 shared/saba/tests/chunked_requests.py --odin ./odin
+--sanitize address` from the Odin root. The harness uses an independent Python
+HTTP chunk encoder as well as fragmented/malformed raw wire fixtures. It checks
+all split points, decoded/metadata bounds, EOF, total deadlines, cancellation,
+keep-alive and exact metrics on test-owned loopback sockets.

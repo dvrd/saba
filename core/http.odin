@@ -36,6 +36,8 @@ Request :: struct {
 	body:                 []u8,
 	content_length:       int,
 	has_content_length:   bool,
+	// Transfer-Encoding was chunked; content_length is decoded length at dispatch.
+	chunked: bool,
 	path_parameters:      [MAX_PATH_PARAMETERS]Path_Parameter,
 	path_parameter_count: int,
 }
@@ -60,7 +62,7 @@ read_json :: proc(request: ^Request, input: ^$T) -> HTTP_Status {
 		return .Unsupported_Media_Type
 	}
 
-	if !request.has_content_length {
+	if !request.has_content_length && !request.chunked {
 		return .Length_Required
 	}
 

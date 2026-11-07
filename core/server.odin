@@ -1,6 +1,8 @@
 package saba_core
 
 import rt "base:runtime"
+import http "../../http"
+import http1 "../../http/v1"
 import "core:log"
 import "core:mem"
 import "core:net"
@@ -23,6 +25,7 @@ Connection_Phase :: enum {
 	Headers,
 	Idle,
 	Body,
+	Chunked_Body,
 	Dispatch,
 	Write,
 	Upgrade,
@@ -52,6 +55,7 @@ Connection_Task :: struct {
 	header:                             []u8,
 	header_used, body_used:             int,
 	request:                            Request,
+	chunked: ^Chunk_Request,
 	output:                             [2][]u8,
 	output_index, output_offset:        int,
 	upgrade_established:              bool,
@@ -164,6 +168,54 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 				return .Done
 			}
 			task.body_used += n
+
+		case .Chunked_Body:
+			if deadline_expired(conn.read_deadline) {
+				if !queue_response(task, {status = .Request_Timeout, close_connection = true}) do return .Done
+				continue
+			}
+			if len(conn.read_buffer) == 0 {
+				n, error := async.read(task.socket, task.chunked.input[:], task.deadline)
+				if error.kind == .Pending do return .Waiting
+				if error.kind != .None {
+					observe_io_error(task, error)
+					if error.kind == .Timeout || error.kind == .Peer_Closed {
+						status: HTTP_Status = .Bad_Request
+						if error.kind == .Timeout do status = .Request_Timeout
+						if !queue_response(task, {status = status, close_connection = true}) do return .Done
+						continue
+					}
+					return .Done
+				}
+				if n == 0 {
+					if !queue_response(task, {status = .Bad_Request, close_connection = true}) do return .Done
+					continue
+				}
+				conn.read_buffer = task.chunked.input[:n]
+			}
+			consumed, written, done, error := http1.chunk_decoder_feed(
+				&task.chunked.decoder,
+				conn.read_buffer,
+				task.request.body[task.body_used:],
+			)
+			conn.read_buffer = conn.read_buffer[consumed:]
+			task.body_used += written
+			if task.observed do task.event.bytes_received += u64(consumed)
+			if error.kind != .None {
+				observe_failure(task, .Protocol_Error)
+				if !queue_response(task, {status = chunk_error_status(error), close_connection = true}) do return .Done
+				continue
+			}
+			if done {
+				if deadline_expired(conn.read_deadline) {
+					if !queue_response(task, {status = .Request_Timeout, close_connection = true}) do return .Done
+					continue
+				}
+				task.request.body = task.request.body[:task.body_used]
+				task.request.content_length = task.body_used
+				conn.read_deadline = {}
+				task.phase = .Dispatch
+			}
 		case .Dispatch:
 			response := dispatch_request(task)
 			if !queue_response(task, response) do return .Done
@@ -241,13 +293,25 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 	if limit < 0 || request.content_length > limit {
 		return queue_response(task, {status = .Content_Too_Large})
 	}
-	body, body_error := make([]u8, request.content_length, allocator)
-	if body_error != nil {observe_failure(task, .Allocation_Error); return false}
+	body_capacity := request.content_length
+	if request.chunked do body_capacity = min(limit, http.MAX_BODY_SIZE)
+	body, body_error := make([]u8, body_capacity, allocator)
+	if body_error != nil {
+		observe_failure(task, .Allocation_Error); return false
+	}
 	task.request.body = body
 	duration := body_timeout(task.runtime.timeouts, request.content_length)
 	task.deadline = async.deadline_after(&task.runtime.executor, duration)
 	task.connection.read_deadline = time.tick_add(time.tick_now(), duration)
 	task.phase = .Body
+	if request.chunked {
+		state, allocation_error := new(Chunk_Request, allocator)
+		if allocation_error != nil {
+			observe_failure(task, .Allocation_Error); return false
+		}
+		if http1.chunk_decoder_init(&state.decoder, u64(body_capacity)).kind != .None do return false
+		task.chunked = state; task.phase = .Chunked_Body
+	}
 	return true
 }
 

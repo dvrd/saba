@@ -140,6 +140,7 @@ keep_alive_next_request :: #force_no_inline proc(task: ^Connection_Task) -> bool
 	count := copy(saved[:], remaining)
 	task.connection.read_buffer = nil
 	task.request = {}
+	task.chunked = nil
 	task.output = {}
 	task.header = nil
 	mem.dynamic_arena_destroy(&task.arena)

@@ -226,7 +226,7 @@ def production(binary, web, workers):
             assert response(conn)[0] == 431
         for bad, expected in [
             (b'Content-Length: 1\r\nContent-Length: 1\r\n', 400),
-            (b'Transfer-Encoding: chunked\r\n', 501),
+            (b'Transfer-Encoding: gzip\r\n', 501),
             (b'Expect: 100-continue\r\n', 417),
             (b'Content-Length: 16385\r\n', 413),
         ]:

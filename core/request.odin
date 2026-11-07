@@ -22,7 +22,7 @@ parse_request :: proc(raw: string, storage: []Header) -> (Request, HTTP_Status) 
 				(end < 0 && len(raw) >= REQUEST_HEADER_LIMIT) {
 		return {}, .Request_Header_Fields_Too_Large
 	}
-	head, status := http1.request_head_decode(raw, storage[:min(len(storage), REQUEST_HEADER_COUNT_LIMIT)])
+	head, status := http1.request_head_decode_framed(raw, storage[:min(len(storage), REQUEST_HEADER_COUNT_LIMIT)])
 	return Request{
 		method = head.method,
 		path = head.path,
@@ -31,6 +31,7 @@ parse_request :: proc(raw: string, storage: []Header) -> (Request, HTTP_Status) 
 		headers = head.headers,
 		content_length = head.content_length,
 		has_content_length = head.has_content_length,
+		chunked = head.chunked,
 	}, status
 }
 
@@ -43,6 +44,7 @@ read_request_body :: proc(
 	HTTP_Status,
 	bool,
 ) {
+	if request.chunked do return read_chunked_body(conn,request,buffer)
 	if request.content_length > len(buffer) {
 		return .Content_Too_Large, false
 	}

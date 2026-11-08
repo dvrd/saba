@@ -4,6 +4,8 @@ Choose `shared:saba/core` for the lean server and import only the adapters you n
 `shared:saba` remains the convenience facade with the existing database, assets,
 pages, development and S3 interface. See [CORE_AND_ADAPTERS.md](CORE_AND_ADAPTERS.md)
 for imports, lifetime rules, migration and measured dependency/layout results.
+Use the optional [bounded offload adapter](offload/README.md) for synchronous
+work that must run outside connection workers.
 
 This Odin package contains the existing HTTP connection handling, request parsing,
 response serialization, status enum, JSON decoding, route matching, WebSocket

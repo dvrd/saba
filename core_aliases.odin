@@ -76,3 +76,7 @@ Stream_Step :: core.Stream_Step
 stream_submit :: core.stream_submit
 stream_wait :: core.stream_wait
 streaming_response :: core.streaming_response
+
+Deferred_Response :: core.Deferred_Response
+Deferred_IO :: core.Deferred_IO
+Deferred_Step :: core.Deferred_Step

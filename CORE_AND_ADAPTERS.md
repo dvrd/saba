@@ -15,7 +15,8 @@ pretend to remove dependencies already imported by the facade.
 
 | Import | Responsibility |
 | --- | --- |
-| `shared:saba/core` | Lean HTTP/1 server and protocol-neutral upgrade continuation |
+| `shared:saba/core` | Lean HTTP/1 server, pre-header deferred responses and protocol-neutral upgrade continuation |
+| `shared:saba/offload` | Optional bounded blocking-work lane integration |
 | `shared:saba/assets` | Prepared static mounts and files |
 | `shared:saba/modules` | Prepared JS/JSX modules; imports assets, JSX and paths |
 | `shared:saba/pages` | Prepared file pages; imports modules |
@@ -95,6 +96,32 @@ entirely in `development/session.odin`. A pending upgrade is cancelled by shutdo
 or the configured drain deadline; already established sessions are not new HTTP
 requests and do not emit additional HTTP completion events.
 
+## Pre-header deferred responses
+
+`Response.deferred` transfers a `Deferred_Response {data, poll, drop, timeout}`
+to the existing connection task before any response head is committed. Return it
+alone: status, headers, body, close flag, stream and upgrade must remain zero.
+Poll and drop run serially on the owner outside locks; poll must be bounded and
+nonblocking. Poll returns Waiting, Ready with the final Response, or Failed. Ready
+may select a normal response, stream or upgrade, but cannot recursively defer.
+Drop runs once on invalid setup, failure, completion, cancellation or shutdown.
+
+`Deferred_IO` borrows the request allocator/context and a detachable wake signal
+for the call. Retain the signal separately before publishing it to a job. Never
+publish raw request/connection/runtime/task pointers or the request allocator.
+The server detaches every retained producer signal before retiring its target.
+A successful result must copy its data to the live owner arena before independent
+job storage is released. `shared:saba/offload` implements that ownership bridge;
+see [its contract](offload/README.md).
+
+The total pre-header budget inherits the response timeout by default and is capped
+by the handler deadline. A late result cannot change the final status after expiry.
+While waiting, bounded read readiness observes peer EOF and saves at most the normal
+8192-byte header limit of pipelined input. Overflow closes without dispatching the
+pipeline. Existing keep-alive reuses preserved bytes only after the ready response
+is sent. Shutdown/drain detach the target without joining non-interruptible jobs on
+a network worker. Blocking `send_response` rejects and disposes deferred responses.
+
 ## Compatibility and migration
 
 Named and zero-value facade Server/Response fields and two-argument Handler work
@@ -104,8 +131,8 @@ explicit `data:rawptr` and Server.handler_data; core has no database field. Core
 Connection and facade Connection are different types. Use the matching helper
 package for each; do not cast between them.
 
-Response adds an Upgrade field. Positional Response literals must supply it or
-use named fields; Connection layouts and previously public implementation structs
+Response includes Upgrade, Response_Stream and Deferred_Response fields. Positional
+Response literals must supply the current fields or use named fields; Connection layouts and previously public implementation structs
 also changed. They are source interfaces, not a binary ABI. Root aliases for
 Connection_Task/Server_Runtime remain for diagnostics but no longer expose
 WebSocket/cache/database implementation fields. Private helpers are not aliases.
@@ -116,7 +143,8 @@ separate explicit migration; this change does not claim its application refactor
 
 ## Measured scope and checks
 
-On macOS arm64 with Odin c826157de, sizes in bytes:
+Historical extraction measurements on macOS arm64 with Odin c826157de, sizes in bytes
+(the later offload layout change is measured separately in [RESULTS91.md](RESULTS91.md)):
 
 | Type | Before split | Core | Facade |
 | --- | ---: | ---: | ---: |

@@ -11,6 +11,7 @@ import "core:sync"
 import "core:time"
 
 import async "shared:async"
+import signal "shared:async/signal"
 
 @(private)
 CONNECTION_STEP_LIMIT :: 32
@@ -27,6 +28,7 @@ Connection_Phase :: enum {
 	Body,
 	Chunked_Body,
 	Dispatch,
+	Await_Response,
 	Write,
 	Produce,
 	Upgrade,
@@ -59,6 +61,12 @@ Connection_Task :: struct {
 	chunked: ^Chunk_Request,
 	output:                             [3][]u8,
 	streaming: ^Response_Stream_State,
+	deferred: Deferred_Response,
+	deferred_signal: signal.Signal,
+	deferred_expires: time.Tick,
+	deferred_deadline: async.Deadline,
+	deferred_buffer: []u8,
+	deferred_used: int,
 	output_index, output_offset:        int,
 	upgrade_established:              bool,
 	upgrade:                          Upgrade,
@@ -221,6 +229,10 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 		case .Dispatch:
 			response := dispatch_request(task)
 			if !queue_response(task, response) do return .Done
+		case .Await_Response:
+			result := await_response(task)
+			if result != .Yield do return result
+			continue
 		case .Produce:
 			result := produce_stream(task)
 			if result != .Yield || task.phase == .Produce do return result
@@ -386,6 +398,7 @@ release_upgrade_request :: proc(task: ^Connection_Task) -> bool {
 
 @(private)
 queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
+	if deferred_present(response.deferred) do return queue_deferred(task, response)
 	prepared := response
 	task.upgrade = response.upgrade
 	if stream_present(response.stream) do return queue_stream_response(task, response)
@@ -436,6 +449,7 @@ dispatch_request :: proc(task: ^Connection_Task) -> Response {
 finish_connection :: proc(data: rawptr) {
 	task := cast(^Connection_Task)data
 	keep_alive_leave_idle(task)
+	drop_deferred(task)
 	finish_request_context(task)
 	observe_finish(task)
 	drop_response_stream(task)

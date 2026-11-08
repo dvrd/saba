@@ -73,7 +73,7 @@ next :: proc(data: rawptr, io: ^server.Stream_IO) -> server.Stream_Step {
 	producer.allocations += 1; sync.atomic_add(&producer.state.allocated, 1)
 	sync.atomic_add(&producer.state.live, grant)
 	producer.pending, _ = owned.take_custom(&storage, producer.size, release_bytes, producer)
-	result := server.stream_submit(io, &producer.pending)
+	result := server.stream_submit_backing(io, &producer.pending, {release_frees_storage=true})
 	if result != .Accepted {
 		assert(producer.pending.release != nil, "rejection destroyed producer ownership")
 		return .Failed

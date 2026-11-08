@@ -3,6 +3,7 @@ package saba_core
 import "core:log"
 import rt "base:runtime"
 import "core:mem"
+import budget "core:sync/budget"
 import "core:net"
 import "core:sync"
 import "core:time"
@@ -19,6 +20,7 @@ ACCEPT_BATCH_LIMIT :: 32
 ACCEPT_RETRY_INTERVAL :: 100 * time.Millisecond
 
 Server :: struct {
+	resources: Resource_Config,
 	address:              string,
 	port:                 int,
 	// Admission ceiling; zero selects DEFAULT_MAX_CONNECTIONS.
@@ -47,6 +49,8 @@ Server :: struct {
 }
 
 Server_Runtime :: struct {
+	resources: budget.Scope,
+	operation_limits, connection_limits: budget.Limits,
 	config:                                  Server,
 	cancellation: ^Server_Cancellation,
 	logger:                                  log.Logger,
@@ -119,6 +123,8 @@ serve :: proc(config: Server) -> bool {
 		logger = context.logger,
 		capacity_state = {current = initial, maximum = maximum},
 	}
+	if !initialize_resources(runtime) do return false
+	defer budget.release_scope(&runtime.resources)
 	if err := async.init(
 		&runtime.executor,
 		{
@@ -238,6 +244,11 @@ server_admit_connection :: proc(runtime: ^Server_Runtime, client: net.TCP_Socket
 		phase = .Adopt,
 		connection = {socket = client, _timeouts = runtime.timeouts},
 	}
+	if !start_connection_resources(task) {
+		server_capacity_allocation_failed(runtime)
+		budget.release_scope(&task.resource_connection)
+		reject_connection(client); free(task); return
+	}
 	init_connection_arena(task)
 	task.task = {
 		resume  = handle_connection,
@@ -252,6 +263,8 @@ server_admit_connection :: proc(runtime: ^Server_Runtime, client: net.TCP_Socket
 		server_capacity_allocation_failed(runtime)
 		reject_connection(client)
 		mem.dynamic_arena_destroy(&task.arena)
+		finish_operation_resources(task)
+		budget.release_scope(&task.resource_connection)
 		free(task)
 	}
 }

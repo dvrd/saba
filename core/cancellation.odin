@@ -3,6 +3,7 @@ package saba_core
 import rt "base:runtime"
 import "core:mem"
 import "core:sync"
+import budget "core:sync/budget"
 import "core:time"
 import async "shared:async"
 
@@ -31,6 +32,8 @@ Server_Cancellation :: struct {
 }
 @(private)
 Request_Cancellation :: struct {
+	resources: budget.Scope,
+	connection_resources: budget.Scope,
 	references: i64,
 	status:     Request_Status,
 	deadline:   time.Tick,
@@ -50,6 +53,7 @@ release_request_context :: proc(owner: ^Request_Context) {
 	node := owner._state; owner^ = {}
 	if node == nil do return
 	if sync.atomic_sub(&node.references, 1) == 1 {
+		budget.release_scope(&node.resources)
 		release_server_cancellation(node.server)
 		free(node, node.allocator)
 	}
@@ -119,6 +123,7 @@ release_server_cancellation :: proc(state: ^Server_Cancellation) {
 shutdown_runtime :: proc(runtime: ^Server_Runtime) {
 	if runtime.cancellation != nil do sync.atomic_store(&runtime.cancellation.stopping, true)
 	// Existing shutdown owns sockets, task cancellation and worker joins.
+	if budget.same_scope(runtime.resources, runtime.resources) do _ = budget.close(runtime.resources)
 	async.shutdown(&runtime.executor)
 }
 
@@ -129,6 +134,14 @@ begin_request_context :: proc(task: ^Connection_Task) -> bool {
 	if task.runtime.config.handler_timeout > 0 do deadline = time.tick_add(time.tick_now(), task.runtime.config.handler_timeout)
 	ctx, ok := new_request_context(task.runtime.cancellation, deadline, rt.heap_allocator())
 	if !ok do return false
+	if budget.same_scope(task.resource_operation, task.resource_operation) {
+		owner, error := budget.retain_scope(task.resource_operation)
+		if error != .None {release_request_context(&ctx); return false}
+		ctx._state.resources = owner
+		if budget.covers(owner, task.resource_connection) {
+			ctx._state.connection_resources = task.resource_connection
+		}
+	}
 	task.request.cancellation = ctx
 	return true
 }
@@ -153,4 +166,16 @@ finish_request_context :: proc(task: ^Connection_Task) {
 server_cancellation_expired :: proc(state: ^Server_Cancellation) -> bool {
 	at := sync.atomic_load(&state.drain_at)
 	return at != 0 && deadline_expired(time.tick_add({}, time.Duration(at)))
+}
+
+// Borrowed while the retained context lives; retain for an independent owner.
+request_resources :: proc(ctx: Request_Context) -> budget.Scope {
+	if ctx._state == nil do return {}
+	return ctx._state.resources
+}
+
+// Borrowed through the retained operation's parent link, never a raw connection.
+request_connection_resources :: proc(ctx: Request_Context) -> budget.Scope {
+	if ctx._state == nil do return {}
+	return ctx._state.connection_resources
 }

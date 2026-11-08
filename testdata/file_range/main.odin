@@ -3,6 +3,7 @@ package main
 import rt "base:runtime"
 import "core:fmt"
 import "core:mem"
+import charged "core:mem/budget"
 import "core:os"
 import "core:strconv"
 import "core:strings"
@@ -21,7 +22,9 @@ State :: struct {
 state: State
 
 allocate :: proc(data: rawptr, mode: mem.Allocator_Mode, size, alignment: int, old: rawptr, old_size: int, loc:=#caller_location) -> ([]u8, mem.Allocator_Error) {
-	assert(size <= 16384, "file stream requested more than one configured chunk")
+	maximum, validation := charged.allocation_cost(16384, mem.DEFAULT_ALIGNMENT)
+	assert(validation.kind == .None)
+	assert(size <= int(maximum), "file backing exceeds one chunk plus accounting overhead")
 	backing := rt.heap_allocator()
 	bytes, error := backing.procedure(backing.data, mode, size, alignment, old, old_size, loc)
 	if error == nil {

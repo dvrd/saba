@@ -145,10 +145,15 @@ keep_alive_next_request :: #force_no_inline proc(task: ^Connection_Task) -> bool
 	task.output = {}
 	task.header = nil
 	mem.dynamic_arena_destroy(&task.arena)
-	init_connection_arena(task)
+	finish_operation_resources(task)
 	task.observed, task.observation_finished, task.response_finished = false,false,false
 	task.event = {}
 	task.observed_at = {}
+	if !start_operation_resources(task) {
+		if count > 0 do return keep_alive_resource_reject(task, count)
+		return false
+	}
+	init_connection_arena(task)
 	task.header_used, task.body_used = 0,0
 	task.output_index, task.output_offset = 0,0
 	task.reuse_after_write = false
@@ -156,7 +161,10 @@ keep_alive_next_request :: #force_no_inline proc(task: ^Connection_Task) -> bool
 	task.header = task.initial_header[:]
 	if count > len(task.header) {
 		buffer, err := make([]u8,count,mem.dynamic_arena_allocator(&task.arena))
-		if err != nil do return false
+		if err != nil {
+			if resource_pressure(task) do return keep_alive_resource_reject(task, count)
+			return false
+		}
 		task.header = buffer
 	}
 	copy(task.header,saved[:count])
@@ -166,4 +174,11 @@ keep_alive_next_request :: #force_no_inline proc(task: ^Connection_Task) -> bool
 	task.connection.write_deadline = {}
 	task.phase = .Idle
 	return keep_alive_enter_idle(task)
+}
+
+@(private)
+keep_alive_resource_reject :: proc(task: ^Connection_Task, count: int) -> bool {
+	if !keep_alive_begin_request(task, 0) do return false
+	if task.observed do task.event.bytes_received = u64(count)
+	return resource_reject(task)
 }

@@ -5,6 +5,8 @@ import http "../../http"
 import rt "base:runtime"
 import "core:fmt"
 import "core:mem"
+import charged "core:mem/budget"
+import budget "core:sync/budget"
 import owned "core:mem/owned"
 import "core:net"
 import "core:os"
@@ -99,11 +101,14 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 	}
 	response := make_response(request, status, headers[:count])
 	if response.status == .Internal_Server_Error do return response
-	allocator := config.allocator
-	if allocator.procedure == nil do allocator = rt.heap_allocator()
+	allocator, binding, prepared := file_storage_allocator(request, config.allocator)
+	if !prepared do return {status=.Internal_Server_Error}
 	producer, error := new(File_Producer, allocator)
-	if error != nil || producer == nil do return {status=.Internal_Server_Error}
-	producer^ = {file=file, offset=start, remaining=length, chunk_bytes=chunk_bytes, allocator=allocator}
+	if error != nil || producer == nil {
+		charged.release(&binding); return {status=.Internal_Server_Error}
+	}
+	producer^ = {file=file, offset=start, remaining=length, chunk_bytes=chunk_bytes,
+		allocator=allocator, binding=binding}
 	response.stream = {
 		data=producer, next=file_next, drop=file_drop, content_length=length,
 		max_chunk_bytes=chunk_bytes, max_body_bytes=max(i64(1), length), timeout=config.timeout,
@@ -114,6 +119,7 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 
 @(private)
 File_Producer :: struct {
+	binding: charged.Binding,
 	file: ^os.File,
 	offset, remaining: i64,
 	chunk_bytes: int,
@@ -146,7 +152,7 @@ file_next :: proc(data: rawptr, io: ^core.Stream_IO) -> core.Stream_Step {
 	if error != nil || n != count do return .Failed
 	chunk := owned.Chunk{data=producer.storage[:n], storage=producer.storage, release=file_release, user_data=producer}
 	producer.borrowed = true
-	if core.stream_submit(io, &chunk) != .Accepted {
+	if core.stream_submit_backing(io, &chunk, {allocator=producer.allocator}) != .Accepted {
 		owned.destroy(&chunk)
 		return .Failed
 	}
@@ -160,7 +166,9 @@ file_drop :: proc(data: rawptr) {
 	assert(!producer.borrowed)
 	os.close(producer.file)
 	delete(producer.storage, producer.allocator)
-	mem.free_with_size(producer, size_of(File_Producer), producer.allocator)
+	allocator, binding := producer.allocator, producer.binding
+	mem.free_with_size(producer, size_of(File_Producer), allocator)
+	charged.release(&binding)
 }
 
 @(private)
@@ -206,4 +214,26 @@ file_request_range :: proc(request: ^Request, size: i64, tag: string) -> http.By
 	// Dates/weak/malformed/unknown validators always fall back to a full 200.
 	if conditions == 1 && (tag == "" || condition != tag) do return {}
 	return http.byte_range(value, size)
+}
+
+// The ordinary request arena cannot free individual producer allocations. Use
+// its retained backing Binding, or wrap an explicit host backing allocator.
+@(private)
+file_storage_allocator :: proc(
+	request: ^Request, configured: mem.Allocator,
+) -> (mem.Allocator, charged.Binding, bool) {
+	managed := budget.same_scope(request.resources, request.resources)
+	if configured.procedure == nil {
+		allocator := request.backing_allocator
+		if allocator.procedure == nil do allocator = rt.heap_allocator()
+		return allocator, {}, true
+	}
+	if !managed do return configured, {}, true
+	if charged.is_managed_allocator(configured) {
+		scope, valid := charged.allocator_scope(configured)
+		return configured, {}, valid && budget.covers(scope, request.resources)
+	}
+	binding, error := charged.create(request.resources, {backing=configured})
+	if error.kind != .None do return {}, {}, false
+	return charged.allocator(binding), binding, true
 }

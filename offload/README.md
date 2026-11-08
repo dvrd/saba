@@ -36,9 +36,12 @@ runtime/task pointers in Work.
 A zero timeout inherits the server response timeout. A positive timeout is a total
 pre-header budget, capped by the request's handler deadline. Expiry produces 408
 and closes; peer close, shutdown and drain retire the continuation. A deadline
-cannot interrupt host IO or crypto. Fixed slots bound job counts, including held
-results, rather than the total bytes allocated by host callbacks. Global byte
-admission is separate work.
+cannot interrupt host IO or crypto. Fixed slots remain a separate local queue bound.
+Managed server scopes now also
+admit retained jobs and charge declared/managed backing across operation,
+connection and global ancestors. See [RESOURCES.md](../RESOURCES.md).
+The original response procedure type remains intact; response_with_unmanaged_bytes
+adds an explicit charge for host backing not already managed by a Binding.
 
 The owning loopback fixture in `../testdata/offload` demonstrates two blocked job
 workers/four slots with one network worker, explicit overload, late cleanup and

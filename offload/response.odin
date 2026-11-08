@@ -13,20 +13,19 @@ import signal "shared:async/signal"
 Build :: #type proc(data: rawptr, allocator: mem.Allocator) -> (server.Response, bool)
 @(private)
 State :: struct {
-	lane:    ^pool.Pool,
-	work:    pool.Work,
-	handle:  pool.Handle,
-	build:   Build,
-	started: bool,
+	lane:            ^pool.Pool,
+	work:            pool.Work,
+	handle:          pool.Handle,
+	build:           Build,
+	started:         bool,
+	unmanaged_bytes: u64,
 }
 @(private)
 Notice :: struct {
 	signal: signal.Signal,
 }
 
-// Success transfers work immediately, even before submission on the first
-// owner poll. Failure preserves work. The pool and host dependencies outlive
-// every job, including non-interruptible work after connection shutdown.
+// Preserve the original procedure signature for existing callback tables.
 response :: proc(
 	lane: ^pool.Pool,
 	work: ^pool.Work,
@@ -36,13 +35,33 @@ response :: proc(
 	server.Response,
 	bool,
 ) {
-	if lane == nil || work == nil || work.run == nil ||
-	   (work.data != nil && work.drop == nil) || build == nil {
+	return response_with_unmanaged_bytes(lane, work, build, timeout)
+}
+
+// Success transfers work immediately, even before submission on the first
+// owner poll. Failure preserves work. The pool and host dependencies outlive
+// every job, including non-interruptible work after connection shutdown.
+response_with_unmanaged_bytes :: proc(
+	lane: ^pool.Pool,
+	work: ^pool.Work,
+	build: Build,
+	timeout: time.Duration = 0,
+	unmanaged_bytes: u64 = 0,
+) -> (
+	server.Response,
+	bool,
+) {
+	if lane == nil ||
+	   work == nil ||
+	   work.run == nil ||
+	   (work.data != nil && work.drop == nil) ||
+	   build == nil {
 		return {}, false
 	}
 	state, error := new(State, rt.heap_allocator())
 	if error != nil || state == nil do return {}, false
-	state.lane, state.work, state.build = lane, work^, build; work^ = {}
+	state.lane, state.work, state.build = lane, work^, build
+	state.unmanaged_bytes = unmanaged_bytes; work^ = {}
 	return {deferred = {data = state, poll = poll_result, drop = drop, timeout = timeout}}, true
 }
 
@@ -64,11 +83,13 @@ start :: proc(state: ^State, io: ^server.Deferred_IO) -> pool.Error {
 	}
 	notice.signal = retained
 	notification := pool.Notification{notice, wake, drop_notice}
-	handle, admission := pool.submit(
+	handle, admission := pool.submit_scoped(
 		state.lane,
 		&state.work,
 		&notification,
 		server.request_deadline(io.cancellation),
+		io.resources,
+		state.unmanaged_bytes,
 	)
 	if admission != .None {
 		drop_notice(notice); return admission

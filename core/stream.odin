@@ -5,6 +5,7 @@ import exchange "../../http/exchange"
 import http1 "../../http/v1"
 import rt "base:runtime"
 import "core:mem"
+import budget "core:sync/budget"
 import owned "core:mem/owned"
 import "core:strconv"
 import "core:time"
@@ -39,6 +40,8 @@ Response_Stream :: struct {
 // All fields/views are borrowed only until next returns. Use stream_wait for
 // timer suspension; raw runtime/task pointers must not escape into host jobs.
 Stream_IO :: struct {
+	resources: budget.Scope,
+	backing_allocator: mem.Allocator,
 	runtime:              ^async.Runtime,
 	cancellation:         Request_Context,
 	max_chunk_bytes:      int,
@@ -47,10 +50,19 @@ Stream_IO :: struct {
 	_submitted, _waiting: bool,
 }
 
+Stream_Backing :: exchange.Backing
+
+// Exact legacy procedure type remains usable in callback tables.
 stream_submit :: proc(io: ^Stream_IO, chunk: ^owned.Chunk) -> exchange.Submit_Result {
+	return stream_submit_backing(io, chunk)
+}
+
+stream_submit_backing :: proc(
+	io: ^Stream_IO, chunk: ^owned.Chunk, backing: Stream_Backing = {},
+) -> exchange.Submit_Result {
 	if io == nil || io._exchange == nil || chunk == nil || len(chunk.data) == 0 do return .Invalid
 	if io._submitted || io._waiting do return .Backpressure
-	result := exchange.submit(io._exchange, chunk)
+	result := exchange.submit_backing(io._exchange, chunk, backing)
 	if result == .Accepted do io._submitted = true
 	return result
 }
@@ -80,6 +92,7 @@ stream_present :: proc(producer: Response_Stream) -> bool {
 
 @(private)
 Response_Stream_State :: struct {
+	allocator: mem.Allocator,
 	producer:                   Response_Stream,
 	exchange:                   exchange.Exchange,
 	expires:                    time.Tick,
@@ -96,7 +109,7 @@ drop_response_stream :: proc(task: ^Connection_Task) {
 	exchange.destroy(&old.exchange)
 	producer := old.producer; old.producer = {}
 	if producer.drop != nil do producer.drop(producer.data)
-	free(old, rt.heap_allocator())
+	free(old, old.allocator)
 }
 
 @(private)
@@ -126,12 +139,15 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 		if producer.drop != nil do producer.drop(producer.data)
 		observe_failure(task, .Protocol_Error); return false
 	}
-	state, error := new(Response_Stream_State, rt.heap_allocator())
+	allocator := task.request.backing_allocator
+	if allocator.procedure == nil do allocator = rt.heap_allocator()
+	state, error := new(Response_Stream_State, allocator)
 	if error != nil || state == nil {
 		if producer.drop != nil do producer.drop(producer.data)
+		if resource_pressure(task) do return resource_reject(task)
 		observe_failure(task, .Allocation_Error); return false
 	}
-	state.producer = producer; task.streaming = state
+	state.producer, state.allocator = producer, allocator; task.streaming = state
 	limit := producer.max_chunk_bytes
 	if limit == 0 do limit = 64 * mem.Kilobyte
 	duration := producer.timeout
@@ -150,8 +166,13 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 	state.deadline = async.deadline_after(&task.runtime.executor, remaining)
 	method: http.Method = .GET
 	if task.request.method == "HEAD" do method = .HEAD
-	if exchange.init(&state.exchange, method, {chunk_capacity = 1, max_retained_bytes = limit, max_body_bytes = producer.max_body_bytes}, rt.heap_allocator()).kind !=
-	   .None {
+	if initialized := exchange.init(
+		&state.exchange, method, {chunk_capacity = 1, max_retained_bytes = limit,
+		max_body_bytes = producer.max_body_bytes, scope = task.resource_operation}, allocator,
+	); initialized.kind != .None {
+		if initialized.kind == .Budget_Rejected || resource_pressure(task) {
+			drop_response_stream(task); return resource_reject(task)
+		}
 		observe_failure(task, .Protocol_Error); return false
 	}
 	status := response.status
@@ -162,11 +183,13 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 		content_length = producer.content_length,
 	}
 	if exchange.respond(&state.exchange, head).kind != .None {
+		if resource_pressure(task) {drop_response_stream(task); return resource_reject(task)}
 		observe_failure(task, .Protocol_Error); return false
 	}
 	stored, _ := exchange.head(&state.exchange)
 	buffer, ae := make([]u8, RESPONSE_HEADER_LIMIT, mem.dynamic_arena_allocator(&task.arena))
 	if ae != nil {
+		if resource_pressure(task) {drop_response_stream(task); return resource_reject(task)}
 		observe_failure(task, .Allocation_Error); return false
 	}
 	task.reuse_after_write = !response.close_connection && response_can_reuse(task, status)
@@ -210,6 +233,8 @@ produce_stream :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		return .Done
 	}
 	io := Stream_IO {
+		resources = task.resource_operation,
+		backing_allocator = task.request.backing_allocator,
 		runtime         = &task.runtime.executor,
 		cancellation    = task.request.cancellation,
 		max_chunk_bytes = state.max_chunk_bytes,

@@ -5,6 +5,8 @@ import http "../../http"
 import http1 "../../http/v1"
 import "core:log"
 import "core:mem"
+import charged "core:mem/budget"
+import budget "core:sync/budget"
 import "core:net"
 import "core:strings"
 import "core:sync"
@@ -37,6 +39,9 @@ Connection_Phase :: enum {
 // One task allocation per admitted connection. State remains stable across
 // suspension. Initial header storage is 512 bytes; larger buffers grow on demand.
 Connection_Task :: struct {
+	resource_connection, resource_operation: budget.Scope,
+	resource_binding, resource_transport: charged.Binding,
+	resource_emergency: [128]u8,
 	task:                               async.Task,
 	runtime:                            ^Server_Runtime,
 	connection:                         Connection,
@@ -127,7 +132,10 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 					min(len(task.header) * 2, REQUEST_HEADER_LIMIT),
 					context.temp_allocator,
 				)
-				if allocation_error != nil {observe_failure(task, .Allocation_Error); return .Done}
+				if allocation_error != nil {
+					if resource_pressure(task) {resource_reject(task); continue}
+					observe_failure(task, .Allocation_Error); return .Done
+				}
 				copy(grown, task.header)
 				task.header = grown
 			}
@@ -301,10 +309,15 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 	// retaining the maximum table for every idle connection.
 	count := min(strings.count(raw[:end], CRLF), REQUEST_HEADER_COUNT_LIMIT)
 	headers, header_error := make([]Header, count, allocator)
-	if header_error != nil {observe_failure(task, .Allocation_Error); return false}
+	if header_error != nil {
+		if resource_pressure(task) do return resource_reject(task)
+		observe_failure(task, .Allocation_Error); return false
+	}
 	request, status := parse_request(raw, headers)
 	task.request = request
 	task.request.allocator = allocator
+	task.request.resources = task.resource_operation
+	task.request.backing_allocator = charged.allocator(task.resource_binding)
 	task.request.request_id = task.event.request_id
 	task.request._observe = task.observed
 	if status != .None {
@@ -323,6 +336,7 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 	if request.chunked do body_capacity = min(limit, http.MAX_BODY_SIZE)
 	body, body_error := make([]u8, body_capacity, allocator)
 	if body_error != nil {
+		if resource_pressure(task) do return resource_reject(task)
 		observe_failure(task, .Allocation_Error); return false
 	}
 	task.request.body = body
@@ -333,6 +347,7 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 	if request.chunked {
 		state, allocation_error := new(Chunk_Request, allocator)
 		if allocation_error != nil {
+			if resource_pressure(task) do return resource_reject(task)
 			observe_failure(task, .Allocation_Error); return false
 		}
 		if http1.chunk_decoder_init(&state.decoder, u64(body_capacity)).kind != .None do return false
@@ -350,7 +365,7 @@ task_read :: proc(task: ^Connection_Task, destination: []u8) -> (int, async.Erro
 		if task.observed && !task.upgrade_established do task.event.bytes_received += u64(n)
 		task.connection.read_buffer = buffered[n:]
 		if len(task.connection.read_buffer) == 0 && task.upgrade_prefetched != nil {
-			delete(task.upgrade_prefetched, rt.heap_allocator())
+			delete(task.upgrade_prefetched, connection_storage_allocator(task))
 			task.upgrade_prefetched = nil
 		}
 		return n, {}
@@ -362,10 +377,13 @@ task_read :: proc(task: ^Connection_Task, destination: []u8) -> (int, async.Erro
 
 @(private)
 init_connection_arena :: proc(task: ^Connection_Task) {
+	allocator := charged.allocator(task.resource_binding)
+	if allocator.procedure == nil do allocator = charged.allocator(task.resource_transport)
+	if allocator.procedure == nil do allocator = rt.heap_allocator()
 	mem.dynamic_arena_init(
 		&task.arena,
-		block_allocator = rt.heap_allocator(),
-		array_allocator = rt.heap_allocator(),
+		block_allocator = allocator,
+		array_allocator = allocator,
 		block_size = 16 * mem.Kilobyte,
 		out_band_size = 8 * mem.Kilobyte,
 	)
@@ -377,7 +395,9 @@ release_upgrade_request :: proc(task: ^Connection_Task) -> bool {
 	observe_finish(task)
 	buffered := task.connection.read_buffer
 	if len(buffered) > 0 {
-		saved, err := make([]u8, len(buffered), rt.heap_allocator())
+		allocator := connection_storage_allocator(task)
+		if allocator.procedure == nil do return false
+		saved, err := make([]u8, len(buffered), allocator)
 		if err != nil do return false
 		copy(saved, buffered)
 		task.upgrade_prefetched = saved
@@ -391,6 +411,8 @@ release_upgrade_request :: proc(task: ^Connection_Task) -> bool {
 	task.header = nil
 	task.output = {}
 	mem.dynamic_arena_destroy(&task.arena)
+	finish_operation_resources(task)
+	if connection_storage_allocator(task).procedure == nil do return false
 	init_connection_arena(task)
 	task.upgrade_established = true
 	return true
@@ -398,10 +420,25 @@ release_upgrade_request :: proc(task: ^Connection_Task) -> bool {
 
 @(private)
 queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
-	if deferred_present(response.deferred) do return queue_deferred(task, response)
+	if resource_pressure(task) {
+		discarded := response; discard_response(&discarded)
+		return resource_reject(task, resource_failure_status(response.status))
+	}
+	if deferred_present(response.deferred) {
+		if queue_deferred(task, response) do return true
+		if resource_pressure(task) {drop_deferred(task); return resource_reject(task)}
+		return false
+	}
 	prepared := response
 	task.upgrade = response.upgrade
 	if stream_present(response.stream) do return queue_stream_response(task, response)
+	if !resource_copy_response(task, &prepared) {
+		drop_upgrade(task)
+		if resource_pressure(task) {
+			return resource_reject(task, resource_failure_status(response.status))
+		}
+		observe_failure(task, .Allocation_Error); return false
+	}
 	if (task.upgrade.resume != nil || task.upgrade.drop != nil || task.upgrade.data != nil) &&
 		(prepared.status != .Switching_Protocols || task.upgrade.resume == nil) {
 		drop_upgrade(task)
@@ -413,7 +450,12 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 		RESPONSE_HEADER_LIMIT,
 		mem.dynamic_arena_allocator(&task.arena),
 	)
-	if allocation_error != nil {observe_failure(task, .Allocation_Error); return false}
+	if allocation_error != nil {
+		if resource_pressure(task) {
+			drop_upgrade(task); return resource_reject(task, resource_failure_status(prepared.status))
+		}
+		observe_failure(task, .Allocation_Error); return false
+	}
 	task.reuse_after_write = !prepared.close_connection && response_can_reuse(task,prepared.status)
 	headers, ok := response_headers(prepared, buffer,task.reuse_after_write)
 	if !ok {observe_failure(task, .Protocol_Error); return false}
@@ -449,6 +491,9 @@ dispatch_request :: proc(task: ^Connection_Task) -> Response {
 finish_connection :: proc(data: rawptr) {
 	task := cast(^Connection_Task)data
 	keep_alive_leave_idle(task)
+	if budget.same_scope(task.resource_connection, task.resource_connection) {
+		_ = budget.close(task.resource_connection)
+	}
 	drop_deferred(task)
 	finish_request_context(task)
 	observe_finish(task)
@@ -456,8 +501,13 @@ finish_connection :: proc(data: rawptr) {
 	drop_upgrade(task)
 	if task.native_pending do net.close(task.connection.socket)
 	// The runtime has already closed adopted sockets and removed readiness.
-	delete(task.upgrade_prefetched, rt.heap_allocator())
+	if task.upgrade_prefetched != nil {
+		delete(task.upgrade_prefetched, connection_storage_allocator(task))
+	}
 	mem.dynamic_arena_destroy(&task.arena)
+	finish_operation_resources(task)
+	charged.release(&task.resource_transport)
+	budget.release_scope(&task.resource_connection)
 	sync.atomic_sub(&task.runtime.active_connections, 1)
 	drain_connection_finished(task.runtime)
 	free(task)

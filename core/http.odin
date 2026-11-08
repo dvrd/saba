@@ -5,6 +5,7 @@ import http1 "../../http/v1"
 import "core:encoding/json"
 import "core:log"
 import "core:mem"
+import budget "core:sync/budget"
 import "core:strings"
 
 CRLF :: http1.CRLF
@@ -22,6 +23,9 @@ Path_Parameter :: struct {
 }
 
 Request :: struct {
+	// Borrowed during owner calls; retain scope/create Binding before escape.
+	resources: budget.Scope,
+	backing_allocator: mem.Allocator,
 	allocator:            mem.Allocator,
 	// Borrowed until handler return; retain explicitly for independently owned work.
 	cancellation: Request_Context,

@@ -15,6 +15,7 @@ import "core:time"
 Handler :: #type proc(conn:^Connection,request:^Request)->Response
 
 Server :: struct {
+	resources: Resource_Config,
 	address: string,
 	port: int,
 	max_connections, initial_connections: int,
@@ -78,7 +79,8 @@ serve :: proc(config:Server)->bool {
 		watcher=thread.create_and_start_with_poly_data(&application.reload,dev.watch_web)
 		if watcher==nil do return false
 	}
-	return core.serve({address=config.address,port=config.port,max_connections=config.max_connections,
+	return core.serve({resources=config.resources,
+		address=config.address,port=config.port,max_connections=config.max_connections,
 		initial_connections=config.initial_connections,runtime_allocator=config.runtime_allocator,
 		handler=facade_dispatch,handler_data=&application,request_body_limit=config.request_body_limit,
 		workers=config.workers,control=config.control,timeouts=config.timeouts,handler_timeout=config.handler_timeout,keep_alive=config.keep_alive,

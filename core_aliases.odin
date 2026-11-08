@@ -80,3 +80,17 @@ streaming_response :: core.streaming_response
 Deferred_Response :: core.Deferred_Response
 Deferred_IO :: core.Deferred_IO
 Deferred_Step :: core.Deferred_Step
+
+Resource_Config :: core.Resource_Config
+server_resources :: core.server_resources
+retain_server_resources :: core.retain_server_resources
+request_resources :: core.request_resources
+
+Stream_Backing :: core.Stream_Backing
+
+stream_submit_backing :: core.stream_submit_backing
+DEFAULT_OPERATION_RESOURCES :: core.DEFAULT_OPERATION_RESOURCES
+DEFAULT_CONNECTION_RESOURCES :: core.DEFAULT_CONNECTION_RESOURCES
+DEFAULT_SERVER_RESOURCES :: core.DEFAULT_SERVER_RESOURCES
+
+request_connection_resources :: core.request_connection_resources

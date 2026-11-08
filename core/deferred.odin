@@ -1,6 +1,7 @@
 package saba_core
 
 import "core:mem"
+import budget "core:sync/budget"
 import "core:time"
 import async "shared:async"
 import signal "shared:async/signal"
@@ -28,6 +29,8 @@ Deferred_Response :: struct {
 // before retiring the continuation or connection. Copy final bytes into allocator
 // before releasing job ownership. Never let work borrow allocator or request data.
 Deferred_IO :: struct {
+	resources: budget.Scope,
+	backing_allocator: mem.Allocator,
 	allocator:    mem.Allocator,
 	cancellation: Request_Context,
 	wake:         signal.Signal,
@@ -111,6 +114,8 @@ await_response :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		return .Yield
 	}
 	io := Deferred_IO {
+		resources = task.resource_operation,
+		backing_allocator = task.request.backing_allocator,
 		allocator    = mem.dynamic_arena_allocator(&task.arena),
 		cancellation = task.request.cancellation,
 		wake         = task.deferred_signal,
@@ -127,6 +132,9 @@ await_response :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	if step != .Ready {
 		discard_response(&response)
 		if step == .Failed {
+			if resource_pressure(task) {
+				drop_deferred(task); resource_reject(task); return .Yield
+			}
 			observe_failure(task, .IO_Error); return .Done
 		}
 		return await_peer_or_result(task)
@@ -153,6 +161,7 @@ await_peer_or_result :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		capacity := min(2 * len(task.deferred_buffer), REQUEST_HEADER_LIMIT)
 		buffer, error := make([]u8, capacity, mem.dynamic_arena_allocator(&task.arena))
 		if error != nil {
+			if resource_pressure(task) {drop_deferred(task); resource_reject(task); return .Yield}
 			observe_failure(task, .Allocation_Error); return .Done
 		}
 		copy(buffer, task.deferred_buffer); task.deferred_buffer = buffer

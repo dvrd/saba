@@ -179,3 +179,12 @@ request_connection_resources :: proc(ctx: Request_Context) -> budget.Scope {
 	if ctx._state == nil do return {}
 	return ctx._state.connection_resources
 }
+
+// Independent of the request's stable terminal status. A retained request
+// context can observe graceful drain or immediate stop after HTTP upgrade.
+// Nil/unavailable contexts return false; no request arena or Runtime is retained.
+request_server_stopping :: proc(ctx: Request_Context) -> bool {
+	if ctx._state == nil || ctx._state.server == nil do return false
+	server := ctx._state.server
+	return sync.atomic_load(&server.stopping) || sync.atomic_load(&server.drain_at) != 0
+}

@@ -1,6 +1,5 @@
 package saba_core
 
-import rt "base:runtime"
 import async "shared:async"
 
 // Returning an upgrade transfers data to the server even if the101 write fails.
@@ -49,7 +48,7 @@ drop_upgrade :: proc(task:^Connection_Task) {
 @(private)
 upgrade_resume_finished :: proc(task:^Connection_Task) {
 	if len(task.connection.read_buffer)==0 && task.upgrade_prefetched!=nil {
-		delete(task.upgrade_prefetched,rt.heap_allocator())
+		delete(task.upgrade_prefetched,connection_storage_allocator(task))
 		task.upgrade_prefetched=nil
 		task.connection.read_buffer=nil
 	}

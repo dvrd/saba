@@ -4,6 +4,14 @@ import "core:fmt"
 import "core:testing"
 import "core:time"
 
+// Disabled benchmarks still need file imports to be referenced under strict vet.
+@(private)
+observability_benchmark_imports :: proc() {
+	_ = fmt.printf
+	_ = testing.expect
+	_ = time.tick_now
+}
+
 when #config(SABA_OBSERVABILITY_BENCHMARK, false) {
 // Explicitly select this benchmark; no network/provider state is involved.
 @(test)

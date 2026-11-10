@@ -20,6 +20,7 @@ ACCEPT_BATCH_LIMIT :: 32
 ACCEPT_RETRY_INTERVAL :: 100 * time.Millisecond
 
 Server :: struct {
+	tls: ^TLS_Config,
 	resources: Resource_Config,
 	address:              string,
 	port:                 int,
@@ -78,6 +79,7 @@ Server_Runtime :: struct {
 // Handler and handler_data must remain valid until serve returns.
 // Returns false on startup failure or an unrecoverable listener error.
 serve :: proc(config: Server) -> bool {
+	if !tls_config_valid(config.tls) {log.error("Invalid TLS configuration"); return false}
 	if !claim_server(config.control) {
 		log.error("Server control is already in use"); return false
 	}
@@ -163,7 +165,7 @@ serve :: proc(config: Server) -> bool {
 	}
 	publish_server(config.control, runtime, endpoint)
 	async.wake(&runtime.executor, &runtime.accept_task)
-	log.infof("listening on http://localhost:%d", endpoint.port)
+	log.infof("listening on %s://localhost:%d", "https" if config.tls != nil else "http", endpoint.port)
 	err := async.run(&runtime.executor)
 	if err.kind != .None && !(err.kind == .Stopping && server_stop_requested(config.control)) {
 		log.error("Server runtime failed:", err)
@@ -212,8 +214,9 @@ accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 }
 
 @(private)
-reject_connection :: proc(client: net.TCP_Socket) {
+reject_connection :: proc(client: net.TCP_Socket, secure: bool) {
 	defer net.close(client)
+	if secure do return
 	if net.set_blocking(client, false) != nil do return
 	buffer: [RESPONSE_HEADER_LIMIT]u8
 	headers, ready := response_headers(Response{status = .Service_Unavailable}, buffer[:])
@@ -229,14 +232,14 @@ server_admit_connection :: proc(runtime: ^Server_Runtime, client: net.TCP_Socket
 	sync.lock(&runtime.drain_mutex)
 	allowed := !runtime.draining
 	sync.unlock(&runtime.drain_mutex)
-	if !allowed {reject_connection(client); return}
+	if !allowed {reject_connection(client, runtime.config.tls != nil); return}
 	if !server_capacity_admit(runtime) {
-		reject_connection(client); return
+		reject_connection(client, runtime.config.tls != nil); return
 	}
 	task, allocation_error := new(Connection_Task)
 	if allocation_error != nil {
 		server_capacity_allocation_failed(runtime)
-		reject_connection(client); return
+		reject_connection(client, runtime.config.tls != nil); return
 	}
 	task^ = {
 		runtime = runtime,
@@ -247,13 +250,14 @@ server_admit_connection :: proc(runtime: ^Server_Runtime, client: net.TCP_Socket
 	if !start_connection_resources(task) {
 		server_capacity_allocation_failed(runtime)
 		budget.release_scope(&task.resource_connection)
-		reject_connection(client); free(task); return
+		reject_connection(client, runtime.config.tls != nil); free(task); return
 	}
 	init_connection_arena(task)
 	task.task = {
 		resume  = handle_connection,
 		data    = task,
 		on_done = finish_connection,
+		on_cancel = connection_cancel,
 	}
 	// Publish fully initialized storage. Adoption happens inside its first
 	// resume, so shutdown can safely dispose even an unexecuted task.
@@ -261,7 +265,7 @@ server_admit_connection :: proc(runtime: ^Server_Runtime, client: net.TCP_Socket
 	if async.spawn(&runtime.executor, &task.task).kind != .None {
 		sync.atomic_sub(&runtime.active_connections, 1)
 		server_capacity_allocation_failed(runtime)
-		reject_connection(client)
+		reject_connection(client, runtime.config.tls != nil)
 		mem.dynamic_arena_destroy(&task.arena)
 		finish_operation_resources(task)
 		budget.release_scope(&task.resource_connection)

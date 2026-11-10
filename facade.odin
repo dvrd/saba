@@ -9,7 +9,12 @@ import "core:time"
 
 Handler :: #type proc(conn:^Connection,request:^Request)->Response
 
+TLS_Config :: core.TLS_Config
+TLS_Event :: core.TLS_Event
+TLS_Event_Kind :: core.TLS_Event_Kind
+
 Server :: struct {
+	tls: ^TLS_Config,
 	resources: Resource_Config,
 	address: string,
 	port: int,
@@ -41,7 +46,7 @@ serve :: proc(config:Server)->bool {
  snapshot:=config
  return application.serve({
   server={
-   resources=config.resources,address=config.address,port=config.port,
+   tls=config.tls,resources=config.resources,address=config.address,port=config.port,
    max_connections=config.max_connections,initial_connections=config.initial_connections,
    runtime_allocator=config.runtime_allocator,handler_data=&snapshot,
    request_body_limit=config.request_body_limit,workers=config.workers,

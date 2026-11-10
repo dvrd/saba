@@ -7,6 +7,8 @@ import "core:sys/posix"
 import "core:time"
 
 Connection :: struct {
+	_task: ^Connection_Task,
+	_secure: bool,
 	socket:         net.TCP_Socket,
 	read_buffer:    []u8,
 	read_deadline:  time.Tick,
@@ -75,6 +77,7 @@ read_connection :: proc(
 	received: int,
 	err: net.TCP_Recv_Error,
 ) {
+	if conn._secure && len(conn.read_buffer) == 0 do return 0, .Unknown
 	for {
 		if deadline_expired(conn.read_deadline) do return 0, .Timeout
 
@@ -98,6 +101,7 @@ read_connection :: proc(
 }
 
 write_connection :: proc(conn: ^Connection, data: []u8) -> (sent: int, err: net.TCP_Send_Error) {
+	if conn._secure do return 0, .Unknown
 	for {
 		if deadline_expired(conn.write_deadline) do return sent, .Timeout
 		if sent == len(data) do return sent, nil

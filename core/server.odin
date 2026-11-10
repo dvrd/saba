@@ -25,6 +25,7 @@ Handler :: #type proc(data:rawptr, conn: ^Connection, request: ^Request) -> Resp
 @(private)
 Connection_Phase :: enum {
 	Adopt,
+	Handshake,
 	Headers,
 	Idle,
 	Body,
@@ -45,6 +46,7 @@ Connection_Task :: struct {
 	task:                               async.Task,
 	runtime:                            ^Server_Runtime,
 	connection:                         Connection,
+	tls_state: ^TLS_State,
 	socket:                             async.Socket,
 	native_pending:                     bool,
 	arena:                              mem.Dynamic_Arena,
@@ -80,7 +82,7 @@ Connection_Task :: struct {
 }
 
 @(private)
-handle_connection :: proc(data: rawptr) -> async.Resume_Result {
+handle_http :: proc(data: rawptr) -> async.Resume_Result {
 	task := cast(^Connection_Task)data
 	conn := &task.connection
 	context.logger = task.runtime.logger
@@ -95,16 +97,19 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 			socket, err := async.adopt(&task.runtime.executor, &task.task, conn.socket)
 			if err.kind != .None do return .Done
 			task.socket = socket
+			conn._task = task
 			observe_start(task)
-			task.header = task.initial_header[:]
-			task.header_deadline = async.deadline_after(&task.runtime.executor, task.runtime.timeouts.header)
-			task.header_read_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.header)
-			task.deadline = async.deadline_after(&task.runtime.executor, task.runtime.timeouts.idle)
-			conn.read_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.idle)
-			task.phase = .Headers
+			if task.runtime.config.tls != nil {
+				conn._secure = true
+				task.phase = .Handshake
+				if !tls_begin(task) do return .Done
+				return .Yield
+			}
+			begin_http_headers(task)
+		case .Handshake: return .Waiting
 		case .Idle:
 			if server_is_draining(task.runtime) do return .Done
-			n, err := async.read(task.socket, task.header, task.deadline)
+			n, err := transport_read(task, task.header, task.deadline)
 			if err.kind == .Pending do return .Waiting
 			// Idle timeout/EOF has no admitted request and emits no extra event.
 			if err.kind != .None || n == 0 do return .Done
@@ -139,7 +144,7 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 				copy(grown, task.header)
 				task.header = grown
 			}
-			n, err := async.read(task.socket, task.header[task.header_used:], task.deadline)
+			n, err := transport_read(task, task.header[task.header_used:], task.deadline)
 			if err.kind == .Pending do return .Waiting
 			if err.kind == .Timeout {
 				observe_io_error(task, err)
@@ -193,7 +198,7 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 				continue
 			}
 			if len(conn.read_buffer) == 0 {
-				n, error := async.read(task.socket, task.chunked.input[:], task.deadline)
+				n, error := transport_read(task, task.chunked.input[:], task.deadline)
 				if error.kind == .Pending do return .Waiting
 				if error.kind != .None {
 					observe_io_error(task, error)
@@ -280,7 +285,7 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 				task.output_offset + RESPONSE_WRITE_CHUNK_BYTES,
 				len(data),
 			)]
-			n, err := async.write(task.socket, chunk, task.deadline)
+			n, err := transport_write(task, chunk, task.deadline)
 			if err.kind == .Pending do return .Waiting
 			if task.observed && n > 0 do task.event.bytes_sent += u64(n)
 			if err.kind != .None {
@@ -290,7 +295,8 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 			task.output_offset += n
 		case .Upgrade:
 			if async.cancelled(&task.task) do return .Done
-			io := Upgrade_IO{socket=task.socket,runtime=&task.runtime.executor,connection=&task.connection}
+			io := Upgrade_IO{runtime=&task.runtime.executor,connection=&task.connection}
+			if task.tls_state == nil do io.socket = task.socket
 			result := task.upgrade.resume(task.upgrade.data,&io)
 			upgrade_resume_finished(task)
 			if result != .Yield do return result
@@ -370,7 +376,7 @@ task_read :: proc(task: ^Connection_Task, destination: []u8) -> (int, async.Erro
 		}
 		return n, {}
 	}
-	n, err := async.read(task.socket, destination, task.deadline)
+	n, err := transport_read(task, destination, task.deadline)
 	if task.observed && n > 0 && !task.upgrade_established do task.event.bytes_received += u64(n)
 	return n, err
 }
@@ -505,6 +511,10 @@ finish_connection :: proc(data: rawptr) {
 		delete(task.upgrade_prefetched, connection_storage_allocator(task))
 	}
 	mem.dynamic_arena_destroy(&task.arena)
+	if task.tls_state != nil {
+		mem.zero(task.tls_state, size_of(TLS_State))
+		free(task.tls_state, connection_storage_allocator(task))
+	}
 	finish_operation_resources(task)
 	charged.release(&task.resource_transport)
 	budget.release_scope(&task.resource_connection)

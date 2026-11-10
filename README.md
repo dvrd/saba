@@ -628,3 +628,10 @@ request/response and lifetime APIs. Application code need not copy Saba routing,
 mount preparation, reload supervision or transport state machines into a local
 facade. The existing `shared:saba` database-aware API delegates to this same
 composition and retains its compatibility handler view.
+
+## Native HTTPS
+
+Set `Server.tls` (or `application.Config.server.tls`) to a caller-owned
+`core.TLS_Config` using a validated Core credential store. Nil preserves HTTP.
+See [HTTPS configuration and ownership](core/HTTPS.md) for bounds, rotation,
+shutdown, transport-aware upgrades, typed events and synchronous facade limits.

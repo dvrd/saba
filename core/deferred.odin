@@ -166,8 +166,8 @@ await_peer_or_result :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		}
 		copy(buffer, task.deferred_buffer); task.deferred_buffer = buffer
 	}
-	n, error := async.read(
-		task.socket,
+	n, error := transport_read(
+		task,
 		task.deferred_buffer[task.deferred_used:],
 		task.deferred_deadline,
 	)

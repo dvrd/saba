@@ -90,7 +90,7 @@ resume_session :: proc(data:rawptr,io:^core.Upgrade_IO)->async.Resume_Result {
 			reset_session_read(session,io)
 			return .Yield
 		}
-		n,error:=async.write(io.socket,session.output[session.output_offset:session.output_used],session.deadline)
+		n,error:=core.upgrade_write(io,session.output[session.output_offset:session.output_used],session.deadline)
 		if error.kind==.Pending do return .Waiting
 		if error.kind!=.None do return .Done
 		session.output_offset+=n

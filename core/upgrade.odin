@@ -31,7 +31,11 @@ upgrade_read :: proc(io:^Upgrade_IO,dst:[]u8,deadline:async.Deadline)->(int,asyn
 		io.connection.read_buffer=io.connection.read_buffer[n:]
 		return n,{}
 	}
-	return async.read(io.socket,dst,deadline)
+	if io.connection._task == nil {
+		if io.connection._secure do return 0,{kind=.Unsupported}
+		return async.read(io.socket,dst,deadline)
+	}
+	return transport_read(io.connection._task,dst,deadline)
 }
 
 @(private)
@@ -49,4 +53,13 @@ upgrade_resume_finished :: proc(task:^Connection_Task) {
 		task.upgrade_prefetched=nil
 		task.connection.read_buffer=nil
 	}
+}
+
+// Buffer must remain unchanged through the Pending result and terminal return.
+upgrade_write :: proc(io:^Upgrade_IO,src:[]u8,deadline:async.Deadline)->(int,async.Error) {
+	if io.connection._task == nil {
+		if io.connection._secure do return 0,{kind=.Unsupported}
+		return async.write(io.socket,src,deadline)
+	}
+	return transport_write(io.connection._task,src,deadline)
 }

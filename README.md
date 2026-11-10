@@ -620,3 +620,11 @@ Run `python3 shared/saba/tests/streaming.py --odin ./odin --sanitize address` fr
 the Odin root; `--sanitize thread --workers 4` covers worker concurrency. The
 harness tests the actual example as well as independent HTTP decoding, partial
 writes, exact owner release, pipelining, contract errors, timers and slow readers.
+
+For direct application integration without the legacy database facade, use
+[`shared:saba/application`](application/README.md). Configure its `core.Server`
+with business handler state and selected mounts; import `shared:saba/core` for
+request/response and lifetime APIs. Application code need not copy Saba routing,
+mount preparation, reload supervision or transport state machines into a local
+facade. The existing `shared:saba` database-aware API delegates to this same
+composition and retains its compatibility handler view.

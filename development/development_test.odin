@@ -1,6 +1,7 @@
 package saba_development
 
 import "core:fmt"
+import "core:log"
 import "core:os"
 import "core:strconv"
 import "core:strings"
@@ -101,4 +102,24 @@ development_rebuild_keeps_failed_builds_running_and_cleans_up :: proc(t: ^testin
 		posix.kill(posix.pid_t(pid), posix.Signal(0)) != posix.result(0),
 		"stopping supervisor stops its child",
 	)
+}
+
+@(test)
+explicit_watch_roots_do_not_require_sdk_relative_shared_packages :: proc(t:^testing.T) {
+	context.logger=log.nil_logger() // Missing root rejection is intentional.
+	testing.expect_value(t,development_compiler({compiler="/explicit/compiler"}),
+		"/explicit/compiler")
+	directory,error:=os.make_directory_temp("","saba-watch-roots-*",context.temp_allocator)
+	assert(error==nil)
+	defer _=os.remove_all(directory)
+	roots:=[1]string{directory}
+	paths,valid:=development_paths({package_directory=directory,
+		compiler="/not/executed",watch_directories=roots[:]},"/not/executed")
+	testing.expect(t,valid)
+	testing.expect_value(t,len(paths),2)
+	testing.expect_value(t,paths[1],directory)
+	missing:=[1]string{fmt.tprintf("%s/missing",directory)}
+	_,valid=development_paths({package_directory=directory,
+		watch_directories=missing[:]},"/not/executed")
+	testing.expect(t,!valid)
 }

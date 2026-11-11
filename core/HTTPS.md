@@ -1,7 +1,10 @@
 # Native HTTPS
 
 `Server.tls == nil` retains the existing HTTP listener. Set it to a caller-owned
-`TLS_Config` to serve HTTP/1.1 over native Core TLS 1.3 on that server's port:
+`TLS_Config` to serve native Core TLS 1.3 on that server's port. The listener
+offers `h2` and then `http/1.1`. Negotiated ALPN `h2` maps each HTTP/2 stream
+onto the existing request and response queue. Absent ALPN and `http/1.1` stay
+on the HTTP/1 server. `h3` is not a token on this TCP listener:
 
 ```odin
 import saba "shared:saba/core"
@@ -50,10 +53,21 @@ preemptible inside an individual signature operation.
 
 ## HTTP behavior and upgrades
 
-The listener advertises only `http/1.1`, accepts clients without ALPN, and rejects
-incompatible ALPN offers. HTTP/2 serving remains separate work. Routing, chunked
-requests, streams, deferred responses, assets, pages and development reload all
-use the same plaintext transport operations after TLS authentication.
+The listener offers `h2` before `http/1.1`, accepts clients without ALPN, and
+rejects incompatible ALPN offers. Exact negotiated `h2` uses `shared:http/v2`
+for one buffered stream at a time: frame payload 16 KiB, header block and list
+8 KiB, 128 fields, 4 KiB HPACK table, 64 KiB retained body. The stream lease is
+the connection budget (`min(budget.streams, 1)`). Eight metadata slots retain
+closed streams until the grace barrier is acknowledged; that does not add a
+second exchange lease. Flow-control credit is
+returned through that engine. A stalled body hits the body deadline and
+`RST_STREAM` `CANCEL`. A connection error queues `GOAWAY` and closes that
+connection. Graceful shutdown uses the engine's GOAWAY barrier. Stream,
+deferred, and `101` responses are answered `501` on this path so gzip policy
+stays in `queue_response` and a second stream lease is not taken. This is not
+a claim of public-internet interoperability. Routing, chunked requests,
+streams, deferred responses, assets, pages and development reload continue to
+use the HTTP/1 transport after TLS when ALPN is not `h2`.
 
 Upgrade continuations use `upgrade_read` and `upgrade_write`. A write buffer must
 remain unchanged after Pending until its terminal return. `Upgrade_IO.socket`
@@ -84,4 +98,5 @@ allocation before Core initialization has no initialized TLS-owner event.
 
 Only the restricted Core TLS 1.3 profile is supported: AES128-GCM/SHA256,
 X25519/P-256 and RSA-PSS/P-256 credentials. There is no automatic TLS 1.2 fallback,
-resumption, client-certificate authentication or HTTP/2 serving claim.
+resumption or client-certificate authentication. HTTP/2 here is the local
+ALPN `h2` adapter above, not HTTP/3 and not a public interoperability claim.

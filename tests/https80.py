@@ -32,15 +32,45 @@ def run(command, timeout=90, env=None):
     return record
 
 
+def input_file(path):
+    parts = path.parts
+    if any(part in {'.git', '__pycache__', 'evidence', 'binaries', '.webtools-worktrees',
+                    'odin-cache', '.odin-cache', '.cache'} for part in parts):
+        return False
+    # shared/http/v3 is not an input of this server. Saba speaks HTTP/2.
+    if any(parts[index] == 'http' and parts[index + 1] == 'v3' for index in range(len(parts) - 1)):
+        return False
+    if path.name.startswith('.#') or path.name.endswith('~') or path.suffix in {
+            '.o', '.obj', '.ll', '.bc', '.pdb', '.dwo', '.tmp', '.swp', '.bin'}:
+        return False
+    return True
+
+
+def input_directories(shared, sdk):
+    # Packages this server compiles. The rest of shared/ is not an input.
+    return [
+        shared/'saba', shared/'http', shared/'websocket', shared/'surf',
+        shared/'async', shared/'files', shared/'kakunou', shared/'tls',
+        sdk/'core', sdk/'base/runtime',
+        sdk/'tests/core/crypto/tls/credentials/testdata',
+    ]
+
+
 def input_hashes(shared, sdk):
     paths = {Path(__file__).resolve()}
-    for directory in [shared, sdk/'core', sdk/'base/runtime',
-                      sdk/'tests/core/crypto/tls/credentials/testdata']:
-        paths.update(path for path in directory.rglob('*') if path.is_file() and
-                     not any(part in {'.git', '__pycache__', 'evidence', 'binaries'}
-                             for part in path.parts))
-    paths.update(path for path in SOURCE.rglob('*') if path.is_file())
-    return {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(paths)}
+    for directory in input_directories(shared, sdk):
+        if directory.is_dir():
+            paths.update(path for path in directory.rglob('*') if path.is_file() and input_file(path))
+    hashed = {}
+    for path in sorted(paths):
+        try:
+            data = path.read_bytes()
+        except FileNotFoundError:
+            if path.suffix == '.bin':
+                continue
+            raise
+        hashed[str(path)] = hashlib.sha256(data).hexdigest()
+    return hashed
 
 
 class Server:
@@ -255,6 +285,8 @@ def main():
                 if not selected(name):
                     continue
                 web = temp / ('web-' + mode)
+                if web.exists():
+                    shutil.rmtree(web)
                 web.mkdir()
                 (web/'view.jsx').write_text('export default function View(){return <p>first</p>}')
                 native_mode = 'development' if mode.startswith('wss') else 'core'
@@ -307,7 +339,14 @@ def main():
                         process.kill();process.communicate()
                     case['server'] = server.close()
             assert report['cases'], 'No cases selected'
-            report['inputs_unchanged'] = input_hashes(args.shared.resolve(), sdk) == inputs
+            after = input_hashes(args.shared.resolve(), sdk)
+            report['inputs_unchanged'] = after == inputs
+            if not report['inputs_unchanged']:
+                for path in sorted(set(inputs) ^ set(after)):
+                    print('INPUT_KEY', path)
+                for path in sorted(set(inputs) & set(after)):
+                    if inputs[path] != after[path]:
+                        print('INPUT_CHG', path)
             assert report['inputs_unchanged'], 'Source inputs changed during the wire gate'
             assert hashlib.sha256(compiler.read_bytes()).hexdigest() == report['compiler_sha256']
             report['passed'] = all(case['passed'] for case in report['cases'])

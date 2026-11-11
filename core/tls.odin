@@ -43,7 +43,11 @@ TLS_State :: struct {
 	read_phase: Connection_Phase,
 	read_deadline: async.Deadline,
 	input: [16 * mem.Kilobyte]u8,
-	protocols: [1]string,
+	// Server preference: h2 when the client offers it, otherwise http/1.1.
+	// h3 is not a token on this TCP listener.
+	protocols: [2]string,
+	protocol: [8]u8,
+	protocol_len: int,
 	negotiated: bool,
 	input_at: int,
 	error: net.Connection_Error,
@@ -73,7 +77,7 @@ tls_begin :: proc(task: ^Connection_Task) -> bool {
 	task.tls_state = state
 	if bridge.init_executor(&state.executor, &task.runtime.executor, &task.task).kind != .None do return false
 	if bridge.init_transport(&state.transport, &state.executor, task.socket).kind != .None do return false
-	state.protocols = {"http/1.1"}
+	state.protocols = {"h2", "http/1.1"}
 	settings := tls.Server_Async_Config {
 		store = config.store, handshake_timeout = config.handshake_timeout,
 		close_timeout = config.close_timeout, max_owned_bytes = config.max_owned_bytes,
@@ -122,7 +126,7 @@ tls_event :: proc(task: ^Connection_Task, kind: TLS_Event_Kind) {
 	event := TLS_Event {kind = kind, handshake_complete = state.ready,
 		error = state.error, close_error = state.close.result.err,
 	failure = tls.server_async_failure(&state.owner),
-		negotiated_protocol = "http/1.1" if state.negotiated else "",
+		negotiated_protocol = string(state.protocol[:state.protocol_len]),
 		stats = tls.server_async_stats(&state.owner), callbacks = state.executor.callbacks,
 		write_waits = state.executor.write_waits, transport_partial_writes = state.executor.partial_writes}
 	config.on_event(config.data, &event)
@@ -163,9 +167,22 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 			tls_event(task, .Handshake); tls_start_close(task, false)
 		} else if bridge.set_request_budget(&state.executor, {}).kind == .None {
 			state.ready = true
-			state.negotiated = tls.server_async_connection_state(&state.owner).negotiated_protocol == "http/1.1"
+			selected := tls.server_async_connection_state(&state.owner).negotiated_protocol
+			state.protocol_len = 0
+			if selected == "h2" || selected == "http/1.1" {
+				state.protocol_len = copy(state.protocol[:], selected)
+			}
+			state.negotiated = state.protocol_len > 0
 			tls_event(task, .Handshake)
-			begin_http_headers(task)
+			if selected == "h2" {
+				if !h2_begin(task) {
+					tls_start_close(task, false)
+				} else {
+					task.phase = .HTTP2
+				}
+			} else {
+				begin_http_headers(task)
+			}
 		}
 	}
 	http_step := async.Resume_Result.Waiting

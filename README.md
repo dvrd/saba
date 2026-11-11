@@ -23,8 +23,9 @@ libraries, and `kakunou` for database handles and SQL operations; it never impor
 
 Install this repository at `$(odin root)/shared/saba` and Kakunou at
 `$(odin root)/shared/kakunou`, and the async library at
-`$(odin root)/shared/async`. The convenience facade requires SQLite and libcurl as system
-libraries; the core does not. Projects import the server and database packages through Odin’s shared collection:
+`$(odin root)/shared/async`. The convenience facade requires system SQLite. Outbound
+S3 calls Surf's native HTTP client through AWS and does not link libcurl; the core
+does not import either. Projects import the server and database packages through Odin’s shared collection:
 
 ```odin
 import server "shared:saba"
@@ -85,7 +86,7 @@ or call the synchronous send/read helpers from a handler. The HTTP server still
 sends one response and closes each ordinary connection; keep-alive and chunked
 request bodies are not introduced by this integration.
 
-Handlers, SQLite calls, filesystem access and S3/libcurl operations remain
+Handlers, SQLite calls, filesystem access and S3 requests remain
 synchronous. They occupy their worker while executing. This integration makes
 network waits asynchronous; it does not make arbitrary handler code preemptible.
 
@@ -628,6 +629,56 @@ request/response and lifetime APIs. Application code need not copy Saba routing,
 mount preparation, reload supervision or transport state machines into a local
 facade. The existing `shared:saba` database-aware API delegates to this same
 composition and retains its compatibility handler view.
+
+## Response content coding
+
+The async response queue negotiates coding after a handler or deferred response
+returns. Supported codings are `identity` and `gzip`. `x-gzip` is a gzip alias.
+`deflate`, `br` and every other token are unsupported. Identity is always sent
+when gzip is not selected, including `identity;q=0` with no acceptable gzip;
+negotiation never answers 406.
+
+A missing or malformed `Accept-Encoding` stays identity and adds no `Vary`.
+A valid field selects gzip when gzip's qvalue is greater than zero and no
+explicit identity qvalue is strictly higher. An omitted identity qvalue does not
+outrank an explicit gzip preference. `*` applies to gzip only when gzip itself
+is absent. The first `gzip` or `x-gzip` token wins.
+
+Gzip also requires every condition below. Otherwise the bytes are unchanged.
+When the request's field was valid and the response is eligible, the queue adds
+`Vary: Accept-Encoding` even if this particular result stays identity, because
+another field could select gzip.
+
+- Status is not 1xx, 204, 206 or 304, and no `Content-Range` is present.
+  Conditional 304 responses from OKAMI-78 are therefore unchanged.
+- No `Content-Encoding` is already set. Existing codings are not wrapped again.
+- `Cache-Control` has neither `no-store` nor `private`. Production asset
+  `no-cache` may be coded. Development `no-store` may not.
+- `Content-Type` is `text/*`, `image/svg+xml`, `application/javascript`,
+  `application/json`, `application/xml`, `application/xhtml+xml`, or ends in
+  `+json` or `+xml`. Missing types and already-compressed media are not coded.
+- Known uncompressed size is 1024 bytes through 1 MiB. Unknown-length streams
+  are not coded: the threshold and output cap are fixed before the head is sent.
+
+Buffered bodies are replaced only when gzip is strictly smaller. `Content-Length`
+becomes the encoded size. HEAD keeps that length and sends no body bytes.
+Eligible streams become one gzip member and use chunked transfer, so GET omits
+`Content-Length`. HEAD of that stream does not poll the producer, sends no body,
+and omits both `Content-Length` and chunked framing. The blocking `send_response`
+helper does not negotiate.
+
+Limits are per response and deterministic, not a wall-clock budget. Matching
+examines at most 8 hash probes and 258 bytes per input byte. Encoder tables are
+184 KiB (32 KiB window, 128 KiB predecessor links, 16 KiB hash, 8 KiB emission
+buffer). A stream also keeps one submission buffer of at most its chunk cap
+(default 64 KiB, hard maximum 1 MiB) and at most one uncompressed chunk until
+that chunk is fully encoded. Encoded output is capped at 1 MiB + 256 KiB, which
+covers the fixed-Huffman worst case for the input cap. Buffered allocation
+failure, or a result that does not shrink, stays identity. Stream allocation
+failure stays identity. A stream that would pass the output cap fails the
+connection instead of emitting a partial member. The queue still releases each
+encoded chunk before the next poll. ETags remain the handler's uncompressed
+validators; coding runs after conditional 304 decisions.
 
 ## Native HTTPS
 

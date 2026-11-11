@@ -77,6 +77,22 @@ existing behavior; `representation_response` exposes this policy to adapters
 that already own complete representation bytes. The core now supports resumable `Response.stream` producers (OKAMI-77);
 the opt-in file/range adapter is described below.
 
+## Content coding
+
+Asset, module and page responses go through the core queue's gzip negotiation.
+The full coding, `Vary`, threshold and memory policy is in the Saba README under
+"Response content coding". Production `Cache-Control: no-cache` may be gzipped.
+Development `no-store` is not, and neither are `private` responses, responses
+that already set `Content-Encoding`, or 206/304 responses. Identity remains
+available, so OKAMI-78 HEAD and 304 behavior is unchanged unless the client
+sends a valid `Accept-Encoding` and the representation is eligible. Eligible
+buffered HEAD advertises the compressed `Content-Length` and still sends no
+body. Eligible file streams are one gzip member with chunked GET framing; their
+HEAD does not read the file or send a body. Unknown-length streams, files
+outside 1024 bytes through 1 MiB, and already-compressed media types stay
+identity. Ranges stay identity so `Content-Range` continues to describe the
+uncompressed file.
+
 ## Streamed file downloads and single byte ranges
 
 `serve_file_stream(request,root,relative,config)` serves an explicitly selected

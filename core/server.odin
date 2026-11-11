@@ -35,6 +35,8 @@ Connection_Phase :: enum {
 	Write,
 	Produce,
 	Upgrade,
+	// Negotiated ALPN is exactly "h2". HTTP/1 phases are not used.
+	HTTP2,
 }
 
 // One task allocation per admitted connection. State remains stable across
@@ -47,6 +49,7 @@ Connection_Task :: struct {
 	runtime:                            ^Server_Runtime,
 	connection:                         Connection,
 	tls_state: ^TLS_State,
+	http2: ^HTTP2_Session,
 	socket:                             async.Socket,
 	native_pending:                     bool,
 	arena:                              mem.Dynamic_Arena,
@@ -300,6 +303,8 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 			result := task.upgrade.resume(task.upgrade.data,&io)
 			upgrade_resume_finished(task)
 			if result != .Yield do return result
+		case .HTTP2:
+			return h2_step(task)
 		}
 	}
 	return .Yield
@@ -426,6 +431,8 @@ release_upgrade_request :: proc(task: ^Connection_Task) -> bool {
 
 @(private)
 queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
+	// HTTP/2 streams use this same queue so gzip policy stays in one place.
+	if task.http2 != nil do return h2_queue_response(task, response)
 	if resource_pressure(task) {
 		discarded := response; discard_response(&discarded)
 		return resource_reject(task, resource_failure_status(response.status))
@@ -436,8 +443,10 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 		return false
 	}
 	prepared := response
-	task.upgrade = response.upgrade
-	if stream_present(response.stream) do return queue_stream_response(task, response)
+	// Negotiates gzip after handlers, including deferred responses, return.
+	content_coding_prepare(&task.request, &prepared)
+	task.upgrade = prepared.upgrade
+	if stream_present(prepared.stream) do return queue_stream_response(task, prepared)
 	if !resource_copy_response(task, &prepared) {
 		drop_upgrade(task)
 		if resource_pressure(task) {
@@ -496,6 +505,7 @@ dispatch_request :: proc(task: ^Connection_Task) -> Response {
 @(private)
 finish_connection :: proc(data: rawptr) {
 	task := cast(^Connection_Task)data
+	h2_destroy(task)
 	keep_alive_leave_idle(task)
 	if budget.same_scope(task.resource_connection, task.resource_connection) {
 		_ = budget.close(task.resource_connection)

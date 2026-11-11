@@ -16,7 +16,7 @@ Upgrade_Fields :: struct {
 @(private)
 request_fields :: proc(request: ^core.Request) -> (Upgrade_Fields, Error) {
 	fields: Upgrade_Fields
-	extended:=request!=nil && request.version=="HTTP/2" && request.method=="CONNECT" && request.protocol=="websocket"
+	extended:=request!=nil && (request.version=="HTTP/2" || request.version=="HTTP/3") && request.method=="CONNECT" && request.protocol=="websocket"
 	if request == nil || (!extended && (request.method != "GET" || request.version != "HTTP/1.1")) ||
 	   len(request.headers) > core.REQUEST_HEADER_COUNT_LIMIT ||
 	   request.content_length != 0 || request.chunked || len(request.body) != 0 {
@@ -109,7 +109,7 @@ prepare_upgrade :: proc(request: ^core.Request, config: Config, app: Application
 		if copy_error != nil do return {}, {kind = .Allocation_Failed, allocation = copy_error, status = .Internal_Server_Error}
 		session.protocol = copy
 	}
-	extended:=request.version=="HTTP/2" && request.method=="CONNECT" && request.protocol=="websocket"
+	extended:=(request.version=="HTTP/2" || request.version=="HTTP/3") && request.method=="CONNECT" && request.protocol=="websocket"
 	headers:[]core.Header
 	status:=core.HTTP_Status.Switching_Protocols
 	if extended {

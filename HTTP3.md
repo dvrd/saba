@@ -71,3 +71,10 @@ on reliable encrypted Application CRYPTO; issuing tickets does not enable 0-RTT.
 See Core TLS `SERVER_RESUMPTION.md` for rotation, credential/policy binding and
 mTLS identity preservation. Existing connection/stream/body ceilings are
 unchanged by these options and remain tracked in OKAMI-392.
+
+HTTP3 handlers receive trailing fields in `Request.trailers`, separately from
+`headers`. A response's `trailers` list is emitted after its complete body or
+stream producer. Allocate its list/strings with `request.allocator`; ownership
+lasts until request release. Framing, routing, authentication and body metadata
+cannot be redefined by trailers. Malformed peer trailers terminate only their
+exchange, preserving sibling requests and WebSockets.

@@ -21,6 +21,10 @@ import signal "shared:async/signal"
 // Optional UDP listener on the ordinary server runtime. Credentials are borrowed
 // until serve returns. TCP and UDP endpoints are deliberately independent.
 Http3_Config :: struct {
+ early_request_policy:proc(rawptr,^Request)->bool,
+ early_request_data:rawptr,
+ reset:^quic.Reset_Secrets,
+ enable_connect_protocol:bool,
  tickets:^tls.Server_Ticket_Config,
  disable_tickets:bool,
  ecn:bool,
@@ -67,7 +71,9 @@ http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
   state.config.handler_data = state.runtime.config.handler_data
  }
  if state.config.handler == nil do return 0, false
- state.live.config = {tickets=state.config.tickets,ecn=state.config.ecn,client_auth=state.config.client_auth,qpack=state.config.qpack,retry=state.config.retry,endpoint=state.config.endpoint, credentials=state.config.credentials,
+ early_policy:http3.Early_Request_Policy
+ if state.config.early_request_policy!=nil {early_policy=http3_allow_early}
+ state.live.config = {early_request_policy=early_policy,early_request_data=state,reset=state.config.reset,enable_connect_protocol=state.config.enable_connect_protocol,tickets=state.config.tickets,ecn=state.config.ecn,client_auth=state.config.client_auth,qpack=state.config.qpack,retry=state.config.retry,endpoint=state.config.endpoint, credentials=state.config.credentials,
   on_request=http3_poll, on_request_user=state, on_request_release=http3_release,
   max_request_body=state.config.max_request_body}
  port, ok = http3.listener_listen(&state.live)
@@ -126,14 +132,22 @@ http3_create_request :: proc(owner: ^Http3, wire: ^http3.Server_Request) -> ^Htt
  init_connection_arena(task)
  allocator := mem.dynamic_arena_allocator(&task.arena)
  task.request = {resources=task.resource_operation, backing_allocator=charged.allocator(task.resource_binding), allocator=allocator,
-  method=wire.method, path=wire.target, version="HTTP/3", body=wire.body,
+  method=wire.method, path=wire.target, version="HTTP/3", protocol=wire.protocol, early_data=wire.early, body=wire.body,
   content_length=len(wire.body), has_content_length=true}
  headers, he := make([]Header, len(wire.headers)+1, allocator)
  if he != nil {state.failed=true} else {
-  for field, i in wire.headers do headers[i] = {field.name, field.value}
-  headers[len(wire.headers)] = {"host", wire.authority}
-  task.request.headers = headers
+  count:=0
+  for field in wire.headers {
+   // HTTP3 :authority is the target authority. A legacy Host field cannot
+   // override it when an application reads its ordinary header view.
+   if wire.authority!="" && strings.equal_fold(field.name,"host") {continue}
+   headers[count]={field.name,field.value};count+=1
+  }
+  if wire.authority!="" {headers[count]={"host",wire.authority};count+=1}
+  task.request.headers = headers[:count]
  }
+ trailers,te:=make([]Header,len(wire.trailers),allocator)
+ if te!=nil {state.failed=true} else {for field,i in wire.trailers {trailers[i]={field.name,field.value}};task.request.trailers=trailers}
  if task.request.backing_allocator.procedure == nil do task.request.backing_allocator = rt.heap_allocator()
  if at := strings.index_byte(wire.target, '?'); at >= 0 {
   task.request.path, task.request.query = wire.target[:at], wire.target[at+1:]
@@ -161,6 +175,7 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
   wire.user_data = state
  }
  task := &state.connection
+ task.request.early_data=wire.early
  context.logger = owner.runtime.logger
  context.temp_allocator = mem.dynamic_arena_allocator(&task.arena)
  if request_cancelled(task.request.cancellation) || state.failed do return .Failed
@@ -169,7 +184,7 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
   response:Response
   limit:=REQUEST_BODY_LIMIT
   if owner.runtime.config.request_body_limit!=nil do limit=owner.runtime.config.request_body_limit(&task.request)
-  if len(task.request.body)>limit {response={status=.Content_Too_Large}} else {
+  if task.request.protocol!="" && task.request.protocol!="websocket" {response={status=.Not_Implemented}} else if len(task.request.body)>limit {response={status=.Content_Too_Large}} else {
    response = owner.config.handler(owner.config.handler_data, &task.connection, &task.request)
   }
   if deferred_present(response.deferred) {
@@ -202,6 +217,7 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
   state.response = response; state.ready=true
  }
  response := &state.response
+ if handled,status:=http3_upgrade_response(owner,wire,state,out);handled {return status}
  if deferred_present(response.deferred) || response.upgrade.data != nil || response.upgrade.resume != nil || response.upgrade.drop != nil || response.status == .Switching_Protocols {
   // TCP upgrades have no HTTP3 transport. Reject explicitly and release their
   // transferred ownership through the ordinary response disposal path.
@@ -239,6 +255,13 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
   else {headers=headers[:len(response.headers)]}
  }
  out.headers = headers
+ trailers,te:=make([]http3.Field,len(response.trailers),task.request.allocator)
+ if te!=nil {return .Failed}
+ for field,i in response.trailers {
+  name,error:=strings.to_lower(field.name,task.request.allocator);if error!=nil {return .Failed}
+  trailers[i]={name=name,value=field.value}
+ }
+ out.trailers=trailers
  if stream_present(response.stream) {
   stream := response.stream; response.stream = {}
   prepared := response^; prepared.stream = stream
@@ -304,4 +327,13 @@ http3_release :: proc(user: rawptr, wire: ^http3.Server_Request) {
  sync.atomic_sub(&task.runtime.active_connections, 1)
  drain_connection_finished(task.runtime)
  free(state, rt.heap_allocator())
+}
+
+@(private)
+http3_allow_early :: proc(data:rawptr,wire:^http3.Server_Request)->bool {
+ owner:=cast(^Http3)data
+ if owner.config.early_request_policy==nil {return false}
+ state:=cast(^Http3_Request)wire.user_data
+ if state==nil {state=http3_create_request(owner,wire);if state==nil {return false};wire.user_data=state}
+ return owner.config.early_request_policy(owner.config.early_request_data,&state.connection.request)
 }

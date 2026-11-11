@@ -38,3 +38,11 @@ extended_connect_preserves_origin_policy_before_owner_transfer :: proc(t:^testin
  testing.expect(t,response.upgrade.data==nil)
  core.discard_response(&response)
 }
+
+@(test)
+http3_extended_connect_uses_shared_websocket_validation :: proc(t:^testing.T) {
+ headers:=[2]core.Header{{"host","localhost"},{"sec-websocket-version","13"}}
+ request:=core.Request{method="CONNECT",version="HTTP/3",protocol="websocket",headers=headers[:]}
+ _,error:=request_fields(&request);testing.expect_value(t,error.kind,.None)
+ request.protocol="unknown";_,error=request_fields(&request);testing.expect_value(t,error.kind,.Invalid_Request)
+}

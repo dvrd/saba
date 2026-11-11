@@ -111,6 +111,7 @@ resource_reject :: proc(
 // Unknown raw borrows have no full-allocation provenance. Copy before suspension.
 @(private)
 resource_copy_response :: proc(task: ^Connection_Task, response: ^Response) -> bool {
+ if len(response.trailers)>0 && task.request.version!="HTTP/3" {return false}
 	if !budget.same_scope(task.resource_operation, task.resource_operation) do return true
 	allocator := mem.dynamic_arena_allocator(&task.arena)
 	body := response.body
@@ -128,6 +129,13 @@ resource_copy_response :: proc(task: ^Connection_Task, response: ^Response) -> b
 		if ne != nil || ve != nil do return false
 		headers[i] = {name, value}
 	}
+ trailers,trailer_error:=make([]Header,len(response.trailers),allocator)
+ if trailer_error!=nil {return false}
+ for field,i in response.trailers {
+  name,name_error:=strings.clone(field.name,allocator);value,value_error:=strings.clone(field.value,allocator)
+  if name_error!=nil || value_error!=nil {return false};trailers[i]={name,value}
+ }
+ response.trailers=trailers
 	response.body, response.headers = body, headers
 	return true
 }

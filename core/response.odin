@@ -10,6 +10,7 @@ RESPONSE_HEADER_LIMIT :: 8192
 // Header values and body must survive until the server finishes sending.
 // Use request.allocator for dynamic response data.
 Response :: struct {
+ trailers:[]Header,
 	status:  HTTP_Status,
 	headers: []Header,
 	body:    []u8,
@@ -48,6 +49,7 @@ http_field_value :: proc(value: string) -> bool {
 }
 
 response_headers :: proc(response: Response, buffer: []u8, keep_alive: bool = false) -> (data: []u8, ok: bool) {
+ if len(response.trailers)>0 {return nil,false}
 	if stream_present(response.stream) || deferred_present(response.deferred) do return nil, false
 	status := response.status
 	if status == .None do status = .OK

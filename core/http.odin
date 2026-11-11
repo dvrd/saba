@@ -23,6 +23,7 @@ Path_Parameter :: struct {
 }
 
 Request :: struct {
+ early_data:bool,
 	// Borrowed during owner calls; retain scope/create Binding before escape.
 	resources: budget.Scope,
 	backing_allocator: mem.Allocator,
@@ -41,6 +42,7 @@ Request :: struct {
 	// Negotiated Extended CONNECT protocol; empty for ordinary HTTP requests.
 	protocol: string,
 	headers:              []Header,
+ trailers:[]Header,
 	body:                 []u8,
 	content_length:       int,
 	has_content_length:   bool,

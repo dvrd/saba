@@ -31,7 +31,7 @@ CASES = {
     'close-valid': (b'\x06\x00\x01\xff\x1c\x00\x00\x00\x06', None),
 }
 CONTROLS = ('padding-only', 'ack-only')
-POSITIVES = ('bad-tag', 'invalid-initial') + CONTROLS
+POSITIVES = ('bad-tag', 'invalid-initial', 'sparse-crypto') + CONTROLS
 PEERS = []
 
 def packets(data):
@@ -67,14 +67,26 @@ class FaultTransport:
                 p.held.append((data,address));return
             if p.positive:return self.original.sendto(data,address)
             return
-        initial_fault=(p.fault=='invalid-initial' or (p.fault=='ack-only' and not q.configuration.is_client)) and q._cryptos[Epoch.INITIAL].send.is_valid()
+        initial_fault=(p.fault=='invalid-initial' or (p.fault=='ack-only' and not q.configuration.is_client) or (p.fault=='sparse-crypto' and q.configuration.is_client)) and q._cryptos[Epoch.INITIAL].send.is_valid()
         if not initial_fault and not q._cryptos[Epoch.HANDSHAKE].send.is_valid():return self.original.sendto(data,address)
         items=packets(data)
         # Both keys and the sender's genuine Initial/Handshake flight now exist.
         if not any(h.packet_type in (QuicPacketType.INITIAL,QuicPacketType.HANDSHAKE) for h,_ in items):
             return self.original.sendto(data,address)
         pn=q._packet_number;q._packet_number+=1
-        if p.fault in CONTROLS:
+        if p.fault=='sparse-crypto':
+            epoch=Epoch.INITIAL if q.configuration.is_client else Epoch.HANDSHAKE
+            sender=q._crypto_streams[epoch].sender
+            genuine=bytes(sender._buffer)
+            assert sender._buffer_start==0 and len(genuine)>=66,(epoch,sender._buffer_start,len(genuine))
+            # Genuine TLS bytes, deliberately separated before the real flight
+            # fills their gaps. Thirty-three bytes used to exhaust32 span slots.
+            payload=b''.join(b'\x06'+var(offset)+b'\x01'+genuine[offset:offset+1]
+                             for offset in range(1,66,2))
+            bad=protected(q,epoch,payload,pn)
+            combined=bad+data
+            p.control_epoch=epoch;p.sparse_pn=pn
+        elif p.fault in CONTROLS:
             epoch=Epoch.INITIAL if p.fault=='ack-only' and not q.configuration.is_client else Epoch.HANDSHAKE
             payload=b'\x02\x00\x00\x00\x00' if p.fault=='ack-only' else b'\x00'*4
             bad=protected(q,epoch,payload,pn)
@@ -109,6 +121,7 @@ class Peer(QuicConnectionProtocol):
         self.fault=fault;self.positive=fault in POSITIVES
         self.injected=False;self.injection={};self.calls=0
         self.held=[];self.released=False;self.observed_acks=0;self.control_epoch=None;self.release_reason=None
+        self.sparse_pn=None;self.sparse_acked=False
         self.http=H3Connection(self._quic);self.events=asyncio.Queue()
         self.terminal=asyncio.get_running_loop().create_future()
     def connection_made(self,transport):super().connection_made(FaultTransport(transport,self))
@@ -125,6 +138,7 @@ class Peer(QuicConnectionProtocol):
             kind=QuicPacketType.INITIAL if self.control_epoch==Epoch.INITIAL else QuicPacketType.HANDSHAKE
             for h,raw in packets(data):
                 if h.packet_type!=kind:continue
+                if not self._quic._cryptos[self.control_epoch].recv.is_valid():continue
                 buf=Buffer(data=raw);pull_quic_header(buf,host_cid_length=8)
                 # Long-header AEAD/header protection is stateless: this passive
                 # observation leaves the published peer parser untouched.
@@ -135,8 +149,12 @@ class Peer(QuicConnectionProtocol):
                     if t in (0,1):continue
                     if t in (2,3):
                         self.observed_acks+=1
-                        frame.pull_uint_var();frame.pull_uint_var();n=frame.pull_uint_var();frame.pull_uint_var()
-                        for _ in range(n):frame.pull_uint_var();frame.pull_uint_var()
+                        upper=frame.pull_uint_var();frame.pull_uint_var();n=frame.pull_uint_var()
+                        lower=upper-frame.pull_uint_var()
+                        if self.sparse_pn is not None and lower<=self.sparse_pn<=upper:self.sparse_acked=True
+                        for _ in range(n):
+                            upper=lower-frame.pull_uint_var()-2;lower=upper-frame.pull_uint_var()
+                            if self.sparse_pn is not None and lower<=self.sparse_pn<=upper:self.sparse_acked=True
                         if t==3:
                             for _ in range(3):frame.pull_uint_var()
                     elif t==6:
@@ -149,6 +167,13 @@ class Peer(QuicConnectionProtocol):
         if self.fault not in CONTROLS:return {}
         assert self.released and self.observed_acks==0,(self.release_reason,self.observed_acks)
         return dict(release=self.release_reason,observed_ack_frames=self.observed_acks,epoch=self.control_epoch.name)
+    def fragmentation_result(self):
+        if self.fault!='sparse-crypto':return {}
+        # Normal HTTP alone would hide a silently discarded Initial injection.
+        # Require an independently decrypted ACK covering that exact packet.
+        assert self.sparse_acked,(self.sparse_pn,self.observed_acks,self.control_epoch)
+        return dict(bytes=33,fragments=33,first_offset=1,last_offset=65,
+                    epoch=self.control_epoch.name,packet_number=self.sparse_pn,acknowledged=True)
     def quic_event_received(self,event):
         if isinstance(event,ConnectionTerminated) and not self.terminal.done():self.terminal.set_result(event)
         for e in self.http.handle_event(event):
@@ -196,7 +221,8 @@ async def run(args):
                 if case=='close-valid':assert terminal.reason_phrase=='Idle timeout',terminal
                 report['close_code']=terminal.error_code;report['terminal_reason']=terminal.reason_phrase
             assert peer.calls==(1 if positive else 0),peer.calls
-            report.update(injection=peer.injection,calls=peer.calls,noneliciting=peer.control_result())
+            report.update(injection=peer.injection,calls=peer.calls,noneliciting=peer.control_result(),
+                          crypto_fragmentation=peer.fragmentation_result())
         finally:server.close()
     else:
         process=await asyncio.create_subprocess_exec(args.binary,'server',args.cert,args.key,stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,stderr=asyncio.subprocess.PIPE)
@@ -213,6 +239,7 @@ async def run(args):
                     if case=='close-valid':assert terminal.reason_phrase=='Idle timeout',terminal
                     report['close_code']=terminal.error_code;report['terminal_reason']=terminal.reason_phrase
                 assert peer.injected;report['injection']=peer.injection;report['noneliciting']=peer.control_result()
+                report['crypto_fragmentation']=peer.fragmentation_result()
             # The same one-slot normal Saba listener must accept fresh work.
             async with connect('127.0.0.1',port,configuration=config,create_protocol=Peer) as fresh:await fresh.get()
             process.stdin.write(b's');await process.stdin.drain();out,err=await asyncio.wait_for(process.communicate(),8)

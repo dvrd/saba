@@ -46,6 +46,7 @@ client :: proc(port_text,cert_path,mode:string) {
  url:=fmt.aprintf("https://localhost:%s/probe",port_text);defer delete(url)
  if mode=="client" {
   response,error:=surf.execute({method=.GET,url=url},{http3=true,timeout=5*time.Second,tls={root_cas=roots.roots[:roots.count]}})
+  if error.kind!=.None {fmt.printf("POSITIVE error=%v status=%d\n",error,response.status)}
   assert(error.kind==.None&&response.status==200&&string(response.body)=="wire-ok");surf.response_destroy(&response)
  } else {
   port,ok:=strconv.parse_u64(port_text);assert(ok)

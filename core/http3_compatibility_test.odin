@@ -374,7 +374,7 @@ saba_http3_loss :: proc(t: ^testing.T) {
 	defer saba_http3_fixture_destroy(session)
 	session.config = {enabled = true, handler = saba_hit_handler, handler_data = &hit}
 	saba_http3_fixture(t,session)
-	port, ok := http3_listen(session)
+	_, ok := http3_listen(session)
 	testing.expect(t, ok, "HTTP3 listener")
 	if !ok do return
 	server_ep, berr := net.bound_endpoint(session.live.socket)

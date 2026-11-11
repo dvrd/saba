@@ -12,6 +12,7 @@ import bridge "shared:async/connection"
 // Store replacement is thread-safe; Core pins each admitted credential generation.
 TLS_Config :: struct {
 	store: ^store.Store,
+	client_auth: ^tls.Client_Auth_Config,
 	handshake_timeout, close_timeout: time.Duration,
 	max_owned_bytes, max_handshake_records: int,
 	on_event: proc(data: rawptr, event: ^TLS_Event),
@@ -23,6 +24,7 @@ TLS_Event_Kind :: enum {Handshake, Closed}
 TLS_Event :: struct {
 	kind: TLS_Event_Kind,
 	handshake_complete: bool,
+	peer_identity: tls.Peer_Identity,
 	error, close_error: net.Connection_Error,
 	failure: tls.Server_Async_Failure,
 	negotiated_protocol: string,
@@ -57,7 +59,7 @@ TLS_State :: struct {
 @(private)
 tls_config_valid :: proc(config: ^TLS_Config) -> bool {
 	if config == nil do return true
-	if config.store == nil || config.handshake_timeout < 0 ||
+	if !tls.client_auth_config_valid(config.client_auth) || config.store == nil || config.handshake_timeout < 0 ||
 	   config.handshake_timeout > MAX_SERVER_TIMEOUT || config.close_timeout < 0 ||
 	   config.close_timeout > MAX_SERVER_TIMEOUT {return false}
 	if config.max_owned_bytes != 0 &&
@@ -83,6 +85,7 @@ tls_begin :: proc(task: ^Connection_Task) -> bool {
 		close_timeout = config.close_timeout, max_owned_bytes = config.max_owned_bytes,
 		max_handshake_records = config.max_handshake_records,
 		parameters = {alpn_protocols = state.protocols[:]},
+		handshake = {client_auth=config.client_auth},
 	}
 	if tls.server_async_server(&state.owner, bridge.stream(&state.transport),
 		bridge.executor(&state.executor), settings, allocator) != .None {return false}
@@ -124,6 +127,7 @@ tls_event :: proc(task: ^Connection_Task, kind: TLS_Event_Kind) {
 	if config.on_event == nil do return
 	state := task.tls_state
 	event := TLS_Event {kind = kind, handshake_complete = state.ready,
+		peer_identity=tls.server_async_connection_state(&state.owner).peer_identity,
 		error = state.error, close_error = state.close.result.err,
 	failure = tls.server_async_failure(&state.owner),
 		negotiated_protocol = string(state.protocol[:state.protocol_len]),
@@ -310,4 +314,12 @@ transport_write :: proc(task: ^Connection_Task, source: []u8, deadline: async.De
 		if error.kind != .None {state.write_started = false; return 0, tls_translate(error)}
 	}
 	return 0, {kind = .Pending}
+}
+
+// Authenticated identity only; the digest is an owned value, never a borrow of
+// handshake certificate storage. Empty before successful mutual authentication.
+tls_peer_identity :: proc(connection:^Connection)->tls.Peer_Identity {
+ if connection==nil||connection._task==nil {return {}}
+ if connection._task.tls_state==nil {return connection._peer_identity}
+ return tls.server_async_connection_state(&connection._task.tls_state.owner).peer_identity
 }

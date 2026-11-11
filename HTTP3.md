@@ -44,3 +44,17 @@ It does not turn those limits into unlimited HTTP3 multiplexing or certify a
 platform. The owned regression harness lives in `core/http3_test.odin`; run its
 wire test with a local HTTP3-capable independent curl. The test's certificate and
 key are synthetic fixtures supplied explicitly to the credential store.
+
+`Http3_Config.qpack={table_capacity=4096,blocked_streams=4}` enables the shared
+transport's dynamic QPACK table and blocked-section handling. Zero preserves
+static-only compression. The transport owns instruction/feedback queues and
+reference retention; application response/request ownership does not change.
+
+`Http3_Config.client_auth` is the native TLS client-certificate policy. Nil
+inherits `Server.tls.client_auth`; explicitly supply a Disabled policy to choose
+a different UDP policy. `tls_peer_identity(conn)` returns the owned validated
+leaf SHA256 for both TCP and HTTP3 after successful authentication. Require
+never admits anonymous application work. Root certificates/policy and credential
+stores remain caller-owned until serve returns. The HTTP3 handshake profile
+retains at most64KiB+1024 CRYPTO bytes per encryption level and accepts fragmented
+certificate/authentication flights within that limit.

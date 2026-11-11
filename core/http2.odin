@@ -11,12 +11,12 @@ import budget "core:sync/budget"
 import "core:time"
 import async "shared:async"
 
-// One active stream. Its lease is the connection stream allowance, so a second
-// concurrent HTTP/2 stream is refused instead of reserving another exchange stream.
-// A closed stream keeps its metadata until the grace barrier is acknowledged.
-// H2_STREAM_SLOTS holds those records so the next request can be admitted.
-// Buffered responses, including gzip, still enter through queue_response.
-H2_MAX_STREAMS :: 1
+// One buffered ordinary exchange plus bounded independent upgraded streams.
+// Resource_Config.connection_limits.streams controls concurrent admission (the
+// legacy default is one); configure at least two for an idle WebSocket plus HTTP.
+// Closed metadata remains until the grace barrier is acknowledged. Buffered
+// responses, including gzip, still enter through queue_response.
+H2_MAX_STREAMS :: 8
 H2_STREAM_SLOTS :: 8
 H2_FRAME_BYTES :: 16384
 H2_BODY_BUFFER :: 64 * 1024
@@ -44,6 +44,7 @@ HTTP2_Session :: struct {
 	ingress_len: int,
 	names: [H2_NAME_SCRATCH]u8,
 	name_used: int,
+	upgrades: [H2_UPGRADE_SLOTS]^H2_Upgrade,
 }
 
 h2_make_limits :: proc(streams: int) -> h2.Limits {
@@ -102,6 +103,7 @@ h2_begin :: proc(task: ^Connection_Task) -> bool {
 		header_sections = 4,
 		enable_push = false,
 		promise_policy = .Decline,
+		enable_connect_protocol = true,
 	}
 	init_error := h2.connection_init(&session.engine, {
 		role = .Server, limits = limits, initial_stream_capacity = H2_STREAM_SLOTS, scope = scope,
@@ -120,6 +122,7 @@ h2_begin :: proc(task: ^Connection_Task) -> bool {
 h2_destroy :: proc(task: ^Connection_Task) {
 	session := task.http2
 	if session == nil do return
+	for stream in session.upgrades {if stream!=nil {h2_upgrade_release(stream)}}
 	task.http2 = nil
 	owned.destroy(&session.chunk)
 	if session.response_ready {
@@ -583,6 +586,8 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 				if session.request_open && value.stream == session.handle && session.receiving {
 					h2_complete_request(task)
 				}
+			} else if value.kind == .Request && value.summary.protocol!="" {
+				if !h2_upgrade_open(task,value) {_=h2.connection_reset(&session.engine,value.stream,.Refused_Stream);h2_remember(session,value.stream)}
 			} else if value.kind == .Request {
 				if session.request_open || session.response_ready || server_is_draining(task.runtime) || session.shutdown || session.needs_reset {
 					_ = h2.connection_reset(&session.engine, value.stream, .Refused_Stream)
@@ -596,12 +601,17 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 				}
 			}
 		case h2.Data_Event:
-			taken = h2_on_data(task, event, value)
+			if stream:=h2_upgrade_find(task,value.stream);stream!=nil {
+				taken=h2_upgrade_data(stream,event,value)
+				if !taken {_=h2.connection_reset(&session.engine,value.stream,.Cancel);h2_upgrade_release(stream)}
+			} else {taken = h2_on_data(task, event, value)}
 		case h2.Stream_End_Event:
+			if stream:=h2_upgrade_find(task,value.stream);stream!=nil {stream.remote_end=true}
 			if session.request_open && value.stream == session.handle && session.receiving {
 				h2_complete_request(task)
 			}
 		case h2.Reset_Event:
+			if stream:=h2_upgrade_find(task,value.stream);stream!=nil {h2_upgrade_reset(stream)}
 			h2_remember(session, value.stream)
 			if session.request_open && value.stream == session.handle {
 				session.request_open = false
@@ -648,7 +658,7 @@ h2_check_deadlines :: proc(task: ^Connection_Task) -> bool {
 			return true
 		}
 	}
-	if !session.request_open && !session.response_ready && deadline_expired(session.idle_deadline) {
+	if !session.request_open && !session.response_ready && h2_upgrade_count(task)==0 && deadline_expired(session.idle_deadline) {
 		h2_shutdown(task)
 		return true
 	}
@@ -780,6 +790,7 @@ h2_finished :: proc(task: ^Connection_Task) -> bool {
 	writing := task.tls_state != nil && task.tls_state.write_started
 	if pending || writing do return false
 	if session.failed || session.peer_gone do return true
+	if h2_upgrade_count(task)>0 do return false
 	if !session.shutdown do return false
 	stats, ok := h2.connection_shutdown_status(&session.engine)
 	if !ok do return false
@@ -808,6 +819,7 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		if h2_feed(task) do progress = true
 		if h2_pump_events(task) do progress = true
 		if h2_submit_response(task) do progress = true
+		if h2_upgrade_pump(task) do progress = true
 		h2_pump_engine(task)
 		if h2_pump_events(task) do progress = true
 		write_progress, write_wait := h2_write(task)
@@ -815,6 +827,7 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		if write_wait do waiting = true
 		if h2_finished(task) do return .Done
 		if progress do continue
+		if h2_upgrade_count(task)>0 {_=async.sleep_until_earlier(&task.runtime.executor,async.deadline_after(&task.runtime.executor,time.Millisecond))}
 		if waiting do return .Waiting
 		break
 	}

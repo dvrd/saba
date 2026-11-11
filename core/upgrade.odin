@@ -19,11 +19,17 @@ Upgrade_IO :: struct {
 	socket: async.Socket,
 	runtime: ^async.Runtime,
 	connection: ^Connection,
+	// A multiplexed stream uses these callbacks instead of a native socket.
+	stream_data: rawptr,
+	stream_read: proc(data:rawptr,dst:[]u8,deadline:async.Deadline)->(int,async.Error),
+	stream_write: proc(data:rawptr,src:[]u8,deadline:async.Deadline)->(int,async.Error),
+	stream_wait: proc(data:rawptr,read,write:bool,deadline:async.Deadline)->async.Error,
 }
 
 // Consume borrowed prefetched bytes only within this resume. The adapter sets
 // connection.read_deadline along with its async deadline when changing budgets.
 upgrade_read :: proc(io:^Upgrade_IO,dst:[]u8,deadline:async.Deadline)->(int,async.Error) {
+	if io.stream_read!=nil {return io.stream_read(io.stream_data,dst,deadline)}
 	if deadline_expired(io.connection.read_deadline) do return 0,{kind=.Timeout}
 	if len(io.connection.read_buffer)>0 {
 		n:=copy(dst,io.connection.read_buffer)
@@ -56,6 +62,7 @@ upgrade_resume_finished :: proc(task:^Connection_Task) {
 
 // Buffer must remain unchanged through the Pending result and terminal return.
 upgrade_write :: proc(io:^Upgrade_IO,src:[]u8,deadline:async.Deadline)->(int,async.Error) {
+	if io.stream_write!=nil {return io.stream_write(io.stream_data,src,deadline)}
 	if io.connection._task == nil {
 		if io.connection._secure do return 0,{kind=.Unsupported}
 		return async.write(io.socket,src,deadline)

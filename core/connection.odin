@@ -3,12 +3,14 @@ package saba_core
 import "core:log"
 import "core:mem"
 import "core:net"
+import "core:crypto/tls"
 import "core:sys/posix"
 import "core:time"
 
 Connection :: struct {
 	_task: ^Connection_Task,
 	_secure: bool,
+	_peer_identity: tls.Peer_Identity,
 	socket:         net.TCP_Socket,
 	read_buffer:    []u8,
 	read_deadline:  time.Tick,

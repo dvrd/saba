@@ -16,7 +16,8 @@ Upgrade_Fields :: struct {
 @(private)
 request_fields :: proc(request: ^core.Request) -> (Upgrade_Fields, Error) {
 	fields: Upgrade_Fields
-	if request == nil || request.method != "GET" || request.version != "HTTP/1.1" ||
+	extended:=request!=nil && request.version=="HTTP/2" && request.method=="CONNECT" && request.protocol=="websocket"
+	if request == nil || (!extended && (request.method != "GET" || request.version != "HTTP/1.1")) ||
 	   len(request.headers) > core.REQUEST_HEADER_COUNT_LIMIT ||
 	   request.content_length != 0 || request.chunked || len(request.body) != 0 {
 		return {}, {kind = .Invalid_Request, status = .Bad_Request}
@@ -39,6 +40,7 @@ request_fields :: proc(request: ^core.Request) -> (Upgrade_Fields, Error) {
 			}
 			fields.origin, fields.origin_present = value, true
 		} else if strings.equal_fold(header.name, "Upgrade") || strings.equal_fold(header.name, "Connection") {
+			if extended {return {},{kind=.Invalid_Request,status=.Bad_Request}}
 			upgrade := strings.equal_fold(header.name, "Upgrade")
 			wanted := "websocket" if upgrade else "upgrade"
 			found, valid := codec.upgrade_list_contains(value, wanted, upgrade)
@@ -54,7 +56,9 @@ request_fields :: proc(request: ^core.Request) -> (Upgrade_Fields, Error) {
 			}
 		}
 	}
-	if !host_seen || !fields.upgrade_seen || !fields.connection_seen ||
+	if extended {
+		if !host_seen || fields.version!="13" || key_seen || fields.upgrade_seen || fields.connection_seen {return {},{kind=.Invalid_Request,status=.Bad_Request}}
+	} else if !host_seen || !fields.upgrade_seen || !fields.connection_seen ||
 	   !codec.upgrade_request_fields_valid(fields.key, fields.version, "websocket", "upgrade") {
 		return {}, {kind = .Invalid_Request, status = .Bad_Request}
 	}
@@ -65,7 +69,7 @@ request_fields :: proc(request: ^core.Request) -> (Upgrade_Fields, Error) {
 }
 
 // Application ownership transfers only on success. Dispose an unused successful
-// Response with core.discard_response; its drop remains exact even if 101 fails.
+// Response with core.discard_response; its drop remains exact if the handshake fails.
 // Config hooks run only now; request headers and policy_data are not retained.
 @(private)
 prepare_upgrade :: proc(request: ^core.Request, config: Config, app: Application) -> (core.Response, Error) {
@@ -105,18 +109,31 @@ prepare_upgrade :: proc(request: ^core.Request, config: Config, app: Application
 		if copy_error != nil do return {}, {kind = .Allocation_Failed, allocation = copy_error, status = .Internal_Server_Error}
 		session.protocol = copy
 	}
-	accept, accept_error := make([]u8, 28, request.allocator)
-	if accept_error != nil do return {}, {kind = .Allocation_Failed, allocation = accept_error, status = .Internal_Server_Error}
-	accepted := codec.upgrade_accept_encoded(fields.key)
-	copy(accept, accepted[:])
-	count := 2
-	if protocol != "" do count += 1
-	headers, headers_error := make([]core.Header, count, request.allocator)
-	if headers_error != nil do return {}, {kind = .Allocation_Failed, allocation = headers_error, status = .Internal_Server_Error}
-	headers[0], headers[1] = {"Upgrade", "websocket"}, {"Sec-WebSocket-Accept", string(accept)}
-	if protocol != "" do headers[2] = {"Sec-WebSocket-Protocol", session.protocol}
+	extended:=request.version=="HTTP/2" && request.method=="CONNECT" && request.protocol=="websocket"
+	headers:[]core.Header
+	status:=core.HTTP_Status.Switching_Protocols
+	if extended {
+		status=.OK
+		if protocol!="" {
+			allocated,header_error:=make([]core.Header,1,request.allocator)
+			if header_error!=nil do return {},{kind=.Allocation_Failed,allocation=header_error,status=.Internal_Server_Error}
+			headers=allocated;headers[0]={"sec-websocket-protocol",session.protocol}
+		}
+	} else {
+		accept, accept_error := make([]u8, 28, request.allocator)
+		if accept_error != nil do return {}, {kind = .Allocation_Failed, allocation = accept_error, status = .Internal_Server_Error}
+		accepted := codec.upgrade_accept_encoded(fields.key)
+		copy(accept, accepted[:])
+		count := 2
+		if protocol != "" do count += 1
+		allocated_headers, headers_error := make([]core.Header, count, request.allocator)
+		headers=allocated_headers
+		if headers_error != nil do return {}, {kind = .Allocation_Failed, allocation = headers_error, status = .Internal_Server_Error}
+		headers[0], headers[1] = {"Upgrade", "websocket"}, {"Sec-WebSocket-Accept", string(accept)}
+		if protocol != "" do headers[2] = {"Sec-WebSocket-Protocol", session.protocol}
+	}
 	session.owns_app, committed = true, true
-	return {status = .Switching_Protocols, headers = headers,
+	return {status = status, headers = headers,
 		upgrade = {data = session, resume = resume_session, drop = drop_session}}, {}
 }
 

@@ -8,6 +8,8 @@ import "core:mem"
 import charged "core:mem/budget"
 import budget "core:sync/budget"
 import "core:net"
+import "core:crypto/tls"
+import "core:net/quic"
 import "core:strings"
 import "core:strconv"
 import "core:sync"
@@ -19,6 +21,9 @@ import signal "shared:async/signal"
 // Optional UDP listener on the ordinary server runtime. Credentials are borrowed
 // until serve returns. TCP and UDP endpoints are deliberately independent.
 Http3_Config :: struct {
+ client_auth: ^tls.Client_Auth_Config,
+ qpack: http3.Qpack_Config,
+ retry: ^quic.Retry_Tokens,
  enabled: bool,
  endpoint: net.Endpoint,
  credentials: ^credential_store.Store,
@@ -52,12 +57,13 @@ Http3_Request :: struct {
 
 http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
  if state == nil || !state.config.enabled || state.runtime == nil || state.config.credentials == nil do return 0, false
+ if state.config.client_auth==nil && state.runtime.config.tls!=nil {state.config.client_auth=state.runtime.config.tls.client_auth}
  if state.config.handler == nil {
   state.config.handler = state.runtime.config.handler
   state.config.handler_data = state.runtime.config.handler_data
  }
  if state.config.handler == nil do return 0, false
- state.live.config = {endpoint=state.config.endpoint, credentials=state.config.credentials,
+ state.live.config = {client_auth=state.config.client_auth,qpack=state.config.qpack,retry=state.config.retry,endpoint=state.config.endpoint, credentials=state.config.credentials,
   on_request=http3_poll, on_request_user=state, on_request_release=http3_release,
   max_request_body=state.config.max_request_body}
  port, ok = http3.listener_listen(&state.live)
@@ -108,7 +114,7 @@ http3_create_request :: proc(owner: ^Http3, wire: ^http3.Server_Request) -> ^Htt
  state.owner = owner
  task := &state.connection
  task.runtime = owner.runtime
- task.connection = {_task=task, _secure=true, socket=net.TCP_Socket(-1), _timeouts=owner.runtime.timeouts}
+ task.connection = {_task=task, _secure=true, _peer_identity=wire.peer_identity, socket=net.TCP_Socket(-1), _timeouts=owner.runtime.timeouts}
  if !start_connection_resources(task) {
   finish_operation_resources(task); budget.release_scope(&task.resource_connection)
   free(state, rt.heap_allocator()); return nil

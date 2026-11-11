@@ -36,6 +36,12 @@ session_budget_expired :: proc(session: ^Session, runtime: ^async.Runtime) -> bo
 wait_session :: proc(session: ^Session, io: ^IO, read, write: bool) -> async.Resume_Result {
 	transport := io._transport
 	deadline := semantic_deadline(session)
+	if transport.stream_wait!=nil {
+		error:=transport.stream_wait(transport.stream_data,read,write,deadline)
+		if error.kind==.None || error.kind==.Timeout do return .Yield
+		if error.kind!=.Pending {session.event.transport=error;session.event.reason=.IO_Error;return .Done}
+		return .Waiting
+	}
 	if transport.socket != (async.Socket{}) && (read || write) {
 		// Individual native read/write calls replace the socket interest. Restore
 		// both directions explicitly after attempting them, then recheck budgets.

@@ -38,6 +38,8 @@ Request :: struct {
 	path:                 string,
 	query:                string,
 	version:              string,
+	// Negotiated Extended CONNECT protocol; empty for ordinary HTTP requests.
+	protocol: string,
 	headers:              []Header,
 	body:                 []u8,
 	content_length:       int,

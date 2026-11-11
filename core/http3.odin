@@ -21,6 +21,8 @@ import signal "shared:async/signal"
 // Optional UDP listener on the ordinary server runtime. Credentials are borrowed
 // until serve returns. TCP and UDP endpoints are deliberately independent.
 Http3_Config :: struct {
+ idle:http3.Idle_Config,
+ handshake_timeout:time.Duration,
  max_connections:int,
  early_request_policy:proc(rawptr,^Request)->bool,
  early_request_data:rawptr,
@@ -74,7 +76,7 @@ http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
  if state.config.handler == nil do return 0, false
  early_policy:http3.Early_Request_Policy
  if state.config.early_request_policy!=nil {early_policy=http3_allow_early}
- state.live.config = {early_request_policy=early_policy,early_request_data=state,reset=state.config.reset,enable_connect_protocol=state.config.enable_connect_protocol,tickets=state.config.tickets,ecn=state.config.ecn,client_auth=state.config.client_auth,qpack=state.config.qpack,retry=state.config.retry,endpoint=state.config.endpoint, credentials=state.config.credentials,
+ state.live.config = {idle=state.config.idle,handshake_timeout=state.config.handshake_timeout,early_request_policy=early_policy,early_request_data=state,reset=state.config.reset,enable_connect_protocol=state.config.enable_connect_protocol,tickets=state.config.tickets,ecn=state.config.ecn,client_auth=state.config.client_auth,qpack=state.config.qpack,retry=state.config.retry,endpoint=state.config.endpoint, credentials=state.config.credentials,
   on_request=http3_poll, on_request_user=state, on_request_release=http3_release,
   max_connections=state.config.max_connections,max_request_body=state.config.max_request_body}
  port, ok = http3.listener_listen(&state.live)

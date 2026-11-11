@@ -58,3 +58,16 @@ never admits anonymous application work. Root certificates/policy and credential
 stores remain caller-owned until serve returns. The HTTP3 handshake profile
 retains at most64KiB+1024 CRYPTO bytes per encryption level and accepts fragmented
 certificate/authentication flights within that limit.
+
+`Http3_Config.ecn` opts into validated ECN marking; accessible receive metadata
+is reported independently. New paths and connection IDs use Core's bounded
+migration/address-validation state. Pending UDP output keeps its destination
+and codepoint until the datagram is written.
+
+`Http3_Config.tickets` borrows a native server ticket policy. A nil policy
+inherits `Server.tls.tickets`; `disable_tickets=true` explicitly suppresses that
+inheritance. Ticket key owners outlive the server. Issued TLS1.3 tickets travel
+on reliable encrypted Application CRYPTO; issuing tickets does not enable 0-RTT.
+See Core TLS `SERVER_RESUMPTION.md` for rotation, credential/policy binding and
+mTLS identity preservation. Existing connection/stream/body ceilings are
+unchanged by these options and remain tracked in OKAMI-392.

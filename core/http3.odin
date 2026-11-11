@@ -21,6 +21,9 @@ import signal "shared:async/signal"
 // Optional UDP listener on the ordinary server runtime. Credentials are borrowed
 // until serve returns. TCP and UDP endpoints are deliberately independent.
 Http3_Config :: struct {
+ tickets:^tls.Server_Ticket_Config,
+ disable_tickets:bool,
+ ecn:bool,
  client_auth: ^tls.Client_Auth_Config,
  qpack: http3.Qpack_Config,
  retry: ^quic.Retry_Tokens,
@@ -58,12 +61,13 @@ Http3_Request :: struct {
 http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
  if state == nil || !state.config.enabled || state.runtime == nil || state.config.credentials == nil do return 0, false
  if state.config.client_auth==nil && state.runtime.config.tls!=nil {state.config.client_auth=state.runtime.config.tls.client_auth}
+ if state.config.disable_tickets {state.config.tickets=nil} else if state.config.tickets==nil && state.runtime.config.tls!=nil {state.config.tickets=state.runtime.config.tls.tickets}
  if state.config.handler == nil {
   state.config.handler = state.runtime.config.handler
   state.config.handler_data = state.runtime.config.handler_data
  }
  if state.config.handler == nil do return 0, false
- state.live.config = {client_auth=state.config.client_auth,qpack=state.config.qpack,retry=state.config.retry,endpoint=state.config.endpoint, credentials=state.config.credentials,
+ state.live.config = {tickets=state.config.tickets,ecn=state.config.ecn,client_auth=state.config.client_auth,qpack=state.config.qpack,retry=state.config.retry,endpoint=state.config.endpoint, credentials=state.config.credentials,
   on_request=http3_poll, on_request_user=state, on_request_release=http3_release,
   max_request_body=state.config.max_request_body}
  port, ok = http3.listener_listen(&state.live)

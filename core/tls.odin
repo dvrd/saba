@@ -13,6 +13,7 @@ import bridge "shared:async/connection"
 TLS_Config :: struct {
 	store: ^store.Store,
 	client_auth: ^tls.Client_Auth_Config,
+	tickets:^tls.Server_Ticket_Config,
 	handshake_timeout, close_timeout: time.Duration,
 	max_owned_bytes, max_handshake_records: int,
 	on_event: proc(data: rawptr, event: ^TLS_Event),
@@ -25,6 +26,7 @@ TLS_Event :: struct {
 	kind: TLS_Event_Kind,
 	handshake_complete: bool,
 	peer_identity: tls.Peer_Identity,
+	resumed:bool,
 	error, close_error: net.Connection_Error,
 	failure: tls.Server_Async_Failure,
 	negotiated_protocol: string,
@@ -59,7 +61,7 @@ TLS_State :: struct {
 @(private)
 tls_config_valid :: proc(config: ^TLS_Config) -> bool {
 	if config == nil do return true
-	if !tls.client_auth_config_valid(config.client_auth) || config.store == nil || config.handshake_timeout < 0 ||
+	if !tls.server_ticket_config_valid(config.tickets) || !tls.client_auth_config_valid(config.client_auth) || config.store == nil || config.handshake_timeout < 0 ||
 	   config.handshake_timeout > MAX_SERVER_TIMEOUT || config.close_timeout < 0 ||
 	   config.close_timeout > MAX_SERVER_TIMEOUT {return false}
 	if config.max_owned_bytes != 0 &&
@@ -85,7 +87,7 @@ tls_begin :: proc(task: ^Connection_Task) -> bool {
 		close_timeout = config.close_timeout, max_owned_bytes = config.max_owned_bytes,
 		max_handshake_records = config.max_handshake_records,
 		parameters = {alpn_protocols = state.protocols[:]},
-		handshake = {client_auth=config.client_auth},
+		handshake = {client_auth=config.client_auth,tickets=config.tickets},
 	}
 	if tls.server_async_server(&state.owner, bridge.stream(&state.transport),
 		bridge.executor(&state.executor), settings, allocator) != .None {return false}
@@ -128,6 +130,7 @@ tls_event :: proc(task: ^Connection_Task, kind: TLS_Event_Kind) {
 	state := task.tls_state
 	event := TLS_Event {kind = kind, handshake_complete = state.ready,
 		peer_identity=tls.server_async_connection_state(&state.owner).peer_identity,
+  resumed=tls.server_async_connection_state(&state.owner).resumed,
 		error = state.error, close_error = state.close.result.err,
 	failure = tls.server_async_failure(&state.owner),
 		negotiated_protocol = string(state.protocol[:state.protocol_len]),

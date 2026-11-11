@@ -13,3 +13,6 @@ tls_peer_identity :: proc(connection:^Connection)->TLS_Peer_Identity {
  if connection==nil||connection._transport==nil {return {}}
  return core.tls_peer_identity(connection._transport)
 }
+
+TLS_Server_Ticket_Config :: tls.Server_Ticket_Config
+TLS_Server_Ticket_Keys :: tls.Server_Ticket_Keys

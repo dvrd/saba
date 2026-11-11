@@ -22,6 +22,7 @@ ACCEPT_RETRY_INTERVAL :: 100 * time.Millisecond
 Server :: struct {
 	tls: ^TLS_Config,
 	http3: Http3_Config,
+	http2: Http2_Config,
 	resources: Resource_Config,
 	address:              string,
 	port:                 int,
@@ -81,6 +82,7 @@ Server_Runtime :: struct {
 // Handler and handler_data must remain valid until serve returns.
 // Returns false on startup failure or an unrecoverable listener error.
 serve :: proc(config: Server) -> bool {
+	if !http2_config_valid(config.http2) {log.error("Invalid HTTP2 concurrency limit"); return false}
 	if !tls_config_valid(config.tls) {log.error("Invalid TLS configuration"); return false}
 	if !claim_server(config.control) {
 		log.error("Server control is already in use"); return false

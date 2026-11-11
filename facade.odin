@@ -16,6 +16,7 @@ TLS_Event_Kind :: core.TLS_Event_Kind
 Server :: struct {
 	tls: ^TLS_Config,
 	http3: Http3_Config,
+ http2: Http2_Config,
 	resources: Resource_Config,
 	address: string,
 	port: int,
@@ -47,7 +48,7 @@ serve :: proc(config:Server)->bool {
  snapshot:=config
  return application.serve({
   server={
-   tls=config.tls,http3=config.http3,resources=config.resources,address=config.address,port=config.port,
+   tls=config.tls,http3=config.http3,http2=config.http2,resources=config.resources,address=config.address,port=config.port,
    max_connections=config.max_connections,initial_connections=config.initial_connections,
    runtime_allocator=config.runtime_allocator,handler_data=&snapshot,
    request_body_limit=config.request_body_limit,workers=config.workers,

@@ -10,8 +10,9 @@ import "core:time"
 import async "shared:async"
 
 DEFAULT_OPERATION_RESOURCES :: budget.Limits{32 * mem.Megabyte, 1, 1}
-DEFAULT_CONNECTION_RESOURCES :: budget.Limits{64 * mem.Megabyte, 1, 4}
-DEFAULT_SERVER_RESOURCES :: budget.Limits{256 * mem.Megabyte, 128, 128}
+// H2 can own both a protocol stream lease and a response-producer lease.
+DEFAULT_CONNECTION_RESOURCES :: budget.Limits{bytes=64 * mem.Megabyte, streams=64, jobs=4}
+DEFAULT_SERVER_RESOURCES :: budget.Limits{bytes=256 * mem.Megabyte, streams=4096, jobs=128}
 
 // Nil limits select finite defaults; explicit zero limits admit nothing. Parent
 // is borrowed during startup; the server owns a child and never closes Parent.
@@ -94,6 +95,7 @@ resource_reject :: proc(
 	task: ^Connection_Task,
 	status: HTTP_Status = .Service_Unavailable,
 ) -> bool {
+ if task.http2_request!=nil {return h2_request_emergency(task,status)}
 	head, encoded := response_headers({status = status}, task.resource_emergency[:])
 	if !encoded do return false
 	task.output = {head, nil, nil}

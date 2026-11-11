@@ -234,7 +234,7 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
  if !resource_copy_response(task, response) do return .Failed
  out.status = int(response.status)
  extra:=0
- if task.request.method=="HEAD" {
+ if task.request.method=="HEAD" && http.response_body_allowed(int(response.status)) {
   extra=1
   for field in response.headers {if strings.equal_fold(field.name,"content-length") {extra=0;break}}
  }

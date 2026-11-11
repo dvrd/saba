@@ -3,14 +3,13 @@ package saba_core
 import h2 "shared:http/v2"
 import hpack "shared:http/v2/hpack"
 import async "shared:async"
-import rt "base:runtime"
 import "core:mem"
+import charged "core:mem/budget"
 import owned "core:mem/owned"
 import budget "core:sync/budget"
 import "core:net"
 import "core:strings"
 
-H2_UPGRADE_SLOTS :: 4
 @(private)
 H2_Upgrade_Input :: struct {owner:h2.Incoming_Data,credit:h2.Data_Token,offset:int}
 @(private)
@@ -47,10 +46,11 @@ h2_upgrade_release :: proc(stream:^H2_Upgrade) {
  finish_request_context(task)
  mem.dynamic_arena_destroy(&task.arena)
  finish_operation_resources(task)
+ charged.release(&task.resource_transport)
  budget.release_scope(&task.resource_connection)
  for &slot in session.upgrades {if slot==stream {slot=nil;break}}
  h2_remember(session,stream.handle)
- free(stream,rt.heap_allocator())
+ free(stream,session.allocator)
 }
 
 @(private)
@@ -58,14 +58,14 @@ h2_upgrade_open :: proc(parent:^Connection_Task,event:h2.Headers_Event)->bool {
  session:=parent.http2
  slot:=-1;for stream,i in session.upgrades {if stream==nil {slot=i;break}}
  if slot<0 || event.end_stream || server_is_draining(parent.runtime) {return false}
- stream,allocated:=new(H2_Upgrade,rt.heap_allocator())
+ stream,allocated:=new(H2_Upgrade,session.allocator)
  if allocated!=nil {return false}
  stream.parent=parent;stream.handle=event.stream
  task:=&stream.connection;task.runtime=parent.runtime
  task.connection={_task=task,_secure=true,_peer_identity=tls_peer_identity(&parent.connection),socket=net.TCP_Socket(-1),_timeouts=parent.runtime.timeouts}
  if budget.same_scope(parent.resource_connection,parent.resource_connection) {
   retained,e:=budget.retain_scope(parent.resource_connection)
-  if e!=.None {free(stream,rt.heap_allocator());return false}
+  if e!=.None {free(stream,session.allocator);return false}
   task.resource_connection=retained
  }
  session.upgrades[slot]=stream

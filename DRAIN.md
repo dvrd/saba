@@ -29,8 +29,12 @@ shutdown also makes readiness false.
 Handlers and observers remain cooperative. An arbitrary callback blocking a
 worker cannot be preempted. With all workers blocked, even listener closure and
 deadline processing wait until a worker returns; `serve` cannot join until those
-callbacks finish. Keep handlers bounded or use the planned offload interface.
-No claim of preemptive cancellation or HTTP/2/3/streaming support is made.
+callbacks finish. Keep handlers bounded or use the optional offload interface.
+HTTP/2 sends its initial GOAWAY, waits for the peer checkpoint and publishes the
+final admitted stream boundary while existing requests finish. Established
+WebSockets retain their graceful close1001 shutdown policy. HTTP/3 listeners
+likewise drain admitted streams within the configured deadline. Cancellation
+remains cooperative.
 
 Run local lifecycle checks with a matching compiler:
 

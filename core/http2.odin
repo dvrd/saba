@@ -1,23 +1,17 @@
 package saba_core
 
-import http "../../http"
 import h2 "shared:http/v2"
-import hpack "shared:http/v2/hpack"
-import "core:fmt"
 import "core:mem"
-import owned "core:mem/owned"
 import "core:strings"
 import budget "core:sync/budget"
 import "core:time"
 import async "shared:async"
 
-// One buffered ordinary exchange plus bounded independent upgraded streams.
-// Resource_Config.connection_limits.streams controls concurrent admission (the
-// legacy default is one); configure at least two for an idle WebSocket plus HTTP.
-// Closed metadata remains until the grace barrier is acknowledged. Buffered
-// responses, including gzip, still enter through queue_response.
-H2_MAX_STREAMS :: 8
-H2_STREAM_SLOTS :: 8
+// One serialized socket/engine owner, independent lazily allocated request and
+// upgrade contexts. Policy grants are bounded by explicit resources/config.
+H2_DEFAULT_STREAMS :: 32
+H2_MAX_STREAMS :: 256
+H2_STREAM_SLOTS :: 8 // Initial metadata only; reserve grows up to the policy bound.
 H2_FRAME_BYTES :: 16384
 H2_BODY_BUFFER :: 64 * 1024
 H2_BODY_CHUNKS :: 8
@@ -27,24 +21,24 @@ H2_INGRESS :: 16 * 1024
 H2_NAME_SCRATCH :: 2048
 H2_FIELD_CAP :: 64
 
+Http2_Config :: struct {
+ // Zero selects 32; values through 256 bound ordinary and WebSocket streams.
+ max_concurrent_streams:int,
+}
 HTTP2_Session :: struct {
-	engine: h2.Connection,
-	allocator: mem.Allocator,
-	limits: h2.Limits,
-	engine_ready, failed, peer_gone, shutdown, request_open, receiving: bool,
-	response_ready, headers_sent, have_length, discard_input, needs_reset: bool,
-	handle: h2.Stream_Handle,
-	reap: [H2_STREAM_SLOTS]h2.Stream_Handle,
-	reap_count: int,
-	expected, body_len, body_sent, limit: int,
-	body_deadline, idle_deadline, response_deadline: time.Tick,
-	response: Response,
-	chunk: owned.Chunk,
-	ingress: [H2_INGRESS]u8,
-	ingress_len: int,
-	names: [H2_NAME_SCRATCH]u8,
-	name_used: int,
-	upgrades: [H2_UPGRADE_SLOTS]^H2_Upgrade,
+ engine:h2.Connection,
+ allocator:mem.Allocator,
+ limits:h2.Limits,
+ engine_ready,failed,peer_gone,shutdown:bool,
+ reap:[]h2.Stream_Handle,
+ reap_count:int,
+ requests:[]^H2_Request,
+ cursor:int,
+ idle_deadline,read_expires:time.Tick,
+ read_deadline:async.Deadline,
+ ingress:[H2_INGRESS]u8,
+ ingress_len:int,
+ upgrades:[]^H2_Upgrade,
 }
 
 h2_make_limits :: proc(streams: int) -> h2.Limits {
@@ -72,12 +66,17 @@ h2_selected_protocol :: proc(protocol: string) -> bool {
 	return protocol == "h2"
 }
 
+http2_config_valid :: proc(config:Http2_Config)->bool {return config.max_concurrent_streams>=0 && config.max_concurrent_streams<=H2_MAX_STREAMS}
+
 @(private)
 h2_stream_allowance :: proc(task: ^Connection_Task) -> int {
-	if !budget.same_scope(task.resource_connection, task.resource_connection) do return H2_MAX_STREAMS
+	configured:=task.runtime.config.http2.max_concurrent_streams
+ if configured==0 {configured=H2_DEFAULT_STREAMS}
+ if configured<1 || configured>H2_MAX_STREAMS {return -1}
+ if !budget.same_scope(task.resource_connection, task.resource_connection) {return configured}
 	view, error := budget.snapshot(task.resource_connection)
 	if error != .None || view.limits.streams == 0 do return 0
-	if view.limits.streams > u64(H2_MAX_STREAMS) do return H2_MAX_STREAMS
+	if view.limits.streams > u64(configured) {return configured}
 	return int(view.limits.streams)
 }
 
@@ -85,7 +84,10 @@ h2_stream_allowance :: proc(task: ^Connection_Task) -> int {
 h2_begin :: proc(task: ^Connection_Task) -> bool {
 	if task.http2 != nil do return true
 	allowance := h2_stream_allowance(task)
-	limits := h2_make_limits(allowance)
+	if allowance<0 {return false}
+ limits := h2_make_limits(allowance)
+ limits.body_chunks=max(H2_BODY_CHUNKS,2*allowance)
+ limits.retained_body_bytes=max(H2_BODY_BUFFER,2*allowance*H2_FRAME_BYTES)
 	if h2.limits_validate(limits).kind != .None do return false
 	allocator := connection_storage_allocator(task)
 	if allocator.procedure == nil do return false
@@ -93,12 +95,17 @@ h2_begin :: proc(task: ^Connection_Task) -> bool {
 	if alloc_error != nil || session == nil do return false
 	session.allocator = allocator
 	session.limits = limits
+ requests,request_error:=make([]^H2_Request,allowance,allocator)
+ reap,reap_error:=make([]h2.Stream_Handle,max(2,2*allowance),allocator)
+ upgrades,upgrade_error:=make([]^H2_Upgrade,allowance,allocator)
+ if request_error!=nil || reap_error!=nil || upgrade_error!=nil {delete(requests,allocator);delete(reap,allocator);delete(upgrades,allocator);free(session,allocator);return false}
+ session.requests=requests;session.reap=reap;session.upgrades=upgrades
 	scope: budget.Scope
 	if budget.same_scope(task.resource_connection, task.resource_connection) {
 		scope = task.resource_connection
 	}
 	options := h2.Engine_Options{
-		max_stream_capacity = H2_STREAM_SLOTS,
+		max_stream_capacity = max(2,2*allowance),
 		control_frame_bytes = 256,
 		header_sections = 4,
 		enable_push = false,
@@ -106,10 +113,11 @@ h2_begin :: proc(task: ^Connection_Task) -> bool {
 		enable_connect_protocol = true,
 	}
 	init_error := h2.connection_init(&session.engine, {
-		role = .Server, limits = limits, initial_stream_capacity = H2_STREAM_SLOTS, scope = scope,
+		role = .Server, limits = limits, initial_stream_capacity = min(H2_STREAM_SLOTS,max(2,2*allowance)), scope = scope,
 	}, options, allocator)
 	if init_error.kind != .None {
-		free(session, allocator)
+		delete(session.requests,allocator);delete(session.reap,allocator);delete(session.upgrades,allocator)
+  free(session, allocator)
 		return false
 	}
 	session.engine_ready = true
@@ -123,11 +131,8 @@ h2_destroy :: proc(task: ^Connection_Task) {
 	session := task.http2
 	if session == nil do return
 	for stream in session.upgrades {if stream!=nil {h2_upgrade_release(stream)}}
-	task.http2 = nil
-	owned.destroy(&session.chunk)
-	if session.response_ready {
-		discard_response(&session.response)
-	}
+	for request in session.requests {if request!=nil {h2_request_release(request,false,.Shutdown)}}
+ task.http2 = nil
 	if session.engine_ready {
 		if view, borrowed := h2.connection_output_front(&session.engine); borrowed {
 			_ = h2.connection_output_release(&session.engine, view.token)
@@ -139,45 +144,8 @@ h2_destroy :: proc(task: ^Connection_Task) {
 		}
 		_ = h2.connection_destroy(&session.engine)
 	}
-	free(session, session.allocator)
-}
-
-@(private)
-h2_queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
-	session := task.http2
-	if session == nil || session.failed || session.response_ready {
-		discarded := response
-		discard_response(&discarded)
-		return false
-	}
-	prepared := response
-	unsupported := stream_present(prepared.stream) || deferred_present(prepared.deferred) ||
-		prepared.upgrade.resume != nil || prepared.upgrade.drop != nil || prepared.upgrade.data != nil ||
-		prepared.status == .Switching_Protocols
-	if unsupported {
-		discard_response(&prepared)
-		prepared = {status = .Not_Implemented}
-	}
-	content_coding_prepare(&task.request, &prepared)
-	if stream_present(prepared.stream) {
-		discard_response(&prepared)
-		prepared = {status = .Not_Implemented}
-	}
-	if !resource_copy_response(task, &prepared) {
-		discard_response(&prepared)
-		session.failed = true
-		return false
-	}
-	if prepared.status == .None do prepared.status = .OK
-	session.response = prepared
-	session.response_ready = true
-	session.headers_sent = false
-	session.body_sent = 0
-	session.response_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.response)
-	task.event.status = prepared.status
-	if prepared.status == .Request_Timeout do observe_failure(task, .Timeout)
-	if prepared.status == .Request_Header_Fields_Too_Large do observe_failure(task, .Protocol_Error)
-	return true
+	delete(session.requests,session.allocator);delete(session.reap,session.allocator);delete(session.upgrades,session.allocator)
+ free(session, session.allocator)
 }
 
 @(private)
@@ -186,26 +154,6 @@ h2_shutdown :: proc(task: ^Connection_Task) {
 	if session == nil || !session.engine_ready || session.shutdown || session.failed do return
 	error := h2.connection_shutdown_begin(&session.engine)
 	if error.kind == .None || error.kind == .Closed do session.shutdown = true
-}
-
-@(private)
-h2_reset_stream :: proc(task: ^Connection_Task, code: h2.Error_Code) -> bool {
-	session := task.http2
-	if session == nil || !session.engine_ready do return true
-	session.receiving = false
-	session.needs_reset = true
-	if session.handle == {} {
-		session.needs_reset = false
-		session.request_open = false
-		return true
-	}
-	error := h2.connection_reset(&session.engine, session.handle, code)
-	if error.kind == .Limit_Exceeded do return false
-	h2_remember(session, session.handle)
-	session.needs_reset = false
-	session.request_open = false
-	session.handle = {}
-	return true
 }
 
 @(private)
@@ -247,57 +195,6 @@ h2_settle :: proc(task: ^Connection_Task) {
 }
 
 @(private)
-h2_finish_request :: proc(task: ^Connection_Task, success: bool) {
-	session := task.http2
-	if session == nil do return
-	if session.response_ready {
-		discard_response(&session.response)
-		session.response_ready = false
-	}
-	owned.destroy(&session.chunk)
-	session.headers_sent = false
-	session.body_sent = 0
-	session.request_open = false
-	session.receiving = false
-	session.needs_reset = false
-	session.have_length = false
-	session.discard_input = false
-	h2_remember(session, session.handle)
-	session.handle = {}
-	session.body_len = 0
-	session.response_deadline = {}
-	if success do task.response_finished = true
-	task.requests_completed += 1
-	finish_request_context(task)
-	observe_finish(task)
-	task.request = {}
-	task.header = nil
-	task.output = {}
-	task.header_used, task.body_used = 0, 0
-	mem.dynamic_arena_destroy(&task.arena)
-	finish_operation_resources(task)
-	if !start_operation_resources(task) {
-		session.failed = true
-		return
-	}
-	init_connection_arena(task)
-	session.idle_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.idle)
-}
-
-@(private)
-h2_lower_name :: proc(session: ^HTTP2_Session, name: string) -> string {
-	start := session.name_used
-	for index in 0 ..< len(name) {
-		if session.name_used >= len(session.names) do return ""
-		byte := name[index]
-		if byte >= 'A' && byte <= 'Z' do byte += 32
-		session.names[session.name_used] = byte
-		session.name_used += 1
-	}
-	return string(session.names[start:session.name_used])
-}
-
-@(private)
 h2_skip_response_header :: proc(name: string) -> bool {
 	switch name {
 	case "connection", "proxy-connection", "keep-alive", "upgrade", "transfer-encoding", "te", "content-length":
@@ -307,267 +204,10 @@ h2_skip_response_header :: proc(name: string) -> bool {
 }
 
 @(private)
-h2_submit_response :: proc(task: ^Connection_Task) -> bool {
-	session := task.http2
-	if session == nil || !session.response_ready || session.failed do return false
-	progress := false
-	code := int(session.response.status)
-	if code == 0 do code = 200
-	send_body := http.response_body_allowed(code, task.request.method) && len(session.response.body) > 0
-	if !session.headers_sent {
-		session.name_used = 0
-		fields: [H2_FIELD_CAP]hpack.Field
-		status_text: [3]u8
-		status_text[0] = u8('0' + code / 100)
-		status_text[1] = u8('0' + (code / 10) % 10)
-		status_text[2] = u8('0' + code % 10)
-		count := 0
-		fields[count] = {":status", string(status_text[:]), false}
-		count += 1
-		for header in session.response.headers {
-			if count + 1 >= len(fields) do break
-			lowered := h2_lower_name(session, header.name)
-			if lowered == "" || h2_skip_response_header(lowered) do continue
-			fields[count] = {lowered, header.value, false}
-			count += 1
-		}
-		length_text: [32]u8
-		if send_body || task.request.method == "HEAD" {
-			fields[count] = {"content-length", fmt.bprintf(length_text[:], "%d", len(session.response.body)), false}
-			count += 1
-		}
-		error := h2.connection_send_headers(&session.engine, session.handle, fields[:count], !send_body)
-		if error.kind == .Limit_Exceeded do return progress
-		if error.kind != .None {
-			session.failed = true
-			return progress
-		}
-		session.headers_sent = true
-		progress = true
-		if !send_body {
-			close_connection := session.response.close_connection
-			h2_finish_request(task, true)
-			if close_connection || server_is_draining(task.runtime) do h2_shutdown(task)
-			return true
-		}
-	}
-	for session.body_sent < len(session.response.body) {
-		if len(session.chunk.storage) == 0 {
-			amount := min(H2_FRAME_BYTES, len(session.response.body) - session.body_sent)
-			chunk, alloc := owned.allocate(amount, session.allocator)
-			if alloc.kind != .None {
-				session.failed = true
-				return progress
-			}
-			copy(chunk.data, session.response.body[session.body_sent:][:amount])
-			session.chunk = chunk
-		}
-		amount := len(session.chunk.data)
-		end := session.body_sent + amount == len(session.response.body)
-		error := h2.connection_send_data(&session.engine, session.handle, &session.chunk, end)
-		if error.kind == .Limit_Exceeded do return progress
-		if error.kind != .None {
-			owned.destroy(&session.chunk)
-			session.failed = true
-			return progress
-		}
-		session.body_sent += amount
-		progress = true
-		if end {
-			close_connection := session.response.close_connection
-			h2_finish_request(task, true)
-			if close_connection || server_is_draining(task.runtime) do h2_shutdown(task)
-			return true
-		}
-	}
-	return progress
-}
-
-@(private)
 h2_clone :: proc(value: string, allocator: mem.Allocator) -> (string, bool) {
 	if len(value) == 0 do return "", true
 	copy, error := strings.clone(value, allocator)
 	return copy, error == nil
-}
-
-@(private)
-h2_open_request :: proc(task: ^Connection_Task, summary: h2.Header_Summary, end_stream: bool) -> bool {
-	session := task.http2
-	if task.observation_finished {
-		task.observed = false
-		task.observation_finished = false
-		task.response_finished = false
-		task.event = {}
-		observe_start(task)
-	}
-	allocator := mem.dynamic_arena_allocator(&task.arena)
-	method, method_ok := h2_clone(summary.method, allocator)
-	path_raw, path_ok := h2_clone(summary.path, allocator)
-	authority, authority_ok := h2_clone(summary.authority, allocator)
-	if !method_ok || !path_ok || !authority_ok {
-		session.failed = true
-		return false
-	}
-	path, query := path_raw, ""
-	if mark := strings.index(path, "?"); mark >= 0 {
-		query = path[mark + 1:]
-		path = path[:mark]
-	}
-	regular := 0
-	has_host := false
-	for field in summary.fields {
-		if len(field.name) == 0 || field.name[0] == ':' do continue
-		if strings.equal_fold(field.name, "host") do has_host = true
-		regular += 1
-	}
-	if !has_host && authority != "" do regular += 1
-	if regular > REQUEST_HEADER_COUNT_LIMIT {
-		observe_failure(task, .Protocol_Error)
-		return false
-	}
-	headers, header_error := make([]Header, regular, allocator)
-	if header_error != nil {
-		session.failed = true
-		return false
-	}
-	index := 0
-	for field in summary.fields {
-		if len(field.name) == 0 || field.name[0] == ':' do continue
-		name, name_ok := h2_clone(field.name, allocator)
-		value, value_ok := h2_clone(field.value, allocator)
-		if !name_ok || !value_ok {
-			session.failed = true
-			return false
-		}
-		headers[index] = {name, value}
-		index += 1
-	}
-	if !has_host && authority != "" {
-		headers[index] = {"host", authority}
-		index += 1
-	}
-	limit := REQUEST_BODY_LIMIT
-	request := Request{
-		resources = task.resource_operation,
-		backing_allocator = connection_storage_allocator(task),
-		allocator = allocator,
-		method = method,
-		path = path,
-		query = query,
-		version = "HTTP/2",
-		headers = headers[:index],
-		request_id = task.event.request_id,
-		_observe = task.observed,
-	}
-	task.request = request
-	if task.runtime.config.request_body_limit != nil {
-		limit = task.runtime.config.request_body_limit(&task.request)
-	}
-	if limit < 0 {
-		observe_failure(task, .Protocol_Error)
-		return false
-	}
-	expected := 0
-	have_length := false
-	if length, present := summary.content_length.?; present {
-		if length > u64(max(int)) || int(length) > limit {
-			observe_failure(task, .Protocol_Error)
-			return false
-		}
-		expected = int(length)
-		have_length = true
-	}
-	capacity := expected if have_length else limit
-	if !end_stream || (have_length && expected > 0) {
-		body, body_error := make([]u8, capacity, allocator)
-		if body_error != nil {
-			session.failed = true
-			return false
-		}
-		task.request.body = body
-	}
-	task.request.has_content_length = have_length
-	task.request.content_length = expected
-	session.have_length = have_length
-	session.expected = expected
-	session.limit = capacity
-	session.body_len = 0
-	session.request_open = true
-	session.receiving = !end_stream
-	duration := body_timeout(task.runtime.timeouts, expected if have_length else 0)
-	session.body_deadline = time.tick_add(time.tick_now(), duration)
-	if task.observed do task.event.method = method
-	if end_stream do h2_complete_request(task)
-	return true
-}
-
-@(private)
-h2_complete_request :: proc(task: ^Connection_Task) {
-	session := task.http2
-	if session == nil || session.response_ready || session.failed do return
-	session.receiving = false
-	if session.have_length && session.body_len != session.expected {
-		observe_failure(task, .Protocol_Error)
-		if !queue_response(task, {status = .Bad_Request, close_connection = true}) {
-			session.failed = true
-		}
-		return
-	}
-	if task.request.body != nil {
-		task.request.body = task.request.body[:session.body_len]
-	}
-	task.request.content_length = session.body_len
-	if task.runtime.config.handler == nil {
-		session.failed = true
-		return
-	}
-	response := dispatch_request(task)
-	if !queue_response(task, response) do session.failed = true
-}
-
-@(private)
-h2_append_body :: proc(task: ^Connection_Task, view: []u8) -> bool {
-	session := task.http2
-	if session.body_len > session.limit || len(view) > session.limit - session.body_len do return false
-	if len(view) > 0 {
-		if task.request.body == nil do return false
-		copy(task.request.body[session.body_len:], view)
-		session.body_len += len(view)
-		if task.observed do task.event.bytes_received += u64(len(view))
-	}
-	if session.have_length && session.body_len > session.expected do return false
-	return true
-}
-
-@(private)
-h2_on_data :: proc(task: ^Connection_Task, event: h2.Event_View, value: h2.Data_Event) -> bool {
-	session := task.http2
-	if !session.request_open || value.stream != session.handle {
-		return false
-	}
-	owner: h2.Incoming_Data
-	if h2.connection_data_take(&session.engine, event.token, &owner).kind != .None do return false
-	view, ok := h2.incoming_data_bytes(&owner)
-	if !ok do view = nil
-	accepted := !session.discard_input && session.receiving && h2_append_body(task, view)
-	if len(view) == 0 || !accepted {
-		_ = h2.connection_discard(&session.engine, value.consumption)
-	} else {
-		_ = h2.connection_consume(&session.engine, value.consumption, u32(len(view)))
-	}
-	h2.incoming_data_destroy(&owner)
-	if !accepted && session.receiving {
-		observe_failure(task, .Protocol_Error)
-		session.receiving = false
-		session.discard_input = true
-		if !queue_response(task, {status = .Content_Too_Large, close_connection = true}) {
-			_ = h2_reset_stream(task, .Cancel)
-			h2_finish_request(task, false)
-		}
-		return true
-	}
-	if value.end_stream && session.receiving do h2_complete_request(task)
-	return true
 }
 
 @(private)
@@ -581,44 +221,26 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 		taken := false
 		switch value in event.payload {
 		case h2.Ready_Event, h2.Peer_Settings_Event, h2.Ping_Ack_Event:
-		case h2.Headers_Event:
-			if value.kind == .Trailers {
-				if session.request_open && value.stream == session.handle && session.receiving {
-					h2_complete_request(task)
-				}
-			} else if value.kind == .Request && value.summary.protocol!="" {
-				if !h2_upgrade_open(task,value) {_=h2.connection_reset(&session.engine,value.stream,.Refused_Stream);h2_remember(session,value.stream)}
-			} else if value.kind == .Request {
-				if session.request_open || session.response_ready || server_is_draining(task.runtime) || session.shutdown || session.needs_reset {
-					_ = h2.connection_reset(&session.engine, value.stream, .Refused_Stream)
-					h2_remember(session, value.stream)
-				} else {
-					session.handle = value.stream
-					session.request_open = true
-					if !h2_open_request(task, value.summary, value.end_stream) {
-						if h2_reset_stream(task, .Cancel) do h2_finish_request(task, false)
-					}
-				}
-			}
-		case h2.Data_Event:
-			if stream:=h2_upgrade_find(task,value.stream);stream!=nil {
-				taken=h2_upgrade_data(stream,event,value)
-				if !taken {_=h2.connection_reset(&session.engine,value.stream,.Cancel);h2_upgrade_release(stream)}
-			} else {taken = h2_on_data(task, event, value)}
-		case h2.Stream_End_Event:
-			if stream:=h2_upgrade_find(task,value.stream);stream!=nil {stream.remote_end=true}
-			if session.request_open && value.stream == session.handle && session.receiving {
-				h2_complete_request(task)
-			}
-		case h2.Reset_Event:
-			if stream:=h2_upgrade_find(task,value.stream);stream!=nil {h2_upgrade_reset(stream)}
-			h2_remember(session, value.stream)
-			if session.request_open && value.stream == session.handle {
-				session.request_open = false
-				session.receiving = false
-				observe_failure(task, .Cancelled)
-				h2_finish_request(task, false)
-			}
+  case h2.Headers_Event:
+   if value.kind==.Trailers {
+    if request:=h2_request_find(task,value.stream);request!=nil && request.receiving {h2_request_trailers(request,value.summary.fields);h2_request_complete(&request.task)}
+   } else if value.kind==.Request && value.summary.protocol!="" {
+    if !h2_upgrade_open(task,value) {_=h2.connection_reset(&session.engine,value.stream,.Refused_Stream);h2_remember(session,value.stream)}
+   } else if value.kind==.Request {
+    if !h2_request_open(task,value) {_=h2.connection_reset(&session.engine,value.stream,.Refused_Stream);h2_remember(session,value.stream)}
+   }
+  case h2.Data_Event:
+   if stream:=h2_upgrade_find(task,value.stream);stream!=nil {
+    taken=h2_upgrade_data(stream,event,value)
+    if !taken {_=h2.connection_reset(&session.engine,value.stream,.Cancel);h2_upgrade_release(stream)}
+   } else if request:=h2_request_find(task,value.stream);request!=nil {taken=h2_request_data(request,event,value)}
+  case h2.Stream_End_Event:
+   if stream:=h2_upgrade_find(task,value.stream);stream!=nil {stream.remote_end=true}
+   if request:=h2_request_find(task,value.stream);request!=nil && request.receiving {h2_request_complete(&request.task)}
+  case h2.Reset_Event:
+   if stream:=h2_upgrade_find(task,value.stream);stream!=nil {h2_upgrade_reset(stream)}
+   if request:=h2_request_find(task,value.stream);request!=nil {h2_request_release(request,false,.Peer_Closed)}
+   h2_remember(session,value.stream)
 		case h2.Promise_Event:
 			// promise_policy is Decline. Releasing the event is enough.
 		case h2.Goaway_Event:
@@ -637,13 +259,19 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 }
 
 @(private)
-h2_wait_budget :: proc(task: ^Connection_Task) -> time.Duration {
+h2_next_deadline :: proc(task: ^Connection_Task) -> time.Tick {
 	session := task.http2
 	deadline := session.idle_deadline
-	if session.receiving do deadline = session.body_deadline
-	if session.response_ready do deadline = session.response_deadline
-	if deadline == {} do return task.runtime.timeouts.header
-	remaining := time.tick_diff(time.tick_now(), deadline)
+	for request in session.requests {if request!=nil {
+  candidate:=request.body_deadline if request.receiving else request.response_deadline
+  if candidate!=(time.Tick{}) && (deadline==(time.Tick{}) || time.tick_diff(candidate,deadline)>0) {deadline=candidate}
+ }}
+	if deadline == {} {return time.tick_add(time.tick_now(),task.runtime.timeouts.header)}
+ return deadline
+}
+@(private)
+h2_wait_budget :: proc(task:^Connection_Task)->time.Duration {
+	remaining := time.tick_diff(time.tick_now(), h2_next_deadline(task))
 	if remaining < 0 do return 0
 	return remaining
 }
@@ -651,17 +279,7 @@ h2_wait_budget :: proc(task: ^Connection_Task) -> time.Duration {
 @(private)
 h2_check_deadlines :: proc(task: ^Connection_Task) -> bool {
 	session := task.http2
-	if session.receiving && deadline_expired(session.body_deadline) {
-		observe_failure(task, .Timeout)
-		if h2_reset_stream(task, .Cancel) {
-			h2_finish_request(task, false)
-			return true
-		}
-	}
-	if !session.request_open && !session.response_ready && h2_upgrade_count(task)==0 && deadline_expired(session.idle_deadline) {
-		h2_shutdown(task)
-		return true
-	}
+ if h2_request_count(task)==0 && h2_upgrade_count(task)==0 && deadline_expired(session.idle_deadline) {h2_shutdown(task);return true}
 	if server_is_draining(task.runtime) {
 		h2_shutdown(task)
 	}
@@ -673,8 +291,14 @@ h2_read :: proc(task: ^Connection_Task) -> (bool, bool) {
 	session := task.http2
 	if session.failed || session.peer_gone do return false, false
 	if session.ingress_len == len(session.ingress) do return false, false
-	task.deadline = async.deadline_after(&task.runtime.executor, h2_wait_budget(task))
-	n, error := transport_read(task, session.ingress[session.ingress_len:], task.deadline)
+	expires:=h2_next_deadline(task)
+ if session.read_expires!=expires {
+  session.read_expires=expires
+  session.read_deadline=async.deadline_after(&task.runtime.executor,max(time.Duration(0),time.tick_diff(time.tick_now(),expires)))
+ }
+ // Preserve the exact async deadline while a TLS read is outstanding. Rebuilding
+ // it from two clock samples would repeatedly cancel the same read under load.
+	n, error := transport_read(task, session.ingress[session.ingress_len:], session.read_deadline)
 	if n > 0 {
 		session.ingress_len += n
 		session.idle_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.idle)
@@ -709,7 +333,14 @@ h2_feed :: proc(task: ^Connection_Task) -> bool {
 		session.failed = true
 		session.ingress_len = 0
 	}
-	if fed.work_used > 0 do progress = true
+	if fed.status==.Backpressure && fed.reason==.Metadata {
+  stats,ok:=h2.connection_stats(&session.engine)
+  if ok && stats.metadata_capacity<stats.max_stream_capacity {
+   capacity:=min(stats.max_stream_capacity,max(2*stats.metadata_capacity,1))
+   if h2.connection_reserve_streams(&session.engine,capacity).kind==.None {progress=true}
+  }
+ }
+ if fed.work_used > 0 do progress = true
 	return progress
 }
 
@@ -727,7 +358,7 @@ h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 	task.deadline = async.deadline_after(&task.runtime.executor, h2_wait_budget(task))
 	if state.write_started {
 		n, error := transport_write(task, nil, task.deadline)
-		if error.kind == .Pending do return false, true
+  if error.kind == .Pending do return false, true
 		view, borrowed := h2.connection_output_front(&session.engine)
 		if borrowed {
 			if error.kind == .None && n > 0 {
@@ -790,11 +421,11 @@ h2_finished :: proc(task: ^Connection_Task) -> bool {
 	writing := task.tls_state != nil && task.tls_state.write_started
 	if pending || writing do return false
 	if session.failed || session.peer_gone do return true
-	if h2_upgrade_count(task)>0 do return false
+	if h2_upgrade_count(task)>0 || h2_request_count(task)>0 do return false
 	if !session.shutdown do return false
 	stats, ok := h2.connection_shutdown_status(&session.engine)
 	if !ok do return false
-	return stats.phase == .Draining || stats.phase == .Complete || stats.phase == .Aborted || stats.phase == .Final
+	return stats.phase == .Draining || stats.phase == .Complete || stats.phase == .Aborted
 }
 
 @(private)
@@ -804,9 +435,6 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	if async.cancelled(&task.task) {
 		if !session.failed do _ = h2.connection_abort(&session.engine, {kind = .Closed})
 		return .Done
-	}
-	if session.needs_reset && h2_reset_stream(task, .Cancel) && !session.response_ready {
-		h2_finish_request(task, false)
 	}
 	waiting := false
 	for _ in 0 ..< 8 {
@@ -818,7 +446,7 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		if read_wait do waiting = true
 		if h2_feed(task) do progress = true
 		if h2_pump_events(task) do progress = true
-		if h2_submit_response(task) do progress = true
+		if h2_requests_pump(task) {progress=true}
 		if h2_upgrade_pump(task) do progress = true
 		h2_pump_engine(task)
 		if h2_pump_events(task) do progress = true
@@ -827,11 +455,16 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		if write_wait do waiting = true
 		if h2_finished(task) do return .Done
 		if progress do continue
-		if h2_upgrade_count(task)>0 {_=async.sleep_until_earlier(&task.runtime.executor,async.deadline_after(&task.runtime.executor,time.Millisecond))}
+		if h2_upgrade_count(task)>0 || h2_request_count(task)>0 {_=async.sleep_until_earlier(&task.runtime.executor,async.deadline_after(&task.runtime.executor,time.Millisecond))}
 		if waiting do return .Waiting
 		break
 	}
 	if h2_finished(task) do return .Done
+ // The bounded turn may exhaust its work while the read is still armed. Ready
+ // response queues need another owner turn even when the peer sends no bytes.
+ if h2_request_count(task)>0 || h2_upgrade_count(task)>0 || h2_output_pending(session) {
+  _=async.sleep_until_earlier(&task.runtime.executor,async.deadline_after(&task.runtime.executor,time.Millisecond))
+ }
 	if waiting do return .Waiting
 	return .Yield
 }

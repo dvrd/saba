@@ -9,7 +9,7 @@ buffers, allocator-internal rounding or arbitrary host caches.
 | Limit | Operation | Connection | Server |
 | --- | ---: | ---: | ---: |
 | Managed backing bytes | 32 MiB | 64 MiB | 256 MiB |
-| Active streaming exchanges | 1 | 1 | 128 |
+| Protocol streams / streaming exchanges | 1 | 64 | 4096 |
 | Retained blocking jobs | 1 | 4 | 128 |
 
 `Server.resources` is `Resource_Config`. Nil `operation_limits`, `connection_limits`
@@ -45,7 +45,7 @@ suspension; HEAD retains no unsent host body and preserves its representation
 length while encoding headers; applications should account for the real overlap of those copies.
 Host-owned preloaded caches retain their separate host ownership and limits.
 
-A refused allocation produces a fixed-storage503+close before a head is committed;
+A refused HTTP/1 allocation produces a fixed-storage503+close before a head is committed;
 no successful allocation is needed to emit that rejection. Known408 timeout and
 413 body-policy statuses keep their status through the same fixed-buffer encoder.
 A deferred Build copy failure under byte pressure also emits503 before any head. Existing request body
@@ -56,12 +56,18 @@ only when backing is physically freed or its admitted resource retires.
 
 ## Streaming ownership
 
-Only streaming HTTP exchanges consume the server stream allowance; ordinary
-buffered HTTP/1 responses consume bytes/jobs as applicable. HTTP Exchange owns the
+HTTP/2 protocol streams each own one engine stream lease; an ordinary response
+producer additionally owns its operation-scoped exchange lease. Default connection
+credit therefore supports 32 concurrent streaming responses. Explicit smaller
+resource limits remain authoritative and can reject only the affected request.
+Buffered HTTP/1 responses consume bytes/jobs as applicable; streaming HTTP/1
+responses consume their exchange lease. HTTP Exchange owns the
 single stream lease from initialization through complete/cancel/destroy terminal
 cleanup. Producer drop is bounded cleanup after chunk release, outside locks; its
 physical managed backing remains byte-charged until actual free even after the
-exchange becomes terminal. A second Saba stream lease is never acquired.
+exchange becomes terminal. Saba acquires no additional bookkeeping lease. HTTP/2 allocation rejection emits
+a local503 before response headers, or resets only that stream after headers;
+other admitted requests retain their resources and continue.
 
 `Stream_IO.resources` and `backing_allocator` are borrowed during next. Allocate
 individually owned chunks with that backing allocator to make provenance explicit.

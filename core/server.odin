@@ -50,6 +50,7 @@ Connection_Task :: struct {
 	connection:                         Connection,
 	tls_state: ^TLS_State,
 	http2: ^HTTP2_Session,
+	http2_request: ^H2_Request,
 	socket:                             async.Socket,
 	native_pending:                     bool,
 	arena:                              mem.Dynamic_Arena,

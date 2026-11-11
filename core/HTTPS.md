@@ -54,20 +54,28 @@ preemptible inside an individual signature operation.
 ## HTTP behavior and upgrades
 
 The listener offers `h2` before `http/1.1`, accepts clients without ALPN, and
-rejects incompatible ALPN offers. Exact negotiated `h2` uses `shared:http/v2`
-for one buffered stream at a time: frame payload 16 KiB, header block and list
-8 KiB, 128 fields, 4 KiB HPACK table, 64 KiB retained body. The stream lease is
-the connection budget (`min(budget.streams, 1)`). Eight metadata slots retain
-closed streams until the grace barrier is acknowledged; that does not add a
-second exchange lease. Flow-control credit is
-returned through that engine. A stalled body hits the body deadline and
-`RST_STREAM` `CANCEL`. A connection error queues `GOAWAY` and closes that
-connection. Graceful shutdown uses the engine's GOAWAY barrier. Stream,
-deferred, and `101` responses are answered `501` on this path so gzip policy
-stays in `queue_response` and a second stream lease is not taken. This is not
-a claim of public-internet interoperability. Routing, chunked requests,
-streams, deferred responses, assets, pages and development reload continue to
-use the HTTP/1 transport after TLS when ALPN is not `h2`.
+rejects incompatible ALPN offers. Exact negotiated `h2` uses `shared:http/v2`:
+frame payload 16 KiB, header block/list 8 KiB, 128 fields and 4 KiB HPACK table.
+`Server.http2.max_concurrent_streams` selects 1–256 concurrent protocol streams;
+zero selects32, capped by the connection resource stream budget. Metadata starts
+at eight slots and grows within the policy ceiling, with bounded spare slots for
+closed-stream grace. Request arenas and operation contexts are allocated lazily.
+
+Ordinary uploads, buffered responses, response producers, deferred/offload
+continuations and RFC8441 WebSockets have independent lifetimes under one socket
+owner. Each protocol stream has an engine lease; a response producer additionally
+owns its operation-scoped exchange lease. Flow-control-blocked streams retain
+bounded output and do not prevent another request from progressing. A body or
+response deadline cancels only its stream; allocation rejection emits a local503
+before headers or resets that stream after headers. Gzip policy remains in the
+ordinary response queue. HTTP/1-style101 upgrades are rejected on ordinary H2
+requests; WebSockets use negotiated Extended CONNECT and explicit stream I/O.
+
+Connection errors close that connection. Graceful H2 shutdown sends the initial
+GOAWAY, waits for the peer checkpoint, then publishes the final admitted boundary.
+Peer GOAWAY retains admitted WebSockets; global server drain keeps their existing
+close1001 policy. Clients negotiating HTTP/1 retain the existing TLS HTTP/1 path.
+The independent loopback gates do not certify every public deployment or peer.
 
 Upgrade continuations use `upgrade_read` and `upgrade_write`. A write buffer must
 remain unchanged after Pending until its terminal return. `Upgrade_IO.socket`

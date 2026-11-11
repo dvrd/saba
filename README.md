@@ -686,3 +686,30 @@ Set `Server.tls` (or `application.Config.server.tls`) to a caller-owned
 `core.TLS_Config` using a validated Core credential store. Nil preserves HTTP.
 See [HTTPS configuration and ownership](core/HTTPS.md) for bounds, rotation,
 shutdown, transport-aware upgrades, typed events and synchronous facade limits.
+
+
+## Concurrent HTTP/2 requests
+
+Native HTTPS negotiates `h2` when offered. Set
+`Server.http2.max_concurrent_streams` to 1–256; zero selects 32. The advertised
+SETTINGS grant is capped by the connection resource stream budget. Metadata
+starts at eight slots and grows within a finite ceiling; request arenas,
+cancellation contexts, deferred continuations and response producers are allocated
+on stream admission. Each stream retains its own operation resources and deadline.
+
+One serialized socket owner services ready streams in rotation. An incomplete
+upload, deferred handler, flow-control-blocked producer or idle WebSocket does
+not hold the ordinary request slot. Output retains at most one bounded DATA
+submission per ordinary stream. Response streams, trailers, content coding and
+optional offload continuations use the existing response APIs. A reset cancels
+only its request and drops each producer/continuation once. Graceful GOAWAY waits
+for the peer checkpoint before final connection admission closes; global server
+drain retains the existing WebSocket close1001 behavior.
+
+The independent raw Go peer gate checks 23 live streams, more than 32 lifetime
+IDs, blocked-window fairness, cancellation, local resource rejection and both
+peer GOAWAY and global drain:
+
+```sh
+python3 saba/tests/http2_multiplex.py --odin /path/to/odin --sanitize address --report /tmp/h2-multiplex.json
+```

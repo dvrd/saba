@@ -95,5 +95,6 @@ DEFAULT_SERVER_RESOURCES :: core.DEFAULT_SERVER_RESOURCES
 
 request_connection_resources :: core.request_connection_resources
 
+Http2_Config :: core.Http2_Config
 Http3_Config :: core.Http3_Config
 server_http3_endpoint :: core.server_http3_endpoint

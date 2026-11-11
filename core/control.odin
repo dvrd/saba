@@ -103,3 +103,11 @@ server_stop_requested :: proc(control: ^Server_Control) -> bool {
 	defer sync.unlock(&control._mutex)
 	return control._stop_requested || control._drain_requested
 }
+
+// The UDP address is published only while the normal server is running.
+server_http3_endpoint :: proc(control: ^Server_Control) -> (net.Endpoint, bool) {
+ if control == nil do return {}, false
+ sync.lock(&control._mutex); defer sync.unlock(&control._mutex)
+ if control._server == nil || !control._server.config.http3.enabled do return {}, false
+ return control._server.http3.config.endpoint, true
+}

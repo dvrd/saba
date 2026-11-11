@@ -5,6 +5,7 @@ import application "application"
 import db "shared:kakunou"
 import "core:mem"
 import "core:testing"
+import "core:log"
 import "core:time"
 
 @(test)
@@ -31,4 +32,18 @@ facade_handler_view_preserves_typed_database_and_io_without_allocation :: proc(t
 	testing.expect_value(t,transport.read_buffer[0],u8('b'))
 	testing.expect(t,transport.write_deadline!=time.Tick{})
 	testing.expect_value(t,tracker.total_memory_allocated,i64(0))
+}
+
+@(test)
+facade_http3_configuration_reaches_owned_runtime :: proc(t:^testing.T) {
+ context.logger=log.nil_logger()
+ // Without forwarding enabled HTTP3, the remembered stop would instead make
+ // the ordinary TCP server return success. Missing credentials must fail first.
+ control:Server_Control
+ stop_server(&control)
+ config:=Server{control=&control,http3=Http3_Config{enabled=true},
+  handler=proc(_: ^Connection,_:^Request)->Response{return {}}}
+ testing.expect(t,!serve(config))
+ endpoint,ready:=server_http3_endpoint(&control)
+ testing.expect(t,!ready && endpoint.port==0)
 }

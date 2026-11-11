@@ -21,6 +21,7 @@ ACCEPT_RETRY_INTERVAL :: 100 * time.Millisecond
 
 Server :: struct {
 	tls: ^TLS_Config,
+	http3: Http3_Config,
 	resources: Resource_Config,
 	address:              string,
 	port:                 int,
@@ -57,6 +58,7 @@ Server_Runtime :: struct {
 	logger:                                  log.Logger,
 	executor:                                async.Runtime,
 	accept_task:                             async.Task,
+	http3: Http3,
 	listener:                                async.Socket,
 	accept_retry:                            async.Deadline,
 	drain_mutex:                             sync.Mutex,
@@ -131,7 +133,7 @@ serve :: proc(config: Server) -> bool {
 		&runtime.executor,
 		{
 			workers = workers,
-			task_capacity = initial + workers + 1,
+			task_capacity = initial + workers + 2,
 			io_capacity = initial + 1,
 			allocator = config.runtime_allocator,
 		},
@@ -142,6 +144,17 @@ serve :: proc(config: Server) -> bool {
 	defer {
 		unpublish_server(config.control)
 		async.destroy(&runtime.executor)
+	}
+	if config.http3.enabled {
+		runtime.http3.config = config.http3
+		runtime.http3.runtime = runtime
+		if _, ok := http3_listen(&runtime.http3); !ok {
+			log.error("Could not start HTTP3 listener"); return false
+		}
+		runtime.http3.task = {resume=http3_resume, data=&runtime.http3, on_done=http3_retire}
+		if e := async.spawn(&runtime.executor, &runtime.http3.task); e.kind != .None {
+			http3_close(&runtime.http3); return false
+		}
 	}
 	runtime.accept_task = {
 		resume = accept_connections,

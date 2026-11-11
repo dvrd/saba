@@ -85,6 +85,7 @@ request_runtime_drain :: proc(runtime: ^Server_Runtime, timeout: time.Duration) 
 	wake_keep_alive_connections(runtime)
 	// The listener task closes its own socket, avoiding races with running accept.
 	async.wake(&runtime.executor, &runtime.accept_task)
+	if runtime.config.http3.enabled do async.wake(&runtime.executor, &runtime.http3.task)
 }
 
 @(private)
@@ -94,7 +95,7 @@ drain_connections :: proc(runtime: ^Server_Runtime) -> async.Resume_Result {
 	sync.lock(&runtime.drain_mutex)
 	deadline := runtime.drain_deadline
 	sync.unlock(&runtime.drain_mutex)
-	if sync.atomic_load(&runtime.active_connections) == 0 {
+	if sync.atomic_load(&runtime.active_connections) == 0 && (!runtime.config.http3.enabled || !sync.atomic_load(&runtime.http3._pending)) {
 		shutdown_runtime(runtime)
 		return .Done
 	}

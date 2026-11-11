@@ -1,503 +1,289 @@
 package saba_core
 
+import http3 "../../http/v3"
+import async "shared:async"
+import signal "shared:async/signal"
+import owned "core:mem/owned"
+import budget "core:sync/budget"
+import credential_store "core:crypto/tls/credentials/store"
 import "core:fmt"
 import "core:net"
 import "core:os"
 import "core:strings"
 import "core:testing"
+import "core:sync"
+import "core:thread"
 import "core:time"
 
-SABA_CURL :: "/opt/homebrew/opt/curl/bin/curl"
-SABA_CA :: "/Users/kakurega/dev/oss/Odin/tests/core/crypto/tls/credentials/testdata/rsa2048-valid.pem"
-SABA_LOG :: "/var/folders/dr/rhcpqcds1wqd3824tvjn0f940000gn/T/grok-goal-1817ebf2fe8d/implementer"
+H3_Probe :: struct {
+ calls, drops, nexts, polls, idles: int,
+ wait_next, pending: bool,
+ valid: bool,
+}
+h3_probe_handler :: proc(data:rawptr,conn:^Connection,request:^Request)->Response {
+ probe := cast(^H3_Probe)data
+ sync.atomic_add(&probe.calls,1)
+ sync.atomic_store(&probe.valid,conn != nil && conn._task != nil && conn._secure && request.allocator.procedure != nil && request.backing_allocator.procedure != nil)
+ switch request.path {
+ case "/auth":
+  sync.atomic_store(&probe.valid,sync.atomic_load(&probe.valid) && request.method=="POST" && request.query=="one=two" && header_value(request,"authorization")=="Bearer test" && string(request.body)=="payload")
+  return make_response(request,.Unauthorized,[]Header{{"www-authenticate","Bearer"}},transmute([]u8)string("denied"))
+ case "/redirect":
+  return make_response(request,.Found,[]Header{{"location","/next"},{"Set-Cookie","a=1; Secure"},{"Set-Cookie","b=2; Secure"}})
+ case "/idle":
+  return {status=.OK,stream={data=probe,next=h3_idle_next,drop=h3_probe_drop,content_length=-1}}
+ case "/stream":
+  return {status=.OK,stream={data=probe,next=h3_probe_next,drop=h3_probe_drop,content_length=6}}
+ case "/deferred", "/pending":
+  probe.pending=request.path=="/pending"
+  return {deferred={data=probe,poll=h3_probe_poll,drop=h3_probe_drop}}
+ case "/upgrade":
+  return {upgrade={data=probe,drop=h3_probe_drop}}
+ }
+ return {status=.Not_Found,body=transmute([]u8)string("missing")}
+}
+h3_probe_next :: proc(data:rawptr,io:^Stream_IO)->Stream_Step {
+ probe := cast(^H3_Probe)data
+ probe.nexts += 1
+ if probe.wait_next && probe.nexts==1 {
+  if stream_wait(io,async.deadline_after(io.runtime,time.Millisecond)).kind==.Pending do return .Waiting
+  return .Failed
+ }
+ if probe.nexts>(3 if probe.wait_next else 2) do return .Done
+ chunk, error := owned.copy_bounded(transmute([]u8)string("abc"),3,io.backing_allocator)
+ if error.kind != .None do return .Failed
+ if stream_submit(io,&chunk)!=.Accepted {owned.destroy(&chunk);return .Failed}
+ return .Chunk
+}
+h3_idle_next :: proc(data:rawptr,io:^Stream_IO)->Stream_Step {
+ probe:=cast(^H3_Probe)data
+ sync.atomic_add(&probe.idles,1)
+ if stream_wait(io,async.deadline_after(io.runtime,5*time.Second)).kind==.Pending do return .Waiting
+ return .Failed
+}
+h3_probe_poll :: proc(data:rawptr,io:^Deferred_IO)->(Response,Deferred_Step) {
+ probe:=cast(^H3_Probe)data
+ count:=sync.atomic_add(&probe.polls,1)
+ if probe.pending || count==0 {
+  if !probe.pending do _=signal.wake(io.wake)
+  return {},.Waiting
+ }
+ return {status=.Accepted,body=transmute([]u8)string("deferred-ready")},.Ready
+}
+h3_probe_drop :: proc(data:rawptr) {probe:=cast(^H3_Probe)data;probe.drops += 1}
 
-Saba_Hit :: struct {
-	calls:    int,
-	path:     [160]u8,
-	path_len: int,
-	body:     [16]u8,
-	body_len: int,
+h3_unit_init :: proc(runtime:^Server_Runtime,owner:^Http3,probe:^H3_Probe) {
+ runtime.config.handler=h3_probe_handler;runtime.config.handler_data=probe
+ runtime.timeouts=resolve_timeouts({})
+ assert(initialize_resources(runtime))
+ assert(async.init(&runtime.executor,{workers=1,task_capacity=4,io_capacity=0}).kind==.None)
+ owner.runtime=runtime;owner.config={enabled=true,handler=h3_probe_handler,handler_data=probe}
+}
+h3_unit_destroy :: proc(runtime:^Server_Runtime) {
+ _=async.destroy(&runtime.executor);budget.release_scope(&runtime.resources)
+}
+@(test)
+http3_handler_preserves_request_response_and_disposes_upgrade :: proc(t:^testing.T) {
+ runtime:Server_Runtime;owner:Http3;probe:H3_Probe
+ h3_unit_init(&runtime,&owner,&probe);defer h3_unit_destroy(&runtime)
+ fields := []http3.Field{{name="authorization",value="Bearer test"}}
+ request:=http3.Server_Request{method="POST",target="/auth?one=two",authority="fixture.invalid",headers=fields,body=transmute([]u8)string("payload")}
+ response:http3.Server_Response
+ testing.expect_value(t,http3_poll(&owner,&request,&response),.Ready)
+ testing.expect(t,sync.atomic_load(&probe.valid))
+ testing.expect_value(t,response.status,401)
+ testing.expect_value(t,string(response.body),"denied")
+ testing.expect_value(t,response.headers[0].name,"www-authenticate")
+ http3_release(&owner,&request)
+ targets:=[]string{"/missing","/redirect","/upgrade"}
+ statuses:=[]int{404,302,501}
+ for target,i in targets {
+  status:=statuses[i]
+  request={method="GET",target=target};response={}
+  testing.expect_value(t,http3_poll(&owner,&request,&response),.Ready)
+  testing.expect_value(t,response.status,status)
+  if target=="/redirect" {
+   testing.expect_value(t,len(response.headers),3)
+   testing.expect_value(t,response.headers[1].name,"set-cookie")
+   testing.expect_value(t,response.headers[2].name,"set-cookie")
+  }
+  http3_release(&owner,&request)
+ }
+ testing.expect_value(t,probe.calls,4)
+ testing.expect_value(t,probe.drops,1)
+ testing.expect_value(t,runtime.active_connections,0)
+}
+@(test)
+http3_stream_copies_bounded_chunks_and_drops_once :: proc(t:^testing.T) {
+ runtime:Server_Runtime;owner:Http3;probe:H3_Probe
+ h3_unit_init(&runtime,&owner,&probe);defer h3_unit_destroy(&runtime)
+ request:=http3.Server_Request{method="GET",target="/stream"};response:http3.Server_Response
+ testing.expect_value(t,http3_poll(&owner,&request,&response),.Ready)
+ destination:[2]u8
+ received:[6]u8;count:=0
+ for _ in 0..<10 {
+  n,status:=response.stream.next(response.stream.data,destination[:])
+  if status==.Done do break
+  testing.expect_value(t,status,.Chunk)
+  count+=copy(received[count:],destination[:n])
+ }
+ testing.expect_value(t,string(received[:count]),"abcabc")
+ testing.expect_value(t,probe.nexts,3)
+ response.stream.drop(response.stream.data)
+ http3_release(&owner,&request)
+ testing.expect_value(t,probe.drops,1)
+ testing.expect_value(t,runtime.active_connections,0)
+ // Cancel while a chunk remains partly copied: release remaining owned bytes
+ // before dropping the producer and destroying its request arena.
+ probe.nexts=0;request={method="GET",target="/stream"};response={}
+ testing.expect_value(t,http3_poll(&owner,&request,&response),.Ready)
+ _,status:=response.stream.next(response.stream.data,destination[:])
+ testing.expect_value(t,status,.Chunk)
+ response.stream.drop(response.stream.data)
+ http3_release(&owner,&request)
+ testing.expect_value(t,probe.drops,2)
 }
 
-saba_hit_init :: proc(hit: ^Saba_Hit) {
-	text := "saba-h3"
-	copy(hit.body[:], text)
-	hit.body_len = len(text)
-}
-
-saba_hit_handler :: proc(data: rawptr, conn: ^Connection, request: ^Request) -> Response {
-	hit := cast(^Saba_Hit)data
-	hit.calls += 1
-	n := len(request.path)
-	if n > len(hit.path) do n = len(hit.path)
-	copy(hit.path[:n], request.path[:n])
-	hit.path_len = n
-	_ = conn
-	return {status = .OK, body = hit.body[:hit.body_len]}
-}
-
-Saba_Curl :: struct {
-	child:  os.Process,
-	stdout: ^os.File,
-	stderr: ^os.File,
-	ok:     bool,
-}
-
-saba_curl_start :: proc(args: []string, label: string) -> Saba_Curl {
-	out_path := fmt.tprintf("%s/saba-%s-stdout.txt", SABA_LOG, label)
-	err_path := fmt.tprintf("%s/saba-%s-stderr.txt", SABA_LOG, label)
-	stdout, oerr := os.open(out_path, {.Read, .Write, .Create, .Trunc})
-	if oerr != nil do return {}
-	stderr, eerr := os.open(err_path, {.Read, .Write, .Create, .Trunc})
-	if eerr != nil {
-		os.close(stdout)
-		return {}
-	}
-	child, perr := os.process_start({
-		command = args,
-		stdout = stdout,
-		stderr = stderr,
-	})
-	if perr != nil {
-		os.close(stdout)
-		os.close(stderr)
-		return {}
-	}
-	return {child = child, stdout = stdout, stderr = stderr, ok = true}
-}
-
-saba_curl_finish :: proc(job: ^Saba_Curl, state: ^Http3, limit: time.Duration, body_dst: []u8) -> (exit_code: int, body: string) {
-	reaped := false
-	defer {
-		if job.ok && !reaped {
-			_ = os.process_kill(job.child)
-			_, _ = os.process_wait(job.child)
-		}
-		if job.stdout != nil do os.close(job.stdout)
-		if job.stderr != nil do os.close(job.stderr)
-	}
-	start := time.tick_now()
-	proc_state: os.Process_State
-	for job.ok && time.tick_since(start) < limit {
-		st, werr := os.process_wait(job.child, 0)
-		if werr == nil && st.exited {
-			proc_state = st
-			reaped = true
-			break
-		}
-		if state != nil do http3_step(state)
-	}
-	if job.ok && !reaped {
-		_ = os.process_kill(job.child)
-		proc_state, _ = os.process_wait(job.child)
-		reaped = true
-	}
-	bn := 0
-	if job.stdout != nil {
-		if _, serr := os.seek(job.stdout, 0, .Start); serr == nil {
-			bn, _ = os.read(job.stdout, body_dst)
-		}
-	}
-	note: [800]u8
-	en := 0
-	if job.stderr != nil {
-		if _, serr := os.seek(job.stderr, 0, .Start); serr == nil {
-			en, _ = os.read(job.stderr, note[:])
-		}
-	}
-	exit_code = proc_state.exit_code
-	if bn > len(body_dst) do bn = len(body_dst)
-	body = string(body_dst[:bn])
-	if en > 0 do fmt.printf("saba-stderr %s\n", string(note[:en]))
-	return
-}
-
-saba_http3_args :: proc(dst: []string, url_buf, resolve_buf: []u8, port: int, path: string, insecure: bool, max_time: string) -> []string {
-	n := 0
-	dst[n] = SABA_CURL; n += 1
-	dst[n] = "--http3-only"; n += 1
-	dst[n] = "--max-time"; n += 1
-	dst[n] = max_time; n += 1
-	dst[n] = "-sS"; n += 1
-	if insecure {
-		dst[n] = "-k"; n += 1
-		dst[n] = fmt.bprintf(url_buf, "https://127.0.0.1:%d%s", port, path); n += 1
-		return dst[:n]
-	}
-	dst[n] = "--cacert"; n += 1
-	dst[n] = SABA_CA; n += 1
-	dst[n] = "--resolve"; n += 1
-	dst[n] = fmt.bprintf(resolve_buf, "synthetic.invalid:%d:127.0.0.1", port); n += 1
-	dst[n] = fmt.bprintf(url_buf, "https://synthetic.invalid:%d%s", port, path); n += 1
-	return dst[:n]
+H3_Server_Fixture :: struct {config:Server,control:Server_Control,ok:bool}
+@(test)
+http3_serve_independent_curl_status_cookies_and_concurrent_clients :: proc(t:^testing.T) {
+ testing.set_fail_timeout(t,60*time.Second)
+ store:=https80_make_store(t);defer credential_store.destroy(&store)
+ probe:H3_Probe
+ probe.wait_next=true
+ fixture:H3_Server_Fixture
+ fixture.config={handler=h3_probe_handler,handler_data=&probe,control=&fixture.control,workers=2,
+  http3={enabled=true,endpoint={net.IP4_Loopback,0},credentials=store}}
+ worker:=thread.create_and_start_with_poly_data(&fixture,proc(f:^H3_Server_Fixture){f.ok=serve(f.config)})
+ defer thread.destroy(worker)
+ joined:=false
+ defer {if !joined {stop_server(&fixture.control);thread.join(worker)}}
+ deadline:=time.tick_add(time.tick_now(),5*time.Second)
+ for !server_ready(&fixture.control) && time.tick_diff(time.tick_now(),deadline)>0 do thread.yield()
+ endpoint,ready:=server_http3_endpoint(&fixture.control)
+ if !testing.expect(t,ready && endpoint.port>0) do return
+ // Each process is an independent peer and both run before either is waited.
+ jobs:[2]os.Process
+ files:[2]^os.File
+ for i in 0..<2 {
+  path:=fmt.tprintf("/tmp/saba-h3-review-%d.txt",i)
+  file,error:=os.open(path,{.Read,.Write,.Create,.Trunc});assert(error==nil);files[i]=file
+  url:=fmt.tprintf("https://127.0.0.1:%d%s",endpoint.port,"/redirect" if i==0 else "/missing")
+  job,pe:=os.process_start({command=[]string{"/opt/homebrew/opt/curl/bin/curl","--http3-only","--insecure","--noproxy","*","--max-time","8","-si",url},stdout=file,stderr=file})
+  if !testing.expect(t,pe==nil) do return
+  jobs[i]=job
+ }
+ for job,i in jobs {
+  state,error:=os.process_wait(job)
+  testing.expect(t,error==nil && state.exit_code==0)
+  _,_=os.seek(files[i],0,.Start)
+  bytes:[4096]u8;n,_:=os.read(files[i],bytes[:]);text:=string(bytes[:n])
+  fmt.printf("HTTP3 independent peer %d: %s\n",i,text)
+  if i==0 {
+   testing.expect(t,strings.contains(text,"302") && strings.contains(text,"location: /next"))
+   testing.expect(t,strings.contains(text,"set-cookie: a=1") && strings.contains(text,"set-cookie: b=2"))
+  } else {testing.expect(t,strings.contains(text,"404") && strings.contains(text,"missing"))}
+  os.close(files[i])
+ }
+ // Sequential clients also exercise request payload and normal async callback
+ // context: stream_wait and detachable deferred wakes run on the same runtime.
+ targets:=[]string{"/auth?one=two","/stream","/deferred"}
+ for target in targets {
+  file,error:=os.open("/tmp/saba-h3-review-sequential.txt",{.Read,.Write,.Create,.Trunc});assert(error==nil)
+  url:=fmt.tprintf("https://127.0.0.1:%d%s",endpoint.port,target)
+  args:=[]string{"/opt/homebrew/opt/curl/bin/curl","--http3-only","--insecure","--noproxy","*","--max-time","8","-si",url}
+  post:=[]string{"/opt/homebrew/opt/curl/bin/curl","--http3-only","--insecure","--noproxy","*","--max-time","8","-si","-X","POST","-H","Authorization: Bearer test","-d","payload",url}
+  if strings.has_prefix(target,"/auth") do args=post
+  job,pe:=os.process_start({command=args,stdout=file,stderr=file});assert(pe==nil)
+  result,re:=os.process_wait(job);testing.expect(t,re==nil&&result.exit_code==0)
+  _,_=os.seek(file,0,.Start);bytes:[4096]u8;n,_:=os.read(file,bytes[:]);text:=string(bytes[:n])
+  fmt.printf("HTTP3 sequential %s: %s\n",target,text)
+  testing.expect(t,sync.atomic_load(&probe.valid))
+  if target=="/stream" {testing.expect(t,strings.contains(text,"200")&&strings.contains(text,"abcabc"))}
+  else if target=="/deferred" {testing.expect(t,strings.contains(text,"202")&&strings.contains(text,"deferred-ready"))}
+  else {testing.expect(t,strings.contains(text,"401")&&strings.contains(text,"denied"))}
+  os.close(file)
+ }
+ // A five-second idle stream shares this listener task with another peer.
+ // Bounded transport polling must still dispatch the unrelated peer promptly.
+ idle_url:=fmt.tprintf("https://127.0.0.1:%d/idle",endpoint.port)
+ idle,ie:=os.process_start({command=[]string{"/opt/homebrew/opt/curl/bin/curl","--http3-only","--insecure","--noproxy","*","--max-time","3","-s",idle_url}})
+ assert(ie==nil)
+ idle_deadline:=time.tick_add(time.tick_now(),time.Second)
+ for sync.atomic_load(&probe.idles)==0 && time.tick_diff(time.tick_now(),idle_deadline)>0 do thread.yield()
+ testing.expect(t,sync.atomic_load(&probe.idles)>0)
+ other_url:=fmt.tprintf("https://127.0.0.1:%d/missing",endpoint.port)
+ other,oe:=os.process_start({command=[]string{"/opt/homebrew/opt/curl/bin/curl","--http3-only","--insecure","--noproxy","*","--max-time","2","-s",other_url}})
+ assert(oe==nil)
+ other_state,ow:=os.process_wait(other)
+ testing.expect(t,ow==nil && other_state.exit_code==0)
+ _=os.process_kill(idle);_,_=os.process_wait(idle)
+ // Closing the server with a pending continuation must detach its wake and
+ // dispose it before serve releases its executor and request resources.
+ prior:=sync.atomic_load(&probe.polls)
+ url:=fmt.tprintf("https://127.0.0.1:%d/pending",endpoint.port)
+ pending,pe:=os.process_start({command=[]string{"/opt/homebrew/opt/curl/bin/curl","--http3-only","--insecure","--noproxy","*","--max-time","2","-s",url}})
+ assert(pe==nil)
+ until:=time.tick_add(time.tick_now(),time.Second)
+ for sync.atomic_load(&probe.polls)==prior && time.tick_diff(time.tick_now(),until)>0 do thread.yield()
+ testing.expect(t,sync.atomic_load(&probe.polls)>prior)
+ stop_server(&fixture.control);thread.join(worker);joined=true
+ _=os.process_kill(pending);_,_=os.process_wait(pending)
+ testing.expect_value(t,probe.drops,4)
+ testing.expect(t,fixture.ok)
+ testing.expect_value(t,probe.calls,8)
+ testing.expect(t,sync.atomic_load(&probe.valid))
 }
 
 @(test)
-saba_http3_disabled :: proc(t: ^testing.T) {
-	hit: Saba_Hit
-	saba_hit_init(&hit)
-	off := new(Http3)
-	defer free(off)
-	off.config.handler = saba_hit_handler
-	off.config.handler_data = &hit
-	port, ok := http3_listen(off)
-	fmt.printf("saba-disabled port %d ok %v\n", port, ok)
-	testing.expect(t, !ok && port == 0)
-	bare := new(Http3)
-	defer free(bare)
-	bare.config.enabled = true
-	port, ok = http3_listen(bare)
-	fmt.printf("saba-no-handler port %d ok %v\n", port, ok)
-	testing.expect(t, !ok && port == 0)
+http3_deferred_poll_and_pending_release_drop_exactly_once :: proc(t:^testing.T) {
+ runtime:Server_Runtime;owner:Http3;probe:H3_Probe
+ h3_unit_init(&runtime,&owner,&probe);defer h3_unit_destroy(&runtime)
+ request:=http3.Server_Request{method="GET",target="/deferred"};response:http3.Server_Response
+ testing.expect_value(t,http3_poll(&owner,&request,&response),.Pending)
+ testing.expect_value(t,http3_poll(&owner,&request,&response),.Ready)
+ testing.expect_value(t,response.status,202)
+ testing.expect_value(t,string(response.body),"deferred-ready")
+ testing.expect_value(t,probe.calls,1)
+ testing.expect_value(t,probe.drops,1)
+ http3_release(&owner,&request)
+ testing.expect_value(t,probe.drops,1)
+ request={method="GET",target="/pending"};response={}
+ testing.expect_value(t,http3_poll(&owner,&request,&response),.Pending)
+ http3_release(&owner,&request)
+ testing.expect_value(t,probe.drops,2)
+ testing.expect_value(t,runtime.active_connections,0)
 }
 
 @(test)
-saba_http3_curl_route :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 20 * time.Second)
-	_ = os.make_directory(SABA_LOG)
-	hit: Saba_Hit
-	saba_hit_init(&hit)
-	session := new(Http3)
-	defer free(session)
-	defer http3_close(session)
-	session.config = {enabled = true, handler = saba_hit_handler, handler_data = &hit}
-	port, ok := http3_listen(session)
-	testing.expect(t, ok, session.live.reason)
-	if !ok do return
-	args: [12]string
-	url_buf, resolve_buf: [96]u8
-	command := saba_http3_args(args[:], url_buf[:], resolve_buf[:], port, "/saba", true, "5")
-	job := saba_curl_start(command, "route")
-	testing.expect(t, job.ok)
-	if !job.ok do return
-	body_buf: [128]u8
-	exit_code, body := saba_curl_finish(&job, session, 8 * time.Second, body_buf[:])
-	fmt.printf(
-		"saba-route exit %d calls %d path %s body %s dead %v reason %s\n",
-		exit_code, hit.calls, string(hit.path[:hit.path_len]), body, session.live.dead, session.live.reason,
-	)
-	testing.expect_value(t, exit_code, 0)
-	testing.expect(t, body == "saba-h3", body)
-	testing.expect(t, string(hit.path[:hit.path_len]) == "/saba")
-	testing.expect(t, hit.calls == 1)
-	testing.expect(t, !session.live.dead || session.live.graceful, session.live.reason)
-}
-
-@(test)
-saba_http3_cacert :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 20 * time.Second)
-	_ = os.make_directory(SABA_LOG)
-	hit: Saba_Hit
-	saba_hit_init(&hit)
-	session := new(Http3)
-	defer free(session)
-	defer http3_close(session)
-	session.config = {enabled = true, handler = saba_hit_handler, handler_data = &hit}
-	port, ok := http3_listen(session)
-	testing.expect(t, ok, session.live.reason)
-	if !ok do return
-	args: [12]string
-	url_buf, resolve_buf: [96]u8
-	command := saba_http3_args(args[:], url_buf[:], resolve_buf[:], port, "/trusted", false, "5")
-	job := saba_curl_start(command, "cacert")
-	testing.expect(t, job.ok)
-	if !job.ok do return
-	body_buf: [128]u8
-	exit_code, body := saba_curl_finish(&job, session, 8 * time.Second, body_buf[:])
-	fmt.printf("saba-cacert exit %d body %s calls %d\n", exit_code, body, hit.calls)
-	testing.expect_value(t, exit_code, 0)
-	testing.expect(t, body == "saba-h3", body)
-	testing.expect(t, string(hit.path[:hit.path_len]) == "/trusted")
-}
-
-@(test)
-saba_http3_untrusted :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 15 * time.Second)
-	_ = os.make_directory(SABA_LOG)
-	hit: Saba_Hit
-	saba_hit_init(&hit)
-	session := new(Http3)
-	defer free(session)
-	defer http3_close(session)
-	session.config = {enabled = true, handler = saba_hit_handler, handler_data = &hit}
-	port, ok := http3_listen(session)
-	testing.expect(t, ok, session.live.reason)
-	if !ok do return
-	args: [12]string
-	n := 0
-	args[n] = SABA_CURL; n += 1
-	args[n] = "--http3-only"; n += 1
-	args[n] = "--max-time"; n += 1
-	args[n] = "3"; n += 1
-	args[n] = "-sS"; n += 1
-	url_buf: [96]u8
-	args[n] = fmt.bprintf(url_buf[:], "https://127.0.0.1:%d/nope", port); n += 1
-	job := saba_curl_start(args[:n], "untrusted")
-	testing.expect(t, job.ok)
-	if !job.ok do return
-	body_buf: [128]u8
-	exit_code, body := saba_curl_finish(&job, session, 6 * time.Second, body_buf[:])
-	fmt.printf("saba-untrusted exit %d body %s calls %d\n", exit_code, body, hit.calls)
-	testing.expect(t, exit_code != 0)
-	testing.expect(t, body != "saba-h3")
-}
-
-@(test)
-saba_http3_drain :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 15 * time.Second)
-	_ = os.make_directory(SABA_LOG)
-	hit: Saba_Hit
-	saba_hit_init(&hit)
-	session := new(Http3)
-	defer free(session)
-	defer http3_close(session)
-	session.config = {enabled = true, handler = saba_hit_handler, handler_data = &hit}
-	port, ok := http3_listen(session)
-	testing.expect(t, ok, session.live.reason)
-	if !ok do return
-	http3_drain(session)
-	args: [12]string
-	url_buf, resolve_buf: [96]u8
-	command := saba_http3_args(args[:], url_buf[:], resolve_buf[:], port, "/drain", true, "2")
-	job := saba_curl_start(command, "drain")
-	testing.expect(t, job.ok)
-	if !job.ok do return
-	body_buf: [128]u8
-	exit_code, body := saba_curl_finish(&job, session, 5 * time.Second, body_buf[:])
-	fmt.printf("saba-drain exit %d calls %d body %s\n", exit_code, hit.calls, body)
-	testing.expect(t, exit_code != 0)
-	testing.expect(t, hit.calls == 0)
-	testing.expect(t, !session.live.request_decoded)
-}
-
-@(test)
-saba_http3_body_cap :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 15 * time.Second)
-	_ = os.make_directory(SABA_LOG)
-	hit: Saba_Hit
-	saba_hit_init(&hit)
-	session := new(Http3)
-	defer free(session)
-	defer http3_close(session)
-	session.config = {enabled = true, handler = saba_hit_handler, handler_data = &hit, max_body = 4}
-	port, ok := http3_listen(session)
-	testing.expect(t, ok, session.live.reason)
-	if !ok do return
-	args: [12]string
-	url_buf, resolve_buf: [96]u8
-	command := saba_http3_args(args[:], url_buf[:], resolve_buf[:], port, "/cap", true, "3")
-	job := saba_curl_start(command, "cap")
-	testing.expect(t, job.ok)
-	if !job.ok do return
-	body_buf: [128]u8
-	exit_code, body := saba_curl_finish(&job, session, 6 * time.Second, body_buf[:])
-	fmt.printf("saba-cap exit %d rejected %v dead %v body %s reason %s\n", exit_code, session.rejected, session.live.dead, body, session.live.reason)
-	testing.expect(t, session.rejected)
-	testing.expect(t, session.live.dead)
-	testing.expect(t, body != "saba-h3")
-	testing.expect(t, exit_code != 0)
-}
-
-Saba_Relay :: struct {
-	socket:         net.UDP_Socket,
-	server:         net.Endpoint,
-	client:         net.Endpoint,
-	have_client:    bool,
-	client_packets: int,
-	dropped:        bool,
-	reordered:      bool,
-	slowed:         bool,
-	held:           [2048]u8,
-	held_n:         int,
-	hold_waits:     int,
-}
-
-saba_relay_packet :: proc(relay: ^Saba_Relay, packet: []u8, from: net.Endpoint) {
-	if from.port == relay.server.port {
-		if relay.have_client {
-			_, _ = net.send_udp(relay.socket, packet, relay.client)
-		}
-		return
-	}
-	relay.client = from
-	relay.have_client = true
-	relay.client_packets += 1
-	if !relay.dropped && relay.client_packets == 2 {
-		relay.dropped = true
-		return
-	}
-	if relay.held_n == 0 && !relay.reordered && relay.client_packets == 4 {
-		n := copy(relay.held[:], packet)
-		relay.held_n = n
-		return
-	}
-	if !relay.slowed && relay.client_packets >= 5 {
-		time.sleep(200 * time.Millisecond)
-		relay.slowed = true
-	}
-	_, _ = net.send_udp(relay.socket, packet, relay.server)
-	if relay.held_n > 0 {
-		_, _ = net.send_udp(relay.socket, relay.held[:relay.held_n], relay.server)
-		relay.held_n = 0
-		relay.reordered = true
-	}
-}
-
-@(test)
-saba_http3_loss :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 20 * time.Second)
-	_ = os.make_directory(SABA_LOG)
-	hit: Saba_Hit
-	saba_hit_init(&hit)
-	session := new(Http3)
-	defer free(session)
-	defer http3_close(session)
-	session.config = {enabled = true, handler = saba_hit_handler, handler_data = &hit}
-	port, ok := http3_listen(session)
-	testing.expect(t, ok, session.live.reason)
-	if !ok do return
-	server_ep, berr := net.bound_endpoint(session.live.socket)
-	testing.expect(t, berr == .None)
-	if berr != .None do return
-	relay_socket, rerr := net.make_unbound_udp_socket(.IP4)
-	testing.expect(t, rerr == nil)
-	if rerr != nil do return
-	defer net.close(relay_socket)
-	testing.expect(t, net.bind(relay_socket, {net.IP4_Loopback, 0}) == .None)
-	testing.expect(t, net.set_option(relay_socket, .Receive_Timeout, 15 * time.Millisecond) == nil)
-	relay_ep, rbound := net.bound_endpoint(relay_socket)
-	testing.expect(t, rbound == .None)
-	if rbound != .None do return
-	relay := Saba_Relay{socket = relay_socket, server = server_ep}
-	args: [12]string
-	url_buf, resolve_buf: [96]u8
-	command := saba_http3_args(args[:], url_buf[:], resolve_buf[:], relay_ep.port, "/loss", true, "6")
-	job := saba_curl_start(command, "loss")
-	testing.expect(t, job.ok)
-	if !job.ok do return
-	reaped := false
-	defer {
-		if !reaped {
-			_ = os.process_kill(job.child)
-			_, _ = os.process_wait(job.child)
-		}
-		os.close(job.stdout)
-		os.close(job.stderr)
-	}
-	start := time.tick_now()
-	proc_state: os.Process_State
-	for time.tick_since(start) < 9 * time.Second {
-		st, werr := os.process_wait(job.child, 0)
-		if werr == nil && st.exited {
-			proc_state = st
-			reaped = true
-			break
-		}
-		buf: [2048]u8
-		for _ in 0 ..< 8 {
-			n, from, uerr := net.recv_udp(relay.socket, buf[:])
-			if uerr != nil || n <= 0 do break
-			saba_relay_packet(&relay, buf[:n], from)
-		}
-		if relay.held_n > 0 {
-			relay.hold_waits += 1
-			if relay.hold_waits >= 6 {
-				_, _ = net.send_udp(relay.socket, relay.held[:relay.held_n], relay.server)
-				relay.held_n = 0
-			}
-		}
-		http3_step(session)
-	}
-	if !reaped {
-		_ = os.process_kill(job.child)
-		proc_state, _ = os.process_wait(job.child)
-		reaped = true
-	}
-	body_buf: [128]u8
-	bn := 0
-	if _, serr := os.seek(job.stdout, 0, .Start); serr == nil {
-		bn, _ = os.read(job.stdout, body_buf[:])
-	}
-	body := string(body_buf[:bn])
-	fmt.printf(
-		"saba-loss exit %d packets %d dropped %v reorder %v slow %v body %s\n",
-		proc_state.exit_code, relay.client_packets, relay.dropped, relay.reordered, relay.slowed, body,
-	)
-	testing.expect_value(t, proc_state.exit_code, 0)
-	testing.expect(t, body == "saba-h3", body)
-	testing.expect(t, relay.dropped)
-	testing.expect(t, relay.reordered)
-	testing.expect(t, relay.slowed)
-	testing.expect(t, hit.calls == 1)
-}
-
-@(test)
-saba_http3_tcp :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 20 * time.Second)
-	_ = os.make_directory(SABA_LOG)
-	hit: Saba_Hit
-	saba_hit_init(&hit)
-	session := new(Http3)
-	defer free(session)
-	defer http3_close(session)
-	session.config = {enabled = true, handler = saba_hit_handler, handler_data = &hit}
-	h3_port, ok := http3_listen(session)
-	testing.expect(t, ok, session.live.reason)
-	if !ok do return
-	listener, lerr := net.listen_tcp({net.IP4_Loopback, 0})
-	testing.expect(t, lerr == nil)
-	if lerr != nil do return
-	defer net.close(listener)
-	tcp_ep, terr := net.bound_endpoint(listener)
-	testing.expect(t, terr == .None)
-	if terr != .None do return
-	testing.expect(t, tcp_ep.port != h3_port)
-	args: [12]string
-	url_buf, resolve_buf: [96]u8
-	command := saba_http3_args(args[:], url_buf[:], resolve_buf[:], h3_port, "/both", true, "5")
-	job := saba_curl_start(command, "tcp")
-	testing.expect(t, job.ok)
-	if !job.ok do return
-	body_buf: [128]u8
-	exit_code, body := saba_curl_finish(&job, session, 8 * time.Second, body_buf[:])
-	client, derr := net.dial_tcp(tcp_ep)
-	testing.expect(t, derr == nil)
-	if derr != nil do return
-	defer net.close(client)
-	peer, _, aerr := net.accept_tcp(listener)
-	testing.expect(t, aerr == nil)
-	if aerr != nil do return
-	defer net.close(peer)
-	_ = net.set_option(peer, .Receive_Timeout, 1 * time.Second)
-	_ = net.set_option(client, .Receive_Timeout, 1 * time.Second)
-	req_buf: [128]u8
-	req := fmt.bprintf(req_buf[:], "GET /saba HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-	_, serr := net.send_tcp(client, transmute([]u8)req)
-	testing.expect(t, serr == nil)
-	in_buf: [512]u8
-	got := 0
-	for got < len(in_buf) {
-		n, rerr := net.recv_tcp(peer, in_buf[got:])
-		if n > 0 do got += n
-		if rerr != nil || n == 0 || strings.contains(string(in_buf[:got]), "\r\n") do break
-	}
-	request := Request{method = "GET", path = "/saba", version = "HTTP/1.1"}
-	response := saba_hit_handler(&hit, nil, &request)
-	head_buf: [128]u8
-	head := fmt.bprintf(head_buf[:], "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n", len(response.body))
-	_, _ = net.send_tcp(peer, transmute([]u8)head)
-	_, _ = net.send_tcp(peer, response.body)
-	out_buf: [256]u8
-	on := 0
-	for on < len(out_buf) {
-		n, rerr := net.recv_tcp(client, out_buf[on:])
-		if n > 0 do on += n
-		if rerr != nil || n == 0 do break
-	}
-	tcp_body := string(out_buf[:on])
-	fmt.printf("saba-tcp h3-exit %d h3-body %s tcp-port %d h3-port %d tcp %s\n", exit_code, body, tcp_ep.port, h3_port, tcp_body)
-	testing.expect_value(t, exit_code, 0)
-	testing.expect(t, body == "saba-h3", body)
-	testing.expect(t, strings.contains(tcp_body, "saba-h3"))
-	testing.expect(t, hit.calls == 2)
+http3_drain_keeps_runtime_alive_for_retained_transport_bytes :: proc(t:^testing.T) {
+ runtime:Server_Runtime
+ runtime.config.http3.enabled=true
+ runtime.draining=true
+ runtime.http3._pending=true
+ testing.expect_value(t,async.init(&runtime.executor,{workers=1,task_capacity=2,io_capacity=1}).kind,.None)
+ defer async.destroy(&runtime.executor)
+ runtime.drain_deadline=async.deadline_after(&runtime.executor,time.Second)
+ runtime.accept_task={resume=proc(data:rawptr)->async.Resume_Result{return drain_connections(cast(^Server_Runtime)data)},data=&runtime}
+ assert(async.spawn(&runtime.executor,&runtime.accept_task).kind==.None)
+ assert(async.start(&runtime.executor).kind==.None)
+ _=async.wait_idle(&runtime.executor)
+ // Request arenas may already be released; pending reliable transport bytes
+ // independently keep the runtime alive until acknowledged or the deadline.
+ testing.expect(t,!async.cancelled(&runtime.accept_task))
+ state,error:=async.task_state(&runtime.executor,&runtime.accept_task)
+ testing.expect_value(t,error.kind,.None)
+ testing.expect_value(t,state,.Waiting)
+ sync.atomic_store(&runtime.http3._pending,false)
+ _=async.wake(&runtime.executor,&runtime.accept_task)
+ until:=time.tick_add(time.tick_now(),time.Second)
+ for time.tick_diff(time.tick_now(),until)>0 {
+  state,_=async.task_state(&runtime.executor,&runtime.accept_task)
+  if state==.Done do break
+  thread.yield()
+ }
+ _=async.join(&runtime.executor)
+ state,error=async.task_state(&runtime.executor,&runtime.accept_task)
+ testing.expect_value(t,error.kind,.None)
+ testing.expect_value(t,state,.Done)
 }

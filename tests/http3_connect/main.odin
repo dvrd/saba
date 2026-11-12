@@ -7,6 +7,7 @@ import codec "shared:websocket"
 import tls "core:crypto/tls"
 import credentials "core:crypto/tls/credentials"
 import store "core:crypto/tls/credentials/store"
+import budget "core:sync/budget"
 import rt "base:runtime"
 import "core:fmt"
 import "core:bytes"
@@ -52,7 +53,8 @@ server :: proc(cert_path,key_path:string,root_path:string="") {
  cert,ce:=os.read_entire_file(cert_path,context.allocator);assert(ce==nil);defer delete(cert)
  key,ke:=os.read_entire_file(key_path,context.allocator);assert(ke==nil);defer delete(key)
  owner,e:=credentials.create(cert,key,{},context.allocator);assert(e==.None)
- state.credentials,_=store.create({},context.allocator);assert(state.credentials!=nil);defer store.destroy(&state.credentials)
+ state.credentials,_=store.create({},context.allocator);assert(state.credentials!=nil)
+ defer assert(store.destroy(&state.credentials).kind==.None)
  assert(store.replace(state.credentials,&owner).kind==.None)
  state.tls_config={store=state.credentials,handshake_timeout=2*time.Second,close_timeout=200*time.Millisecond}
  if root_path!="" {
@@ -70,9 +72,15 @@ server :: proc(cert_path,key_path:string,root_path:string="") {
  until:=time.tick_add(time.tick_now(),5*time.Second)
  for !core.server_ready(&state.control) && time.tick_diff(time.tick_now(),until)>0 {time.sleep(time.Millisecond)}
  endpoint,ready:=core.server_http3_endpoint(&state.control);assert(ready)
+ retained,retained_ok:=core.retain_server_resources(&state.control);assert(retained_ok)
  fmt.printf("READY %d\n",endpoint.port);os.flush(os.stdout)
  command:[1]u8;_,_=os.read(os.stdin,command[:])
  core.stop_server(&state.control);thread.join(worker);thread.destroy(worker)
+ // This observes Saba's configured managed scope, not the QUIC transport heap.
+ view,view_error:=budget.snapshot(retained);assert(view_error==.None)
+ assert(view.used.bytes==0 && view.used.streams==0 && view.used.jobs==0 && view.scope_nodes==1)
+ budget.release_scope(&retained)
+ fmt.println("SABA_RESOURCES bytes=0 streams=0 jobs=0 scope_nodes=1")
  fmt.printf("RESULT opened=%d dropped=%d messages=%d http=%d resets=%d\n",state.opened,state.dropped,state.messages,state.http,state.resets)
  assert(state.opened==state.dropped)
 }

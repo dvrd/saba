@@ -54,7 +54,7 @@ route :: proc(data:rawptr,connection:^core.Connection,request:^core.Request)->co
  return {status=.OK,body=transmute([]u8)string("http-ok")}
 
 }
-server :: proc(cert_path,key_path:string,root_path:string="") {
+server :: proc(cert_path,key_path:string,root_path:string="",load:bool=false) {
  state:State
  cert,ce:=os.read_entire_file(cert_path,context.allocator);assert(ce==nil);defer delete(cert)
  key,ke:=os.read_entire_file(key_path,context.allocator);assert(ke==nil);defer delete(key)
@@ -62,6 +62,7 @@ server :: proc(cert_path,key_path:string,root_path:string="") {
  state.credentials,_=store.create({},context.allocator);assert(state.credentials!=nil);defer store.destroy(&state.credentials)
  assert(store.replace(state.credentials,&owner).kind==.None)
  state.tls_config={store=state.credentials,handshake_timeout=2*time.Second,close_timeout=200*time.Millisecond}
+ if load {state.tls_config.handshake_timeout=0} // Use the existing production default10s.
  if root_path!="" {
   assert(tls.root_pool_load_file(&state.roots,root_path).kind==.None)
   state.auth={mode=.Require,roots=state.roots.roots[:state.roots.count]}
@@ -78,6 +79,11 @@ server :: proc(cert_path,key_path:string,root_path:string="") {
  endpoint,ready:=core.server_endpoint(&state.control);assert(ready)
  retained,retained_ok:=core.retain_server_resources(&state.control);assert(retained_ok)
  fmt.printf("READY %d\n",endpoint.port);os.flush(os.stdout)
+ if load {
+  fmt.printf("LOAD_CONFIG workers=2 handshake_timeout_seconds=10 ")
+  fmt.printf("global_bytes=268435456 connection_bytes=67108864 operation_bytes=33554432\n")
+  os.flush(os.stdout)
+ }
  command:[1]u8;_,_=os.read(os.stdin,command[:])
  core.stop_server(&state.control);thread.join(worker);thread.destroy(worker)
  view,ve:=budget.snapshot(retained);assert(ve==.None && view.used.bytes==0 && view.used.streams==0 && view.used.jobs==0 && view.scope_nodes==1)
@@ -119,4 +125,7 @@ next :: proc(data:rawptr,io:^core.Stream_IO)->core.Stream_Step {
  if core.stream_submit(io,&chunk)!=.Accepted {owned.destroy(&chunk);return .Failed}
  work.sent=true;return .Chunk
 }
-main :: proc() {assert(len(os.args)==3);server(os.args[1],os.args[2])}
+main :: proc() {
+ assert(len(os.args)==3 || (len(os.args)==4 && os.args[3]=="load"))
+ server(os.args[1],os.args[2],load=len(os.args)==4)
+}

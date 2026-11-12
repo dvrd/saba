@@ -17,19 +17,41 @@ representation_response :: proc(
 		return make_response(request, .OK,
 			{{"Content-Type", content_type}, {"Cache-Control", "no-store"}}, body)
 	}
+	prepared := prepare_representation(body, content_type)
+	return prepared_representation_response(request, &prepared)
+}
+
+// Metadata is inline and allocation-free. Body and content_type remain borrowed and
+// must stay immutable through every response send. Prepare once after loading a
+// production representation; development must use representation_response(..., true).
+Prepared_Representation :: struct {
+	body: []u8,
+	content_type: string,
+	tag: [66]u8,
+}
+
+prepare_representation :: proc(body: []u8, content_type: string) -> Prepared_Representation {
+	prepared := Prepared_Representation{body = body, content_type = content_type}
 	digest: [32]u8
 	hasher: sha2.Context_256
 	sha2.init_256(&hasher)
 	sha2.update(&hasher, body)
 	sha2.final(&hasher, digest[:])
-	tag_buffer: [66]u8
-	tag_buffer[0] = '"'; tag_buffer[65] = '"'
+	prepared.tag[0] = '"'; prepared.tag[65] = '"'
 	alphabet := "0123456789abcdef"
 	for byte, index in digest {
-		tag_buffer[1+index*2] = alphabet[byte>>4]
-		tag_buffer[2+index*2] = alphabet[byte&15]
+		prepared.tag[1+index*2] = alphabet[byte>>4]
+		prepared.tag[2+index*2] = alphabet[byte&15]
 	}
-	tag, allocation_error := strings.clone(string(tag_buffer[:]), request.allocator)
+	return prepared
+}
+
+prepared_representation_response :: proc(
+	request: ^Request,
+	representation: ^Prepared_Representation,
+) -> Response {
+	assert(representation != nil)
+	tag, allocation_error := strings.clone(string(representation.tag[:]), request.allocator)
 	if allocation_error != nil do return Response{status = .Internal_Server_Error}
 	matched, valid := false, true
 	fields, stars := 0, 0
@@ -47,5 +69,6 @@ representation_response :: proc(
 			{{"Cache-Control", "no-cache"}, {"ETag", tag}})
 	}
 	return make_response(request, .OK,
-		{{"Content-Type", content_type}, {"Cache-Control", "no-cache"}, {"ETag", tag}}, body)
+		{{"Content-Type", representation.content_type}, {"Cache-Control", "no-cache"},
+		 {"ETag", tag}}, representation.body)
 }

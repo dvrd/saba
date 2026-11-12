@@ -59,6 +59,17 @@ runs on each response, including conditional requests, without copying the body.
 It adds linear CPU work in representation size, within existing asset bounds.
 The public cache structs and existing callable signatures are unchanged.
 
+For compile-embedded or separately owned immutable bytes, call
+`prepare_representation(body, content_type)` once and retain the returned
+`Prepared_Representation`. Its validator is a fixed 66-byte inline field; it owns
+no allocation and borrows the body and content type. Both borrows must stay
+immutable until every response send completes.
+`prepared_representation_response(request, &representation)` reuses that validator
+without reading/hashing the body, and copies response metadata into the request
+arena. Preparing metadata does not copy or take ownership of the body. Ordinary
+`representation_response` and existing asset mounts retain their current behavior;
+use their development mode for fresh file bytes instead of reusing prepared tags.
+
 `If-None-Match` supports weak comparison, comma-separated tags, repeated field
 lines and a standalone wildcard. A matching GET or HEAD returns 304 with the
 same ETag/cache policy and no body or Content-Length. Malformed conditions are

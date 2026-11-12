@@ -48,7 +48,7 @@ route :: proc(data:rawptr,connection:^core.Connection,request:^core.Request)->co
  headers:=make([]core.Header,1,request.allocator);headers[0]={"x-client-identity",string(text)}
  return {status=.OK,headers=headers,body=transmute([]u8)string("http-ok")}
 }
-server :: proc(cert_path,key_path:string,root_path:string="") {
+server :: proc(cert_path,key_path:string,root_path:string="",load_mode:bool=false) {
  state:State
  cert,ce:=os.read_entire_file(cert_path,context.allocator);assert(ce==nil);defer delete(cert)
  key,ke:=os.read_entire_file(key_path,context.allocator);assert(ke==nil);defer delete(key)
@@ -67,6 +67,9 @@ server :: proc(cert_path,key_path:string,root_path:string="") {
   http3={enabled=true,enable_connect_protocol=true,qpack={table_capacity=4096,blocked_streams=4},endpoint={net.IP4_Loopback,0},credentials=state.credentials},
   keep_alive={enabled=true},resources={connection_limits={64*mem.Megabyte,8,8}},
   timeouts={header=3*time.Second,body=time.Second,response=3*time.Second,idle=5*time.Second},drain_timeout=500*time.Millisecond}
+ // The load profile reserves transport slots for both active and draining peers.
+ // Ordinary functional modes retain the library default of 32 total slots.
+ if load_mode {state.config.http3.max_connections=64}
  worker:=thread.create_and_start_with_poly_data(&state,proc(s:^State){assert(core.serve(s.config))})
  assert(worker!=nil)
  until:=time.tick_add(time.tick_now(),5*time.Second)
@@ -74,6 +77,10 @@ server :: proc(cert_path,key_path:string,root_path:string="") {
  endpoint,ready:=core.server_http3_endpoint(&state.control);assert(ready)
  retained,retained_ok:=core.retain_server_resources(&state.control);assert(retained_ok)
  fmt.printf("READY %d\n",endpoint.port);os.flush(os.stdout)
+ if load_mode {
+  fmt.println("LOAD_CONFIG total_transport_slots=64 profile_client_limit=32 includes_closing=true")
+  os.flush(os.stdout)
+ }
  command:[1]u8;_,_=os.read(os.stdin,command[:])
  core.stop_server(&state.control);thread.join(worker);thread.destroy(worker)
  // This observes Saba's configured managed scope, not the QUIC transport heap.
@@ -185,6 +192,7 @@ main :: proc() {
  context.logger=log.nil_logger()
  assert(len(os.args)>=4)
  if os.args[1]=="server" {server(os.args[2],os.args[3])}
+ else if os.args[1]=="server-load" {assert(len(os.args)==4);server(os.args[2],os.args[3],"",true)}
  else if os.args[1]=="server-mtls" {assert(len(os.args)==5);server(os.args[2],os.args[3],os.args[4])}
  else if os.args[1]=="client-mtls" {assert(len(os.args)==8);client(os.args[2],os.args[3],os.args[4],os.args[5],os.args[6],os.args[7])}
  else if os.args[1]=="negative" {negative(os.args[2],os.args[3])}

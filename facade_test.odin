@@ -58,3 +58,10 @@ facade_http3_invalid_request_timeout_reaches_prebind_validation :: proc(t:^testi
   testing.expect(t,!serve(config))
  }
 }
+
+@(test)
+facade_http3_phase_configuration_remains_explicit :: proc(t:^testing.T) {
+ config:=Server{http3={request_phases=Http3_Phase_Config{enabled=true,connect_accept=time.Second,connect_close=2*time.Second}}}
+ testing.expect(t,config.http3.request_phases.enabled&&config.http3.request_phases.connect_accept==time.Second&&config.http3.request_phases.connect_close==2*time.Second)
+ testing.expect(t,!Server{}.http3.request_phases.enabled)
+}

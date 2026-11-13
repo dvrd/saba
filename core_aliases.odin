@@ -97,4 +97,5 @@ request_connection_resources :: core.request_connection_resources
 
 Http2_Config :: core.Http2_Config
 Http3_Config :: core.Http3_Config
+Http3_Phase_Config :: core.Http3_Phase_Config
 server_http3_endpoint :: core.server_http3_endpoint

@@ -117,3 +117,74 @@ Run with the matching compiler/SDK and repeat with `-sanitize:thread`. The peer
 uses only an owned 127.0.0.1 listener, verifies the supplied synthetic certificate,
 and kills/reaps its child on failure. This check does not change the separate
 5-second native client payload qualification budget.
+
+## Opt-in isolated request phase budgets
+
+`Http3_Config.request_phases` is an explicit `Http3_Phase_Config`:
+
+```odin
+http3 = {
+    enabled = true,
+    endpoint = endpoint,
+    credentials = credentials,
+    request_phases = {
+        enabled = true,
+        connect_accept = 2 * time.Second,
+        connect_close = time.Second,
+    },
+}
+```
+
+When enabled, native HTTP/3 Header/Body/Response total phase budgets use resolved
+`Server.timeouts`. Defaults are header5s/body5s/large declared body30s/response5s;
+explicit body sets both ordinary and large-body durations. The existing strict
+`Content-Length > REQUEST_BODY_LIMIT` (4096-byte) threshold selects large body;
+unknown-length requests use ordinary body. Progress does not renew a budget.
+Native phase expiry resets only the affected request and drops its application
+ownership once, preserving healthy concurrent streams. Response completion means
+local transport byte/FIN handoff, not peer ACK/delivery.
+
+CONNECT acceptance and closing grace require explicit positive values no greater
+than `MAX_SERVER_TIMEOUT`. They are independent from ordinary response budgets;
+an accepted tunnel has no automatic request lifetime limit. Application upgrade
+read/write/close deadlines remain owned by the upgrade. `request_timeout` still
+configures the separate native pending-handler absolute budget (default30s from
+first parser bytes); with phases enabled, its expiry is stream-isolated.
+
+Zero/unset phase configuration preserves previous timeout behavior. `Http3_Config.idle`
+remains QUIC negotiated connection idle, `handshake_timeout` remains TLS/QUIC
+handshake timing, and TCP `Server.timeouts.idle` is not mapped to either. Invalid
+explicit CONNECT phase configuration fails before listener binding. Standalone
+owners must initialize the runtime's resolved timeouts before opting in.
+
+`tests/http3_phases.py` builds a public-facade server and reuses HTTP's maintained
+independent aioquic peer without duplicating protocol tools. The400ms fixed-credit
+isolation profile and separate3s response/initial64B auto-credit exact64KiB profile
+retain the5-second peer bound:
+
+```sh
+python3 tests/http3_phases.py --odin /path/to/verified/tools/odin \
+  --python /path/to/aioquic/python --report /tmp/saba-h3-phases.json
+```
+
+Add `--sanitize address` for the owned-wire correctness run. These finite local
+checks do not qualify native Linux, Mesa installation, production SLOs or deployment.
+
+Explicit finite `Response_Stream.timeout` keeps its existing lifetime contract.
+Saba forwards the validated remaining monotonic `stream.expires` budget at Ready,
+including a shorter inherited request deadline; it never restarts a full stream
+lifetime. Thus a60s SSE producer remains distinct from ordinary10s response
+policy. The producer's own deadline still applies. The additional stream-budget
+wire profile delays600ms under a1.5s declared producer lifetime while ordinary
+responses retain400ms; native and facade tests verify remaining-budget bounds,
+inheritance and exactly-once drop. This does not enable a Mesa H3 listener or
+change its SSE lifecycle.
+
+A producer failure, including its precise Tick deadline expiring just before the
+native millisecond phase check, cancels only that response stream. The native
+owner keeps healthy siblings alive and drops producer/request ownership once.
+Unexpected Core and critical protocol errors still fail the connection.
+
+Explicit application callback failure, including a shorter deferred/handler
+deadline, is stream-local too. The public-facade peer verifies a100ms deferred
+timeout under the separate2s native handler budget and healthy sibling responses.

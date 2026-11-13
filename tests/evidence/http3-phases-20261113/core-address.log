@@ -1,0 +1,51 @@
+[INFO ] --- [2026-11-13 14:30:55] Starting test runner with 1 thread.
+[INFO ] --- [2026-11-13 14:30:55] The random seed sent to every test is: 12540121376054. Set with -define:ODIN_TEST_RANDOM_SEED=n.
+[INFO ] --- [2026-11-13 14:30:55] Memory tracking is enabled. Tests will log their memory usage if there's an issue.
+[INFO ] --- [2026-11-13 14:30:55] < Final Mem/ Total Mem> <  Peak Mem> (#Free/Alloc) :: [package.test_name]
+HTTP3 independent peer 0: HTTP/3 302 
+location: /next
+set-cookie: a=1; Secure
+set-cookie: b=2; Secure
+
+
+HTTP3 independent peer 1: HTTP/3 404 
+
+missing
+HTTP3 sequential /auth?one=two: HTTP/3 401 
+www-authenticate: Bearer
+
+denied
+HTTP3 sequential /stream: HTTP/3 200 
+
+abcabc
+HTTP3 sequential /deferred: HTTP/3 202 
+
+deferred-ready
+saba-stderr curl: (95) HTTP/3 stream 0 reset by server (error 0x102 INTERNAL_ERROR)
+
+saba-cap exit 95 rejected true dead true body  reason HTTP3 listener
+saba-cacert exit 0 body saba-h3 calls 1
+saba-route exit 0 calls 1 path /saba body saba-h3 dead false reason HTTP3 listener
+saba-disabled port 0 ok false
+saba-no-handler port 0 ok false
+saba-stderr curl: (28) Connection timed out after 2000 milliseconds
+
+saba-drain exit 28 calls 0 body 
+saba-relay dropped adopted response packet bytes=299
+saba-loss exit 0 packets 12 dropped true reorder true slow true body xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+saba-tcp h3-exit 0 h3-body saba-h3 tcp-port 56879 h3-port 60736 tcp HTTP/1.1 200 OK
+Content-Length: 7
+Connection: close
+
+saba-h3
+saba-stderr curl: (60) Failed to connect to 127.0.0.1:64768 after 162 ms: SSL peer certificate or SSH remote key was not OK
+More details here: https://curl.se/docs/sslcerts.html
+
+curl failed to verify the legitimacy of the server and therefore could not
+establish a secure connection to it. To learn more about this situation and
+how to fix it, please visit the webpage mentioned above.
+
+saba-untrusted exit 60 body  calls 0
+
+Finished 25 tests in 14.051126s. All tests were successful.
+

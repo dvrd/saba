@@ -21,11 +21,13 @@ import signal "shared:async/signal"
 // Optional UDP listener on the ordinary server runtime. Credentials are borrowed
 // until serve returns. TCP and UDP endpoints are deliberately independent.
 Http3_Config :: struct {
+ request_phases:Http3_Phase_Config,
  idle:http3.Idle_Config,
  handshake_timeout:time.Duration,
  // Native H3 pending-handler budget, starting at first request bytes. Zero
- // selects 30s; expiry closes the connection and releases all its streams.
- // Also bounds extended-CONNECT closing grace. This is not a header/body
+ // selects 30s; unset phase policy closes the connection on expiry. An enabled
+ // phase policy instead expires only this request.
+ // With unset phase policy it also bounds CONNECT closing grace. This is not a header/body
  // receive or response-transmission phase deadline (see HTTP3.md).
  request_timeout:time.Duration,
  max_connections:int,
@@ -72,7 +74,7 @@ Http3_Request :: struct {
 
 http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
  if state == nil || !state.config.enabled || state.runtime == nil || state.config.credentials == nil do return 0, false
- if state.config.request_timeout<0 || state.config.request_timeout>MAX_SERVER_TIMEOUT do return 0,false
+ if !http3_phases_valid(state.config.request_phases) || state.config.request_timeout<0 || state.config.request_timeout>MAX_SERVER_TIMEOUT do return 0,false
  if state.config.client_auth==nil && state.runtime.config.tls!=nil {state.config.client_auth=state.runtime.config.tls.client_auth}
  if state.config.disable_tickets {state.config.tickets=nil} else if state.config.tickets==nil && state.runtime.config.tls!=nil {state.config.tickets=state.runtime.config.tls.tickets}
  if state.config.handler == nil {
@@ -82,7 +84,7 @@ http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
  if state.config.handler == nil do return 0, false
  early_policy:http3.Early_Request_Policy
  if state.config.early_request_policy!=nil {early_policy=http3_allow_early}
- state.live.config = {request_timeout=state.config.request_timeout,idle=state.config.idle,handshake_timeout=state.config.handshake_timeout,early_request_policy=early_policy,early_request_data=state,reset=state.config.reset,enable_connect_protocol=state.config.enable_connect_protocol,tickets=state.config.tickets,ecn=state.config.ecn,client_auth=state.config.client_auth,qpack=state.config.qpack,retry=state.config.retry,endpoint=state.config.endpoint, credentials=state.config.credentials,
+ state.live.config = {request_phases=http3_phase_policy(state.config.request_phases,state.runtime.timeouts),request_timeout=state.config.request_timeout,idle=state.config.idle,handshake_timeout=state.config.handshake_timeout,early_request_policy=early_policy,early_request_data=state,reset=state.config.reset,enable_connect_protocol=state.config.enable_connect_protocol,tickets=state.config.tickets,ecn=state.config.ecn,client_auth=state.config.client_auth,qpack=state.config.qpack,retry=state.config.retry,endpoint=state.config.endpoint, credentials=state.config.credentials,
   on_request=http3_poll, on_request_user=state, on_request_release=http3_release,
   max_connections=state.config.max_connections,max_request_body=state.config.max_request_body}
  port, ok = http3.listener_listen(&state.live)
@@ -276,6 +278,9 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
   prepared := response^; prepared.stream = stream
   if !queue_stream_response(task, prepared) do return .Failed
   out.stream = {data=state, next=http3_stream_next, drop=http3_stream_drop}
+  // The stream owner already started its total lifetime and applied inherited
+  // cancellation. Forward the remaining monotonic budget, never restart it.
+  out.response_timeout=max(time.Nanosecond,time.tick_diff(time.tick_now(),task.streaming.expires))
  } else if http.response_body_allowed(int(response.status), task.request.method) {
   out.body = response.body
  }

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 
 HERE = Path(__file__).resolve().parent
@@ -31,6 +32,8 @@ def main():
     parser.add_argument('--sanitize', choices=('address', 'thread'))
     parser.add_argument('--report', type=Path, required=True)
     args = parser.parse_args()
+    # Imported fixtures belong to the validated source tree, never a bytecode cache.
+    sys.dont_write_bytecode = True
     path = SHARED / 'http/v3/testdata/request_phases/run.py'
     spec = importlib.util.spec_from_file_location('http_phase_harness', path)
     harness = importlib.util.module_from_spec(spec)

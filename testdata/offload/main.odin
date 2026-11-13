@@ -3,6 +3,7 @@ package main
 import rt "base:runtime"
 import "core:fmt"
 import "core:mem"
+import "core:net"
 import charged "core:mem/budget"
 import owned "core:mem/owned"
 import "core:os"
@@ -54,8 +55,12 @@ build :: proc(p: rawptr, allocator: mem.Allocator) -> (server.Response, bool) {
 	copy(bytes, job.bytes)
 	return {status = .Created, body = bytes}, true
 }
-route :: proc(p: rawptr, _: ^server.Connection, request: ^server.Request) -> server.Response {
+route :: proc(p: rawptr, conn: ^server.Connection, request: ^server.Request) -> server.Response {
 	state := cast(^State)p
+	if request.path == "/slow" {
+		// An unread peer alone cannot hold backing when the kernel queues the whole body.
+		assert(net.set_option(conn.socket, .Send_Buffer_Size, 4096) == .None)
+	}
 	if request.path == "/scopes" do return resource_views(state, request)
 	if request.path == "/stream" do return resource_stream(request)
 	if request.path == "/slow" || request.path == "/large" do return large_response(state, request)

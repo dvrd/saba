@@ -87,6 +87,9 @@ def byte_admission(binary, checks):
     checks.append('full upload backing is charged before payload arrives; '
                   'global reject and recovery')
     with ResourceServer(binary, 'bytes') as server:
+        code, _, body = server.exchange('/slow')
+        assert code == 200 and len(body) == 1024 * 1024
+        server.wait_usage(lambda v: v['bytes'] == 0)
         conn = server.connect()
         conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
         conn.sendall(request('/slow'))

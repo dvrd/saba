@@ -21,15 +21,19 @@ State :: struct {
  control:saba.Server_Control,
  server:saba.Server,
  stop,query:bool,
- calls:u64,
+ calls,drops:u64,
+ pending:bool,
 }
 now_ms :: proc()->i64 {return i64(time.tick_diff({},time.tick_now()))/i64(time.Millisecond)}
 route :: proc(data:rawptr,_:^saba.Connection,r:^saba.Request)->saba.Response {
  assert(r.version=="HTTP/3"&&r.path=="/probe")
  state:=cast(^State)data
  sync.atomic_add(&state.calls,1)
+ if state.pending {return {deferred={data=state,poll=pending_poll,drop=pending_drop}}}
  return {status=.OK,body=transmute([]u8)string("idle-ok")}
 }
+pending_poll :: proc(_:rawptr,_:^saba.Deferred_IO)->(saba.Response,saba.Deferred_Step) {return {},.Waiting}
+pending_drop :: proc(data:rawptr) {sync.atomic_add(&(cast(^State)data).drops,1)}
 raw_route :: proc(data:rawptr,r:^h3.Server_Request,out:^h3.Server_Response)->h3.Response_Status {
  assert(r.target=="/probe")
  state:=cast(^State)data
@@ -46,10 +50,17 @@ server :: proc(mode,cert_path,key_path:string) {
  assert(store.replace(owner,&identity).kind==.None)
  state:=new(State);defer free(state)
  worker:^thread.Thread
- if mode=="saba" {
+ if mode=="saba"||mode=="saba-pending" {
   state.server={port=0,workers=2,handler=route,handler_data=state,control=&state.control,
    http3={enabled=true,endpoint={net.IP4_Loopback,0},credentials=owner,max_connections=1,
     idle={timeout=IDLE}},drain_timeout=300*time.Millisecond}
+  if mode=="saba-pending" {
+   state.pending=true
+   state.server.http3.request_timeout=200*time.Millisecond
+   state.server.http3.idle={timeout=5*time.Second}
+   state.server.timeouts.response=10*time.Second
+   state.server.handler_timeout=10*time.Second
+  }
   worker=thread.create_and_start_with_poly_data(state,proc(s:^State){assert(saba.serve(s.server))})
   assert(worker!=nil)
   until:=time.tick_add(time.tick_now(),5*time.Second)
@@ -91,9 +102,9 @@ server :: proc(mode,cert_path,key_path:string) {
   n,e:=os.read(os.stdin,command[:]);if e!=nil||n==0||command[0]=='s' {break}
   if command[0]=='t' {sync.atomic_store(&state.query,true)}
  }
- if mode=="saba" {saba.stop_server(&state.control)} else {sync.atomic_store(&state.stop,true)}
+ if mode=="saba"||mode=="saba-pending" {saba.stop_server(&state.control)} else {sync.atomic_store(&state.stop,true)}
  thread.join(worker);thread.destroy(worker)
- fmt.printf("RESULT calls=%d\n",state.calls)
+ fmt.printf("RESULT calls=%d drops=%d\n",state.calls,state.drops)
 }
 client :: proc(port_text,cert_path:string) {
  roots:tls.Root_Pool

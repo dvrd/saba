@@ -97,6 +97,7 @@ serve :: proc(config: Server) -> bool {
 		log.error("Invalid keep-alive request count or idle timeout")
 		return false
 	}
+	if config.http3.request_timeout<0 || config.http3.request_timeout>MAX_SERVER_TIMEOUT {log.error("Invalid HTTP3 request timeout");return false}
 	if config.handler_timeout<0 || config.handler_timeout>MAX_SERVER_TIMEOUT {log.error("Invalid handler timeout");return false}
 	if !timeouts_valid(config.timeouts) {
 		log.error("Invalid server timeouts: durations must be between zero and MAX_SERVER_TIMEOUT")

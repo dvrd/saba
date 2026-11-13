@@ -209,10 +209,41 @@ async def server_case(args,report):
     finally:
         if process.returncode is None:process.kill();await process.wait()
 
+async def pending_request_case(args, report):
+    process = await asyncio.create_subprocess_exec(
+        args.binary, 'saba-pending', args.cert, args.key,
+        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE)
+    try:
+        port = int((await line(process, b'READY '))[1])
+        cfg = config(args, True)
+        cfg.idle_timeout = 5
+        async with connect('127.0.0.1', port, configuration=cfg,
+                           create_protocol=Peer) as peer:
+            stream = peer._quic.get_next_available_stream_id()
+            started = asyncio.get_running_loop().time()
+            peer.http.send_headers(stream, [(b':method', b'GET'), (b':scheme', b'https'),
+                (b':authority', b'localhost'), (b':path', b'/probe')], end_stream=True)
+            peer.transmit()
+            terminal = await asyncio.wait_for(asyncio.shield(peer.terminal), 3)
+            elapsed = asyncio.get_running_loop().time() - started
+            assert terminal.error_code == 0x10c, terminal
+            assert .1 < elapsed < 3, elapsed
+            assert peer.events.empty(), 'pending handler produced an HTTP response'
+            report.update(application_close_code=terminal.error_code,
+                          pending_seconds=elapsed, request_timeout_ms=200)
+        report['native'] = await finish(process, 1)
+        assert 'RESULT calls=1 drops=1' in report['native']['stdout'], report
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
+
 async def run(args):
     assert aioquic.__version__=='1.3.0'
     report=dict(case=args.mode,peer='aioquic '+aioquic.__version__)
-    if args.mode.startswith('client-'):await client_pool(args,report)
+    if args.mode == 'saba-request-timeout': await pending_request_case(args, report)
+    elif args.mode.startswith('client-'):await client_pool(args,report)
     else:await server_case(args,report)
     print(json.dumps(report))
 if __name__=='__main__':

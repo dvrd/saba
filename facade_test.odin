@@ -47,3 +47,14 @@ facade_http3_configuration_reaches_owned_runtime :: proc(t:^testing.T) {
  endpoint,ready:=server_http3_endpoint(&control)
  testing.expect(t,!ready && endpoint.port==0)
 }
+
+@(test)
+facade_http3_invalid_request_timeout_reaches_prebind_validation :: proc(t:^testing.T) {
+ context.logger=log.nil_logger()
+ for duration in ([]time.Duration{-1,24*time.Hour+1}) {
+  control:Server_Control;stop_server(&control)
+  config:=Server{control=&control,http3={request_timeout=duration},
+   handler=proc(_:^Connection,_:^Request)->Response{return {status=.OK}}}
+  testing.expect(t,!serve(config))
+ }
+}

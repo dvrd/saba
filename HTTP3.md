@@ -23,6 +23,25 @@ TCP address/port are independent. With UDP port zero, query
 `server_http3_endpoint(&control)` after readiness. A separate HTTP3 handler is
 optional; leaving it nil uses the normal server handler and its data.
 
+`Http3_Config.request_timeout` explicitly forwards the native HTTP3 request
+budget. Zero preserves the transport's 30-second default; negative values and
+values over 24 hours fail before binding, including standalone `http3_listen`.
+An explicit value is independent of `Server.timeouts` and `handler_timeout`.
+
+The native timer starts at the first request bytes and is checked while a fully
+received request's application callback remains pending. Expiration closes the
+whole HTTP3 connection and releases all its streams, including sibling requests.
+The same setting bounds extended-CONNECT closing grace; it does not impose that
+lifetime on an open CONNECT stream. It is not a header/body receive deadline or
+a response-transmission deadline: incomplete requests and already-ready responses
+are outside the current check. `Server.timeouts` cannot be used as proof of those
+HTTP3 transport phases. See the separate phase-policy follow-up, OKAMI-420.
+
+For example, `http3={enabled=true, endpoint=endpoint, credentials=store,
+request_timeout=2*time.Second}` selects a 2-second native budget without changing
+TCP or application phase deadlines. The convenience facade aliases this same
+configuration; it introduces no second timeout setting.
+
 HTTP3 handlers receive method, path, query, authority as the Host header, ordinary
 headers, body, request allocator/resources/cancellation, and a nonnil secure
 Connection backed by the current request task. Normal routing and authentication
@@ -78,3 +97,23 @@ stream producer. Allocate its list/strings with `request.allocator`; ownership
 lasts until request release. Framing, routing, authentication and body metadata
 cannot be redefined by trailers. Malformed peer trailers terminate only their
 exchange, preserving sibling requests and WebSockets.
+
+## Explicit request-budget regression
+
+The focused tests in `core/http3_request_timeout_test.odin` cover exact/default
+forwarding, bounds rejected before listener configuration, and a native loopback
+pending callback released once before its longer application/client deadlines.
+The independent aioquic 1.3.0 check observes the authenticated application close
+and exactly one deferred drop (not external message delivery or receive-phase
+coverage):
+
+```sh
+odin build tests/http3_idle -out:/tmp/saba-h3-idle -sanitize:address
+python3 tests/http3_idle/peer.py saba-request-timeout --binary /tmp/saba-h3-idle \
+  --cert ../surf/tests/http3/localhost.pem --key ../http/v3/testdata/rsa2048.pem
+```
+
+Run with the matching compiler/SDK and repeat with `-sanitize:thread`. The peer
+uses only an owned 127.0.0.1 listener, verifies the supplied synthetic certificate,
+and kills/reaps its child on failure. This check does not change the separate
+5-second native client payload qualification budget.

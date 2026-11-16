@@ -9,6 +9,12 @@ import "core:strings"
 import "core:sync"
 import "core:sys/posix"
 import "core:time"
+import core "../core"
+import rt "base:runtime"
+import "core:unicode/utf8"
+import async "shared:async"
+import "core:crypto/legacy/sha1"
+import "core:encoding/base64"
 
 Development :: struct {
 	// Empty preserves ODIN environment then the historical "odin" default.
@@ -278,4 +284,430 @@ development_signature :: proc(paths: []string) -> (signature: u64, ok: bool) {
 		if !ok do return
 	}
 	return
+}
+
+RELOAD_CLIENT :: #load("reload_client.js", string)
+RELOAD_CLIENT_TAG :: `<script type="module" src="/__reload/client.js"></script>`
+
+RELOAD_INTERVAL :: 250 * time.Millisecond
+
+Reload_State :: struct {
+	directory:         string,
+	version:           u64,
+	stopped:           bool,
+	initial_signature: u64,
+	logger:            log.Logger,
+}
+
+reload_client_response :: proc(request: ^Request) -> Response {
+	return make_response(
+		request,
+		.OK,
+		[]Header {
+			{"Content-Type", "text/javascript; charset=utf-8"},
+			{"Cache-Control", "no-store"},
+		},
+		transmute([]u8)RELOAD_CLIENT,
+	)
+}
+
+
+reload_html_response :: proc(response: Response) -> bool {
+	if response.status != .None && response.status != .OK do return false
+
+	for header in response.headers {
+		if !strings.equal_fold(header.name, "Content-Type") do continue
+
+		media_type := header.value
+		if separator := strings.index_byte(media_type, ';'); separator >= 0 {
+			media_type = media_type[:separator]
+		}
+
+		return strings.equal_fold(strings.trim_space(media_type), "text/html")
+	}
+
+	return false
+}
+
+inject_reload_client :: proc(
+	html: []u8,
+	allocator := context.allocator,
+) -> (
+	injected: []u8,
+	ok: bool,
+) {
+	if strings.contains(string(html), RELOAD_CLIENT_TAG) do return nil, true
+
+	position := strings.index(string(html), "</head>")
+	if position < 0 {
+		log.error("Missing </head> in development HTML")
+
+		return nil, false
+	}
+
+	development_html, allocation_err := make([]u8, len(html) + len(RELOAD_CLIENT_TAG), allocator)
+	if allocation_err != nil {
+		log.error("Could not allocate development HTML:", allocation_err)
+
+		return nil, false
+	}
+
+	injected = development_html
+	used := copy(injected, html[:position])
+	used += copy(injected[used:], RELOAD_CLIENT_TAG)
+	copy(injected[used:], html[position:])
+
+	return injected, true
+}
+
+web_signature :: proc(directory: string) -> (signature: u64, ok: bool) {
+	walker := os.walker_create(directory)
+	defer os.walker_destroy(&walker)
+
+	ok = true
+
+	for info in os.walker_walk(&walker) {
+		if info.type != .Regular do continue
+
+		data, err := os.read_entire_file(info.fullpath, context.allocator)
+
+		if err != nil {
+			log.error("Could not read watched file:", info.fullpath, err)
+			ok = false
+			return
+		}
+
+		file_hash := hash.fnv64a(transmute([]u8)info.fullpath)
+		file_hash = hash.fnv64a(data, file_hash)
+
+		signature ~= file_hash
+
+		if free_err := delete(data); free_err != nil {
+			log.error("Could not free watched file:", free_err)
+			ok = false
+		}
+	}
+
+	if path, err := os.walker_error(&walker); err != nil {
+		log.error("Could not scan watched directory:", path, err)
+		ok = false
+	}
+
+	return
+}
+
+watch_web :: proc(state: ^Reload_State) {
+	context.logger = state.logger
+
+	observed := state.initial_signature
+	published := state.initial_signature
+
+	for !sync.atomic_load(&state.stopped) {
+		time.sleep(RELOAD_INTERVAL)
+
+		current, ok := web_signature(state.directory)
+		if !ok do continue
+
+		// Wait for two matching scans before publishing a change.
+		if current != observed {
+			observed = current
+			continue
+		}
+
+		if current != published {
+			version := sync.atomic_load(&state.version)
+			sync.atomic_store(&state.version, version + 1)
+
+			published = current
+		}
+	}
+}
+
+@(private)
+Session_Phase :: enum {Header,Frame,Write}
+@(private)
+Reload_Session :: struct {
+	state:^Reload_State,
+	phase:Session_Phase,
+	initialized:bool,
+	version:u64,
+	deadline:async.Deadline,
+	input:[131]u8,
+	used,expected:int,
+	output:[256]u8,
+	output_used,output_offset:int,
+	close_after:bool,
+}
+
+// This adapter owns WebSocket framing/session storage; core drives only the
+// optional continuation on its existing task and destroys it exactly once.
+handle :: proc(state:^Reload_State,request:^Request)->(Response,bool) {
+	if core.match_route(request,"GET","/__reload/client.js") do return reload_client_response(request),true
+	if !core.match_route(request,"GET","/__reload") do return {},false
+	accept_storage,allocation_error:=make([]u8,28,request.allocator)
+	if allocation_error!=nil do return {status=.Internal_Server_Error},true
+	accept,status:=websocket_accept(request,accept_storage)
+	if status!=.None do return {status=status},true
+	response:=make_response(request,.Switching_Protocols,{{"Upgrade","websocket"},{"Sec-WebSocket-Accept",accept}})
+	if response.status!=.Switching_Protocols do return response,true
+	session,error:=new(Reload_Session,rt.heap_allocator())
+	if error!=nil do return {status=.Internal_Server_Error},true
+	session.state=state
+	session.version=sync.atomic_load(&state.version)
+	response.upgrade={data=session,resume=resume_session,drop=drop_session}
+	return response,true
+}
+
+@(private)
+drop_session :: proc(data:rawptr) {free(cast(^Reload_Session)data,rt.heap_allocator())}
+
+@(private)
+reset_session_read :: proc(session:^Reload_Session,io:^core.Upgrade_IO) {
+	session.used,session.expected=0,2
+	session.phase=.Header
+	session.deadline=async.deadline_after(io.runtime,RELOAD_INTERVAL)
+	io.connection.read_deadline=time.tick_add(time.tick_now(),RELOAD_INTERVAL)
+}
+
+@(private)
+queue_session_output :: proc(session:^Reload_Session,io:^core.Upgrade_IO,count:int,close_after:bool) {
+	session.output_used,session.output_offset=count,0
+	session.close_after=close_after
+	session.phase=.Write
+	session.deadline=async.deadline_after(io.runtime,RESPONSE_SEND_TIMEOUT)
+	io.connection.write_deadline=time.tick_add(time.tick_now(),RESPONSE_SEND_TIMEOUT)
+}
+
+@(private)
+append_websocket_frame :: proc(storage:[]u8,opcode:Opcode,payload:[]u8)->int {
+	assert(len(payload)<=125 && len(storage)>=len(payload)+2)
+	storage[0],storage[1]=0x80|u8(opcode),u8(len(payload))
+	copy(storage[2:],payload)
+	return len(payload)+2
+}
+
+@(private)
+queue_session_close :: proc(session:^Reload_Session,io:^core.Upgrade_IO,code:u16,reason:string) {
+	payload:[125]u8
+	assert(len(reason)<=123)
+	payload[0],payload[1]=u8(code>>8),u8(code&255)
+	copy(payload[2:],reason)
+	count:=append_websocket_frame(session.output[:],.Close,payload[:2+len(reason)])
+	queue_session_output(session,io,count,true)
+}
+
+@(private)
+resume_session :: proc(data:rawptr,io:^core.Upgrade_IO)->async.Resume_Result {
+	session:=cast(^Reload_Session)data
+	if !session.initialized {session.initialized=true;reset_session_read(session,io)}
+	if session.phase==.Write {
+		if session.output_offset==session.output_used {
+			if session.close_after do return .Done
+			reset_session_read(session,io)
+			return .Yield
+		}
+		n,error:=core.upgrade_write(io,session.output[session.output_offset:session.output_used],session.deadline)
+		if error.kind==.Pending do return .Waiting
+		if error.kind!=.None do return .Done
+		session.output_offset+=n
+		return .Yield
+	}
+	used:=session.used
+	if session.phase==.Header && used==0 {
+		if sync.atomic_load(&session.state.stopped) do return .Done
+		if sync.atomic_load(&session.state.version)!=session.version {
+			count:=append_websocket_frame(session.output[:],.Text,transmute([]u8)string("reload"))
+			payload:=[]u8{u8(REGULAR_CLOSE>>8),u8(REGULAR_CLOSE&255),'r','e','l','o','a','d','i','n','g'}
+			count+=append_websocket_frame(session.output[count:],.Close,payload)
+			queue_session_output(session,io,count,true)
+			return .Yield
+		}
+	}
+	target:=session.expected
+	if session.phase==.Header && used==0 do target=1
+	n,error:=core.upgrade_read(io,session.input[used:target],session.deadline)
+	if error.kind==.Pending do return .Waiting
+	if error.kind==.Timeout && used==0 && session.phase==.Header {reset_session_read(session,io);return .Yield}
+	if error.kind!=.None do return .Done
+	session.used+=n
+	used=session.used
+	if used==1 {
+		session.deadline=async.deadline_after(io.runtime,REQUEST_HEADER_TIMEOUT)
+		io.connection.read_deadline=time.tick_add(time.tick_now(),REQUEST_HEADER_TIMEOUT)
+		return .Yield
+	}
+	if used<session.expected do return .Yield
+	header:=session.input[:2]
+	opcode:=Opcode(header[0]&15)
+	length:=int(header[1]&127)
+	if session.phase==.Header {
+		code:u16=PROTOCOL_ERROR
+		reason:string
+		if header[0]&0x70!=0 {reason="reserved bits must be zero"}
+		else if header[1]&0x80==0 {reason="client frames must be masked"}
+		else if opcode==.Text || opcode==.Binary {code=UNSUPPORTED_DATA;reason="reload endpoint accepts control frames only"}
+		else if opcode!=.Close && opcode!=.Ping && opcode!=.Pong {reason="unsupported opcode"}
+		else if header[0]&0x80==0 {reason="control frames must not be fragmented"}
+		else if length>125 {reason="control payload exceeds125bytes"}
+		else if opcode==.Close && length==1 {reason="close payload must be empty or contain at least2bytes"}
+		if reason!="" {queue_session_close(session,io,code,reason);return .Yield}
+		session.expected=6+length
+		session.phase=.Frame
+		return .Yield
+	}
+	mask:=session.input[2:6]
+	payload:=session.input[6:6+length]
+	for &value,i in payload do value~=mask[i%4]
+	#partial switch opcode {
+	case .Close:
+		if length>=2 {
+			code:=u16(payload[0])<<8|u16(payload[1])
+			if !valid_close_code(code) {queue_session_close(session,io,PROTOCOL_ERROR,"invalid close code");return .Yield}
+			if !utf8.valid_string(string(payload[2:])) {queue_session_close(session,io,INVALID_PAYLOAD_DATA,"close reason must be valid UTF-8");return .Yield}
+		}
+		count:=append_websocket_frame(session.output[:],.Close,payload)
+		queue_session_output(session,io,count,true)
+	case .Ping:
+		count:=append_websocket_frame(session.output[:],.Pong,payload)
+		queue_session_output(session,io,count,false)
+	case .Pong:reset_session_read(session,io)
+	case:return .Done
+	}
+	return .Yield
+}
+
+Request :: core.Request
+Response :: core.Response
+Header :: core.Header
+Connection :: core.Connection
+HTTP_Status :: core.HTTP_Status
+make_response :: core.make_response
+header_value :: core.header_value
+send_response :: core.send_response
+send_empty_response :: core.send_empty_response
+send_bytes :: core.send_bytes
+read_connection :: core.read_connection
+REQUEST_HEADER_TIMEOUT :: core.REQUEST_HEADER_TIMEOUT
+RESPONSE_SEND_TIMEOUT :: core.RESPONSE_SEND_TIMEOUT
+WEBSOCKET_GUID: string : "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+Opcode :: enum u8 {
+	Continue = 0x00,
+	Text     = 0x01,
+	Binary   = 0x02,
+	// 0x03–0x07 | Reserved for future data-frame types
+	Close    = 0x08,
+	Ping     = 0x09,
+	Pong     = 0x0a,
+	// 0x0b–0x0f | Reserved for future control-frame types
+}
+
+REGULAR_CLOSE :: 1000
+PROTOCOL_ERROR :: 1002
+UNSUPPORTED_DATA :: 1003
+INVALID_PAYLOAD_DATA :: 1007
+
+// Returns an accept value borrowing caller storage; no stack-backed value escapes.
+@(private)
+websocket_accept :: proc(request: ^Request, storage: []u8) -> (string, HTTP_Status) {
+	key := header_value(request, "Sec-WebSocket-Key")
+	nonce: [16]byte
+	decoded, decode_error := base64.decode_into_buf(nonce[:], key, options = {.Strict})
+	connection := header_value(request, "Connection")
+	has_upgrade := false
+	for token in strings.split_iterator(&connection, ",") {
+		if strings.equal_fold(strings.trim_space(token), "upgrade") do has_upgrade = true
+	}
+	if decode_error != nil ||
+	   len(decoded) != len(nonce) ||
+	   header_value(request, "Sec-WebSocket-Version") != "13" ||
+	   !strings.equal_fold(header_value(request, "Upgrade"), "websocket") ||
+	   !has_upgrade {
+		return "", .Bad_Request
+	}
+	hash: sha1.Context
+	digest: [sha1.DIGEST_SIZE]u8
+	sha1.init(&hash)
+	sha1.update(&hash, transmute([]u8)key)
+	sha1.update(&hash, transmute([]u8)WEBSOCKET_GUID)
+	sha1.final(&hash, digest[:])
+	accept, err := base64.encode_into_buf(storage, digest[:])
+	if err != nil do return "", .Internal_Server_Error
+	return string(accept), .None
+}
+
+upgrade_websocket :: proc(conn: ^Connection, request: ^Request) -> bool {
+	storage: [28]u8
+	accept, status := websocket_accept(request, storage[:])
+	if status != .None {
+		send_empty_response(conn, status); return false
+	}
+	return send_response(
+		conn,
+		{
+			status = .Switching_Protocols,
+			headers = []Header{{"Upgrade", "websocket"}, {"Sec-WebSocket-Accept", accept}},
+		},
+	)
+}
+
+send_websocket_frame :: proc(conn: ^Connection, opcode: Opcode, payload: []u8) -> bool {
+	if len(payload) > 125 {
+		log.error("WebSocket control payload exceeds 125 bytes")
+		return false
+	}
+
+	frame: [127]u8
+	frame[0] = 0x80 | cast(u8)opcode
+	frame[1] = cast(u8)len(payload)
+	copy(frame[2:], payload)
+
+	conn.write_deadline = time.tick_add(time.tick_now(), RESPONSE_SEND_TIMEOUT)
+
+	return send_bytes(conn, frame[:2 + len(payload)], "WebSocket frame")
+}
+
+send_websocket_close :: proc(conn: ^Connection, code: u16, reason: string) -> bool {
+	if len(reason) > 123 {
+		log.error("WebSocket close reason exceeds 123 bytes")
+		return false
+	}
+
+	payload: [125]u8
+	payload[0] = u8(code >> 8)
+	payload[1] = u8(code & 0xff)
+	copy(payload[2:], transmute([]u8)reason)
+
+	return send_websocket_frame(conn, .Close, payload[:2 + len(reason)])
+}
+
+read_websocket_bytes :: proc(conn: ^Connection, buffer: []u8) -> bool {
+	used := 0
+
+	for used < len(buffer) {
+		n, err := read_connection(conn, buffer[used:])
+		if err != nil {
+			log.error("Could not read WebSocket frame:", err, "| socket:", conn.socket)
+
+			return false
+		}
+
+		if n == 0 {
+			log.error("Client disconnected during WebSocket frame", "| socket:", conn.socket)
+
+			return false
+		}
+
+		used += n
+	}
+
+	return true
+}
+
+valid_close_code :: proc(code: u16) -> bool {
+	return(
+		(code >= 1000 && code <= 1003) ||
+		(code >= 1007 && code <= 1014) ||
+		(code >= 3000 && code <= 4999) \
+	)
 }

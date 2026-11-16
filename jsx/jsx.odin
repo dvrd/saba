@@ -4,6 +4,7 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:strings"
 import "core:unicode/utf8"
+import paths "../paths"
 
 JSX_Error :: struct {
 	file:         string,
@@ -606,3 +607,7 @@ jsx_javascript_scan :: proc(
 	}
 	return
 }
+
+module_url_ok :: paths.module_url_ok
+
+JSX_RUNTIME_URL :: "/__saba/dom.js"

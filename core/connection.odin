@@ -501,7 +501,7 @@ server_admit_connection :: proc(runtime: ^Server_Runtime, client: net.TCP_Socket
 		return
 	}
 
-	task, allocation_error := new(Connection_Task)
+	task, allocation_error := connection_storage_new()
 
 	if allocation_error != nil {
 		server_capacity_allocation_failed(runtime)
@@ -509,18 +509,21 @@ server_admit_connection :: proc(runtime: ^Server_Runtime, client: net.TCP_Socket
 		return
 	}
 
+	initial_header, resource_emergency := task.initial_header, task.resource_emergency
 	task^ = {
 		runtime = runtime,
 		native_pending = true,
 		phase = .Adopt,
 		connection = {socket = client, _timeouts = runtime.timeouts},
+		initial_header = initial_header,
+		resource_emergency = resource_emergency,
 	}
 
 	if !start_connection_resources(task) {
 		server_capacity_allocation_failed(runtime)
 		budget.release_scope(&task.resource_connection)
 		reject_connection(client, runtime.config.tls != nil)
-		free(task)
+		connection_storage_free(task)
 		return
 	}
 
@@ -543,7 +546,7 @@ server_admit_connection :: proc(runtime: ^Server_Runtime, client: net.TCP_Socket
 		mem.dynamic_arena_destroy(&task.arena)
 		finish_operation_resources(task)
 		budget.release_scope(&task.resource_connection)
-		free(task)
+		connection_storage_free(task)
 	}
 }
 
@@ -873,7 +876,7 @@ connection_cancel :: proc(data: rawptr) -> async.Resume_Result {
 }
 
 begin_http_headers :: proc(task: ^Connection_Task) {
-	task.header = task.initial_header[:]
+	task.header = task.initial_header
 	task.header_deadline = async.deadline_after(&task.runtime.executor, task.runtime.timeouts.header)
 	task.header_read_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.header)
 	arm_read_deadline(task, task.runtime.timeouts.idle)
@@ -1295,7 +1298,7 @@ keep_alive_next_request :: #force_no_inline proc(task: ^Connection_Task) -> bool
 	task.output_index, task.output_offset = 0, 0
 	task.reuse_after_write = false
 	task.finish_after_write = true
-	task.header = task.initial_header[:]
+	task.header = task.initial_header
 
 	if count > len(task.header) {
 		buffer, err := make([]u8, count, mem.dynamic_arena_allocator(&task.arena))

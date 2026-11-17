@@ -11,8 +11,10 @@ import "core:testing"
 import async "shared:async"
 
 Resource_Test :: struct {
-	runtime: Server_Runtime,
-	task:    Connection_Task,
+	runtime:            Server_Runtime,
+	task:               Connection_Task,
+	initial_header:     [512]u8,
+	resource_emergency: [128]u8,
 }
 resource_test_init :: proc(fixture: ^Resource_Test, config: Resource_Config = {}) {
 	fixture.runtime.config.resources = config
@@ -21,6 +23,8 @@ resource_test_init :: proc(fixture: ^Resource_Test, config: Resource_Config = {}
 	assert(async.init(&fixture.runtime.executor, {workers = 1, task_capacity = 1, io_capacity = 1}).kind == .None)
 	fixture.task.runtime = &fixture.runtime
 	fixture.task.phase = .Dispatch
+	fixture.task.initial_header = fixture.initial_header[:]
+	fixture.task.resource_emergency = fixture.resource_emergency[:]
 	assert(start_connection_resources(&fixture.task))
 	init_connection_arena(&fixture.task)
 	fixture.task.request = {
@@ -56,7 +60,7 @@ zero_byte_allowance_uses_fixed_503_storage_and_no_payload_allocation :: proc(t: 
 	testing.expect_value(t, before.used.bytes, u64(0))
 	assert(queue_response(&fixture.task, {status = .OK, body = []u8{42}}))
 	testing.expect(t, strings.contains(string(fixture.task.output[0]), "503 Service Unavailable"))
-	testing.expect(t, raw_data(fixture.task.output[0]) == raw_data(fixture.task.resource_emergency[:]))
+	testing.expect(t, raw_data(fixture.task.output[0]) == raw_data(fixture.task.resource_emergency))
 	after, result := budget.snapshot(fixture.runtime.resources)
 	assert(result == .None)
 	testing.expect_value(t, after.used.bytes, u64(0))
@@ -224,7 +228,7 @@ review_chunk_decoder_budget_reject_uses_fixed_503 :: proc(t: ^testing.T) {
 	}
 
 	used += copy(raw[used:], "\r\n")
-	fixture.task.header = fixture.task.initial_header[:]
+	fixture.task.header = fixture.task.initial_header
 
 	for size in ([4]int{1024, 2048, 4096, 8192}) {
 		buffer, error := make([]u8, size, mem.dynamic_arena_allocator(&fixture.task.arena))
@@ -388,4 +392,19 @@ review_keepalive_operation_create_failure_balances_observation :: proc(t: ^testi
 	testing.expect_value(t, fixture.runtime.metrics.started, u64(2))
 	testing.expect_value(t, fixture.runtime.metrics.completed, u64(2))
 	testing.expect_value(t, fixture.runtime.metrics.active, u64(0))
+}
+
+@(test)
+http2_stream_tasks_do_not_reserve_the_http1_buffers :: proc(t: ^testing.T) {
+	// Before the split Connection_Task held [512]u8 + [128]u8 inline (2104 bytes;
+	// H2_Request 2384, H2_Upgrade 2992). Both buffers now live in Connection_Storage.
+	testing.expect(t, size_of(Connection_Task) <= 1600)
+	testing.expect(t, size_of(H2_Request) <= 1900)
+	testing.expect(t, size_of(H2_Upgrade) <= 2500)
+	task, error := connection_storage_new()
+	testing.expect_value(t, error, nil)
+	defer connection_storage_free(task)
+	testing.expect_value(t, len(task.initial_header), 512)
+	testing.expect_value(t, len(task.resource_emergency), 128)
+	testing.expect(t, raw_data(task.initial_header) != raw_data(task.resource_emergency))
 }

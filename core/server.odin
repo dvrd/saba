@@ -37,10 +37,37 @@ Connection_Phase :: enum {
 
 // One task allocation per admitted connection. State remains stable across
 // suspension. Initial header storage is 512 bytes; larger buffers grow on demand.
+// The fixed HTTP/1 buffers live beside the task of a TCP connection instead of
+// inside it, so the Connection_Task embedded in every HTTP/2 stream does not
+// reserve them. `task` must stay the first field.
+Connection_Storage :: struct {
+	task:               Connection_Task,
+	initial_header:     [512]u8,
+	resource_emergency: [128]u8,
+}
+
+connection_storage_new :: proc() -> (^Connection_Task, mem.Allocator_Error) {
+	storage, error := new(Connection_Storage)
+
+	if error != nil {
+		return nil, error
+	}
+
+	storage.task.initial_header = storage.initial_header[:]
+	storage.task.resource_emergency = storage.resource_emergency[:]
+
+	return &storage.task, nil
+}
+
+connection_storage_free :: proc(task: ^Connection_Task) {
+	free(cast(^Connection_Storage)task)
+}
+
 Connection_Task :: struct {
 	resource_connection, resource_operation:           budget.Scope,
 	resource_binding, resource_transport:              charged.Binding,
-	resource_emergency:                                [128]u8,
+	// HTTP/1 only; nil for HTTP/2 streams (see Connection_Storage).
+	resource_emergency:                                []u8,
 	task:                                              async.Task,
 	runtime:                                           ^Server_Runtime,
 	connection:                                        Connection,
@@ -61,7 +88,7 @@ Connection_Task :: struct {
 	observed, observation_finished, response_finished: bool,
 	observed_at:                                       time.Tick,
 	event:                                             Request_Event,
-	initial_header:                                    [512]u8,
+	initial_header:                                    []u8,
 	header:                                            []u8,
 	header_used, body_used:                            int,
 	request:                                           Request,
@@ -748,7 +775,7 @@ finish_connection :: proc(data: rawptr) {
 	budget.release_scope(&task.resource_connection)
 	sync.atomic_sub(&task.runtime.active_connections, 1)
 	drain_connection_finished(task.runtime)
-	free(task)
+	connection_storage_free(task)
 }
 
 send_bytes :: proc(conn: ^Connection, data: []u8, operation: string) -> bool {
@@ -1242,7 +1269,7 @@ resource_reject :: proc(task: ^Connection_Task, status: HTTP_Status = .Service_U
 		return h2_request_emergency(task, status)
 	}
 
-	head, encoded := response_headers({status = status}, task.resource_emergency[:])
+	head, encoded := response_headers({status = status}, task.resource_emergency)
 	if !encoded {
 		return false
 	}

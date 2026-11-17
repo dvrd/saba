@@ -1,5 +1,6 @@
 package saba_core
 
+import http3 "../../http/v3"
 import "core:fmt"
 import "core:net"
 import "core:os"
@@ -109,7 +110,7 @@ saba_curl_finish :: proc(
 		}
 
 		if state != nil {
-			http3_step(state)
+			http3.listener_step(&state.live)
 		}
 		time.sleep(time.Millisecond)
 	}
@@ -353,7 +354,7 @@ saba_http3_drain :: proc(t: ^testing.T) {
 	if !ok {
 		return
 	}
-	http3_drain(session)
+	http3.listener_drain(&session.live)
 	args: [12]string
 	url_buf, resolve_buf: [96]u8
 	command := saba_http3_args(args[:], url_buf[:], resolve_buf[:], port, "/drain", true, "2")
@@ -588,7 +589,7 @@ saba_http3_loss :: proc(t: ^testing.T) {
 			}
 		}
 
-		http3_step(session)
+		http3.listener_step(&session.live)
 		time.sleep(time.Millisecond)
 	}
 
@@ -754,7 +755,7 @@ saba_http3_fixture :: proc(t: ^testing.T, state: ^Http3) {
 	state.config.endpoint = {net.IP4_Loopback, 0}
 }
 saba_http3_fixture_destroy :: proc(state: ^Http3) {
-	http3_close(state)
+	http3.listener_close(&state.live)
 
 	if state.runtime != nil {
 		_ = async.destroy(&state.runtime.executor)

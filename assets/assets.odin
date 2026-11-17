@@ -410,7 +410,7 @@ file_next :: proc(data: rawptr, io: ^core.Stream_IO) -> core.Stream_Step {
 
 	producer.borrowed = true
 
-	if core.stream_submit_backing(io, &chunk, {allocator = producer.allocator}) != .Accepted {
+	if core.stream_submit(io, &chunk, {allocator = producer.allocator}) != .Accepted {
 		owned.destroy(&chunk)
 		return .Failed
 	}

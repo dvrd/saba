@@ -80,7 +80,7 @@ http3_phase_policy_is_forwarded_and_idle_handler_budgets_remain_distinct :: proc
 
 	port, ok := http3_listen(owner)
 	testing.expect(t, ok && port > 0)
-	defer http3_close(owner)
+	defer http3.listener_close(&owner.live)
 	policy := owner.live.config.request_phases
 	testing.expect(
 		t,

@@ -14,6 +14,7 @@ import store "core:crypto/tls/credentials/store"
 import bridge "shared:async/connection"
 import "core:strings"
 import http "../../http"
+import http3 "../../http/v3"
 
 Connection :: struct {
 	_task:          ^Connection_Task,
@@ -367,7 +368,7 @@ serve :: proc(config: Server) -> bool {
 		}
 
 		if e := async.spawn(&runtime.executor, &runtime.http3.task); e.kind != .None {
-			http3_close(&runtime.http3)
+			http3.listener_close(&runtime.http3.live)
 			return false
 		}
 	}

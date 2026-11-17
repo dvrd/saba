@@ -1,5 +1,6 @@
 package saba_core
 
+import http3 "../../http/v3"
 import "core:crypto/tls"
 import credential_store "core:crypto/tls/credentials/store"
 import "core:net"
@@ -45,7 +46,7 @@ http3_inherits_client_auth_policy_and_requires_explicit_disable :: proc(t: ^test
 	testing.expect(t, ok)
 	testing.expect(t, owner.live.config.client_auth == &require)
 	testing.expect(t, owner.live.config.tickets == &tickets)
-	http3_close(&owner)
+	http3.listener_close(&owner.live)
 	// Different policies are explicit. Merely enabling UDP cannot silently turn
 	// off a TLS client-certificate requirement on the same application handler.
 	disabled := tls.Client_Auth_Config {
@@ -59,7 +60,7 @@ http3_inherits_client_auth_policy_and_requires_explicit_disable :: proc(t: ^test
 	testing.expect(t, ok)
 	testing.expect(t, owner.live.config.client_auth == &disabled)
 	testing.expect(t, owner.live.config.tickets == nil)
-	http3_close(&owner)
+	http3.listener_close(&owner.live)
 	invalid := tls.Client_Auth_Config {
 		mode = .Require,
 	}

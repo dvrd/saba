@@ -32,7 +32,7 @@ http3_request_timeout_is_forwarded_without_resolving_phase_timeouts :: proc(t: ^
 		port, ok := http3_listen(owner)
 		testing.expect(t, ok && port > 0)
 		testing.expect_value(t, owner.live.config.request_timeout, duration)
-		http3_close(owner)
+		http3.listener_close(&owner.live)
 	}
 }
 

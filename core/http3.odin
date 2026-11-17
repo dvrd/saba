@@ -134,39 +134,19 @@ http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
 	return
 }
 
-http3_step :: proc(state: ^Http3) -> bool {
-	if state == nil {
-		return false
-	}
-
-	return http3.listener_step(&state.live)
-}
-http3_drain :: proc(state: ^Http3) {
-	if state != nil {
-		http3.listener_drain(&state.live)
-	}
-}
-// Owner-only. Runtime integration calls this from the listener's retirement
-// callback, after all running application callbacks have returned.
-http3_close :: proc(state: ^Http3) {
-	if state != nil {
-		http3.listener_close(&state.live)
-	}
-}
-
 http3_resume :: proc(data: rawptr) -> async.Resume_Result {
 	state := cast(^Http3)data
 	if async.cancelled(&state.task) {
 		return .Done
 	}
 	if server_is_draining(state.runtime) {
-		http3_drain(state)
+		http3.listener_drain(&state.live)
 	}
 	// Protect admitted transport work while step may create/release a request.
 	// Drain reads only this atomic snapshot, never mutable QUIC state.
 	sync.atomic_store(&state._pending, true)
 
-	if !http3_step(state) {
+	if !http3.listener_step(&state.live) {
 		state.runtime.listener_failed = true
 		shutdown_runtime(state.runtime)
 		return .Done
@@ -187,7 +167,9 @@ http3_resume :: proc(data: rawptr) -> async.Resume_Result {
 }
 http3_retire :: proc(data: rawptr) {
 	state := cast(^Http3)data
-	http3_close(state)
+	// Owner-only: runs from the listener's retirement callback, after all
+	// running application callbacks have returned.
+	http3.listener_close(&state.live)
 	sync.atomic_store(&state._pending, false)
 }
 

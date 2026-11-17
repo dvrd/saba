@@ -136,9 +136,9 @@ server_scope_closure_does_not_close_the_injected_global_parent :: proc(t: ^testi
 }
 
 @(test)
-legacy_stream_submit_remains_assignable_to_the_original_procedure_type :: proc(t: ^testing.T) {
-	legacy: proc(_: ^Stream_IO, _: ^owned.Chunk) -> exchange.Submit_Result = stream_submit
-	testing.expect_value(t, legacy(nil, nil), .Invalid)
+stream_submit_is_one_entry_point_with_a_defaulted_backing :: proc(t: ^testing.T) {
+	testing.expect_value(t, stream_submit(nil, nil), .Invalid)
+	testing.expect_value(t, stream_submit(nil, nil, {release_frees_storage = true}), .Invalid)
 }
 
 @(test)

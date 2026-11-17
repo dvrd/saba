@@ -200,16 +200,9 @@ Stream_IO :: struct {
 
 Stream_Backing :: exchange.Backing
 
-// Exact legacy procedure type remains usable in callback tables.
-stream_submit :: proc(io: ^Stream_IO, chunk: ^owned.Chunk) -> exchange.Submit_Result {
-	return stream_submit_backing(io, chunk)
-}
-
-stream_submit_backing :: proc(
-	io: ^Stream_IO,
-	chunk: ^owned.Chunk,
-	backing: Stream_Backing = {},
-) -> exchange.Submit_Result {
+// The one entry point for handing a chunk to the response stream; a zero
+// Backing keeps the caller's chunk storage semantics.
+stream_submit :: proc(io: ^Stream_IO, chunk: ^owned.Chunk, backing: Stream_Backing = {}) -> exchange.Submit_Result {
 	if io == nil || io._exchange == nil || chunk == nil || len(chunk.data) == 0 {
 		return .Invalid
 	}
@@ -237,9 +230,6 @@ stream_wait :: proc(io: ^Stream_IO, deadline: async.Deadline) -> async.Error {
 	return error
 }
 
-streaming_response :: proc(response: Response) -> bool {
-	return stream_present(response.stream)
-}
 stream_present :: proc(producer: Response_Stream) -> bool {
 	return(
 		producer.next != nil ||

@@ -134,7 +134,7 @@ route :: proc(data: rawptr, connection: ^core.Connection, request: ^core.Request
 	}
 
 	if request.path == "/global-drain" {
-		core.http3_drain(&connection._task.runtime.http3)
+		h3.listener_drain(&connection._task.runtime.http3.live)
 	}
 
 	if request.path == "/inspect" {

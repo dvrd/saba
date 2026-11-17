@@ -148,7 +148,7 @@ handle_request :: proc(data: rawptr, connection: ^core.Connection, request: ^cor
 		}
 	}
 
-	if state.config.development && !core.streaming_response(response) && development.reload_html_response(response) {
+	if state.config.development && !core.stream_present(response.stream) && development.reload_html_response(response) {
 		body, ok := development.inject_reload_client(response.body, request.allocator)
 
 		if !ok {

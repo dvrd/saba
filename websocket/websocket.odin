@@ -212,8 +212,10 @@ read_step :: proc(session: ^Session, io: ^IO) -> Step {
 	if session.reading_payload && session.payload_used == len(session.payload) do return finish_frame(session, io)
 	if !session.reading_payload && session.header_used == session.header_expected {
 		if session.header_used == 2 {
-			_, error := codec.frame_prefix_decode(session.input_header[:2], true)
-			if error != .None {
+			// A masked two-byte prefix is never a whole header, so anything other
+			// than Header_Incomplete is a real prefix violation.
+			_, _, error := codec.frame_header_decode(session.input_header[:2], true)
+			if error != .Header_Incomplete {
 				session.event.frame = error; protocol_close(session, 1002, .Protocol_Error); return .Progress
 			}
 			length := session.input_header[1] & 127
@@ -373,8 +375,7 @@ wait_session :: proc(session: ^Session, io: ^IO, read, write: bool) -> async.Res
 		error := async.wait_stream(transport.socket, read, write, deadline)
 		if error.kind == .None || error.kind == .Timeout do return .Yield
 		if error.kind != .Pending {
-			if session.event.transport.kind == .None do session.event.transport = error
-			if session.event.reason == .Owner_Stopped do session.event.reason = .IO_Error
+			record_io_failure(session, error)
 			return .Done
 		}
 	}
@@ -526,10 +527,17 @@ Upgrade_Fields :: struct {
 	offered_count: int,
 }
 
+// RFC 8441 / RFC 9220 Extended CONNECT carries no Upgrade handshake fields.
+@(private)
+extended_connect :: proc(request: ^core.Request) -> bool {
+	return (request.version == "HTTP/2" || request.version == "HTTP/3") &&
+		request.method == "CONNECT" && request.protocol == "websocket"
+}
+
 @(private)
 request_fields :: proc(request: ^core.Request) -> (Upgrade_Fields, Error) {
 	fields: Upgrade_Fields
-	extended:=request!=nil && (request.version=="HTTP/2" || request.version=="HTTP/3") && request.method=="CONNECT" && request.protocol=="websocket"
+	extended := request != nil && extended_connect(request)
 	if request == nil || (!extended && (request.method != "GET" || request.version != "HTTP/1.1")) ||
 	   len(request.headers) > core.REQUEST_HEADER_COUNT_LIMIT ||
 	   request.content_length != 0 || request.chunked || len(request.body) != 0 {
@@ -622,7 +630,7 @@ prepare_upgrade :: proc(request: ^core.Request, config: Config, app: Application
 		if copy_error != nil do return {}, {kind = .Allocation_Failed, allocation = copy_error, status = .Internal_Server_Error}
 		session.protocol = copy
 	}
-	extended:=(request.version=="HTTP/2" || request.version=="HTTP/3") && request.method=="CONNECT" && request.protocol=="websocket"
+	extended := extended_connect(request)
 	headers:[]core.Header
 	status:=core.HTTP_Status.Switching_Protocols
 	if extended {
@@ -670,6 +678,13 @@ set_write_deadline :: proc(io: ^core.Upgrade_IO, deadline: async.Deadline) {
 	io.connection.write_deadline = time.tick_add(time.tick_now(), time.Duration(max(i64(0), deadline.at - now.at)))
 }
 
+// The first transport error and the first close reason win.
+@(private)
+record_io_failure :: proc(session: ^Session, error: async.Error) {
+	if error.kind != .None && session.event.transport.kind == .None do session.event.transport = error
+	if session.event.reason == .Owner_Stopped do session.event.reason = .IO_Error
+}
+
 @(private)
 notify_writable :: proc(session: ^Session, io: ^IO) {
 	if !session.writable_wanted || session.close_requested do return
@@ -701,8 +716,10 @@ write_step :: proc(session: ^Session, io: ^IO) -> Step {
 		set_write_deadline(transport, deadline)
 		n, error := core.upgrade_write(transport, session.frame_wire[session.frame_sent:session.frame_used], deadline)
 		if error.kind == .Pending do return .Waiting
-		if error.kind != .None {if session.event.transport.kind == .None do session.event.transport = error; if session.event.reason == .Owner_Stopped do session.event.reason = .IO_Error; return .Done}
-		if n <= 0 {if session.event.reason == .Owner_Stopped do session.event.reason = .IO_Error; return .Done}
+		if error.kind != .None || n <= 0 {
+			record_io_failure(session, error)
+			return .Done
+		}
 		session.frame_sent += n
 		if session.frame_sent != session.frame_used do return .Progress
 		session.metrics.frames_out += 1
@@ -728,8 +745,10 @@ write_step :: proc(session: ^Session, io: ^IO) -> Step {
 		n, error := core.upgrade_write(transport,
 			session.control[session.control_sent:session.control_used], session.control_deadline)
 		if error.kind == .Pending do return .Waiting
-		if error.kind != .None {if session.event.transport.kind == .None do session.event.transport = error; if session.event.reason == .Owner_Stopped do session.event.reason = .IO_Error; return .Done}
-		if n <= 0 {if session.event.reason == .Owner_Stopped do session.event.reason = .IO_Error; return .Done}
+		if error.kind != .None || n <= 0 {
+			record_io_failure(session, error)
+			return .Done
+		}
 		session.control_sent += n
 		if session.control_sent != session.control_used do return .Progress
 		session.metrics.frames_out += 1
@@ -742,7 +761,10 @@ write_step :: proc(session: ^Session, io: ^IO) -> Step {
 	if output.deadline.epoch == 0 do output.deadline = async.deadline_after(transport.runtime, session.config.write_timeout)
 	if session.frame_wire == nil {
 		buffer, allocation := make([]u8, session.config.max_frame_bytes + codec.MAX_FRAME_HEADER_SIZE, session.allocator)
-		if allocation != nil {if session.event.reason == .Owner_Stopped do session.event.reason = .IO_Error; return .Done}
+		if allocation != nil {
+			record_io_failure(session, {})
+			return .Done
+		}
 		session.frame_wire = buffer
 	}
 	count := min(session.config.max_frame_bytes, len(output.payload) - output.offset)

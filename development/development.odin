@@ -789,10 +789,7 @@ Connection :: core.Connection
 HTTP_Status :: core.HTTP_Status
 make_response :: core.make_response
 header_value :: core.header_value
-send_response :: core.send_response
-send_empty_response :: core.send_empty_response
 send_bytes :: core.send_bytes
-read_connection :: core.read_connection
 REQUEST_HEADER_TIMEOUT :: core.REQUEST_HEADER_TIMEOUT
 RESPONSE_SEND_TIMEOUT :: core.RESPONSE_SEND_TIMEOUT
 
@@ -835,24 +832,6 @@ websocket_accept :: proc(request: ^Request, storage: []u8) -> (string, HTTP_Stat
 	return string(storage[:len(accepted)]), .None
 }
 
-upgrade_websocket :: proc(conn: ^Connection, request: ^Request) -> bool {
-	storage: [28]u8
-	accept, status := websocket_accept(request, storage[:])
-
-	if status != .None {
-		send_empty_response(conn, status)
-		return false
-	}
-
-	return send_response(
-		conn,
-		{
-			status = .Switching_Protocols,
-			headers = []Header{{"Upgrade", "websocket"}, {"Sec-WebSocket-Accept", accept}},
-		},
-	)
-}
-
 send_websocket_frame :: proc(conn: ^Connection, opcode: Opcode, payload: []u8) -> bool {
 	if len(payload) > 125 {
 		log.error("WebSocket control payload exceeds 125 bytes")
@@ -867,44 +846,6 @@ send_websocket_frame :: proc(conn: ^Connection, opcode: Opcode, payload: []u8) -
 	conn.write_deadline = time.tick_add(time.tick_now(), RESPONSE_SEND_TIMEOUT)
 
 	return send_bytes(conn, frame[:2 + len(payload)], "WebSocket frame")
-}
-
-send_websocket_close :: proc(conn: ^Connection, code: u16, reason: string) -> bool {
-	if len(reason) > 123 {
-		log.error("WebSocket close reason exceeds 123 bytes")
-		return false
-	}
-
-	payload: [125]u8
-	payload[0] = u8(code >> 8)
-	payload[1] = u8(code & 0xff)
-	copy(payload[2:], transmute([]u8)reason)
-
-	return send_websocket_frame(conn, .Close, payload[:2 + len(reason)])
-}
-
-read_websocket_bytes :: proc(conn: ^Connection, buffer: []u8) -> bool {
-	used := 0
-
-	for used < len(buffer) {
-		n, err := read_connection(conn, buffer[used:])
-
-		if err != nil {
-			log.error("Could not read WebSocket frame:", err, "| socket:", conn.socket)
-
-			return false
-		}
-
-		if n == 0 {
-			log.error("Client disconnected during WebSocket frame", "| socket:", conn.socket)
-
-			return false
-		}
-
-		used += n
-	}
-
-	return true
 }
 
 valid_close_code :: proc(code: u16) -> bool {

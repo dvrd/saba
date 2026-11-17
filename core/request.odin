@@ -37,60 +37,6 @@ parse_request :: proc(raw: string, storage: []Header) -> (Request, HTTP_Status) 
 		status
 }
 
-// A zero body timeout means the connection was built without resolved timeouts.
-connection_timeouts :: proc(conn: ^Connection) -> Resolved_Timeouts {
-	if conn._timeouts.body == 0 {
-		return resolve_timeouts({})
-	}
-
-	return conn._timeouts
-}
-
-// A read failure may have no HTTP status when the connection itself failed.
-read_request_body :: proc(conn: ^Connection, request: ^Request, buffer: []u8) -> (HTTP_Status, bool) {
-	if request.chunked {
-		return read_chunked_body(conn, request, buffer)
-	}
-
-	if request.content_length > len(buffer) {
-		return .Content_Too_Large, false
-	}
-
-	request.body = buffer[:request.content_length]
-	previous_deadline := conn.read_deadline
-	timeouts := connection_timeouts(conn)
-	conn.read_deadline = time.tick_add(time.tick_now(), body_timeout(timeouts, request.content_length))
-	defer conn.read_deadline = previous_deadline
-	used := 0
-
-	for used < len(request.body) {
-		n, err := read_connection(conn, request.body[used:])
-
-		if err == .Timeout {
-			log.error("Request body timed out | socket:", conn.socket)
-			return .Request_Timeout, false
-		}
-
-		if err != nil {
-			log.error("Could not read request body:", err, "| socket:", conn.socket)
-
-			return .None, false
-		}
-
-		if n == 0 {
-			return .Bad_Request, false
-		}
-
-		used += n
-	}
-
-	if deadline_expired(conn.read_deadline) {
-		return .Request_Timeout, false
-	}
-
-	return .None, true
-}
-
 CRLF :: http1.CRLF
 HTTP_HEADERS_END :: http1.HTTP_HEADERS_END
 HTTP_VERSION :: http1.HTTP_VERSION
@@ -187,60 +133,6 @@ chunk_error_status :: proc(error: http.Error) -> HTTP_Status {
 		return .Content_Too_Large
 	case:
 		return .Bad_Request
-	}
-}
-
-read_chunked_body :: proc(conn: ^Connection, request: ^Request, buffer: []u8) -> (HTTP_Status, bool) {
-	decoder: http1.Chunk_Decoder
-	if http1.chunk_decoder_init(&decoder, u64(len(buffer))).kind != .None {
-		return .Content_Too_Large, false
-	}
-	previous := conn.read_deadline
-	timeouts := connection_timeouts(conn)
-	conn.read_deadline = time.tick_add(time.tick_now(), body_timeout(timeouts, 0))
-	defer conn.read_deadline = previous
-	scratch: [2048]u8
-	used := 0
-
-	for {
-		if deadline_expired(conn.read_deadline) {
-			return .Request_Timeout, false
-		}
-		input := conn.read_buffer
-		buffered := len(input) > 0
-
-		if !buffered {
-			want := http1.chunk_decoder_read_limit(&decoder, len(scratch))
-			n, error := read_connection(conn, scratch[:want])
-			if error == .Timeout {
-				return .Request_Timeout, false
-			}
-			if error != nil {
-				return .None, false
-			}
-			if n == 0 {
-				return .Bad_Request, false
-			}
-			input = scratch[:n]
-		}
-
-		consumed, written, done, error := http1.chunk_decoder_feed(&decoder, input, buffer[used:])
-		if buffered {
-			conn.read_buffer = conn.read_buffer[consumed:]
-		}
-		used += written
-		if error.kind != .None {
-			return chunk_error_status(error), false
-		}
-
-		if done {
-			if deadline_expired(conn.read_deadline) {
-				return .Request_Timeout, false
-			}
-			request.body = buffer[:used]
-			request.content_length = used
-			return .None, true
-		}
 	}
 }
 

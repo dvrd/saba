@@ -136,10 +136,6 @@ send_response :: proc(conn: ^Connection, response: Response, request_method: str
 	return send_bytes(conn, prepared.body, "HTTP response body")
 }
 
-send_empty_response :: proc(conn: ^Connection, status: HTTP_Status) -> bool {
-	return send_response(conn, Response{status = status})
-}
-
 // Disposes transferred continuations when a late response cannot be queued.
 // Body/header borrows remain owned by their request arena.
 discard_response :: proc(response: ^Response) {

@@ -88,7 +88,7 @@ send_response :: proc(conn: ^Connection, response: Response, request_method: str
 		injected, ok = dev.inject_reload_client(response.body)
 
 		if !ok {
-			send_empty_response(conn, .Internal_Server_Error)
+			send_response(conn, {status = .Internal_Server_Error})
 			return false
 		}
 
@@ -104,55 +104,6 @@ send_response :: proc(conn: ^Connection, response: Response, request_method: str
 	connection_refresh(conn, io)
 
 	return result
-}
-send_empty_response :: proc(conn: ^Connection, status: HTTP_Status) -> bool {
-	return send_response(conn, {status = status})
-}
-read_request_body :: proc(conn: ^Connection, request: ^Request, buffer: []u8) -> (HTTP_Status, bool) {
-	local: core.Connection
-	io := connection_transport(conn, &local)
-	defer connection_refresh(conn, io)
-
-	return core.read_request_body(io, request, buffer)
-}
-send_bytes :: proc(conn: ^Connection, data: []u8, operation: string) -> bool {
-	local: core.Connection
-	io := connection_transport(conn, &local)
-	defer connection_refresh(conn, io)
-
-	return core.send_bytes(io, data, operation)
-}
-
-upgrade_websocket :: proc(conn: ^Connection, request: ^Request) -> bool {
-	local: core.Connection
-	io := connection_transport(conn, &local)
-	defer connection_refresh(conn, io)
-
-	return dev.upgrade_websocket(io, request)
-}
-
-send_websocket_frame :: proc(conn: ^Connection, opcode: Opcode, payload: []u8) -> bool {
-	local: core.Connection
-	io := connection_transport(conn, &local)
-	defer connection_refresh(conn, io)
-
-	return dev.send_websocket_frame(io, opcode, payload)
-}
-
-send_websocket_close :: proc(conn: ^Connection, code: u16, reason: string) -> bool {
-	local: core.Connection
-	io := connection_transport(conn, &local)
-	defer connection_refresh(conn, io)
-
-	return dev.send_websocket_close(io, code, reason)
-}
-
-read_websocket_bytes :: proc(conn: ^Connection, buffer: []u8) -> bool {
-	local: core.Connection
-	io := connection_transport(conn, &local)
-	defer connection_refresh(conn, io)
-
-	return dev.read_websocket_bytes(io, buffer)
 }
 
 Server_Control :: core.Server_Control

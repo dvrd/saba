@@ -6,14 +6,12 @@ import "core:mem"
 import "core:os"
 import "core:testing"
 
-@(private)
 asset_test_directory :: proc() -> string {
 	directory, error := os.make_directory_temp("", "saba-assets-*", context.allocator)
 	assert(error == nil)
 
 	return directory
 }
-@(private)
 asset_test_write :: proc(directory, name, value: string) {
 	assert(os.write_entire_file(fmt.tprintf("%s/%s", directory, name), value) == nil)
 }
@@ -71,7 +69,6 @@ asset_exact_global_limits_and_legacy_callable :: proc(t: ^testing.T) {
 	testing.expect(t, output == nil)
 }
 
-@(private)
 Asset_Test_Allocator :: struct {
 	backing:                    mem.Allocator,
 	calls, fail_at, live, peak: int,
@@ -80,7 +77,6 @@ Asset_Test_Allocator :: struct {
 	mutate_size:                int,
 	mutated:                    bool,
 }
-@(private)
 asset_test_allocate :: proc(
 	data: rawptr,
 	mode: mem.Allocator_Mode,
@@ -256,7 +252,6 @@ asset_bad_mounts_and_exhausted_total_accept_only_empty_files :: proc(t: ^testing
 	}
 }
 
-@(private)
 asset_test_failed_development :: proc(request: ^Request, caches: []Asset_Cache) -> (Response, bool) {
 	previous := context.logger
 	context.logger = log.nil_logger()

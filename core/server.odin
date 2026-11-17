@@ -14,14 +14,11 @@ import "core:time"
 import async "shared:async"
 import signal "shared:async/signal"
 
-@(private)
 CONNECTION_STEP_LIMIT :: 32
-@(private)
 RESPONSE_WRITE_CHUNK_BYTES :: 64 * mem.Kilobyte
 
 Handler :: #type proc(data: rawptr, conn: ^Connection, request: ^Request) -> Response
 
-@(private)
 Connection_Phase :: enum {
 	Adopt,
 	Handshake,
@@ -83,7 +80,6 @@ Connection_Task :: struct {
 	upgrade_prefetched:                                []u8,
 }
 
-@(private)
 handle_http :: proc(data: rawptr) -> async.Resume_Result {
 	task := cast(^Connection_Task)data
 	conn := &task.connection
@@ -436,7 +432,6 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 	return .Yield
 }
 
-@(private)
 prepare_request :: proc(task: ^Connection_Task) -> bool {
 	allocator := mem.dynamic_arena_allocator(&task.arena)
 	raw := string(task.header[:task.header_used])
@@ -521,7 +516,6 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 	return true
 }
 
-@(private)
 task_read :: proc(task: ^Connection_Task, destination: []u8) -> (int, async.Error) {
 	if deadline_expired(task.connection.read_deadline) {
 		return 0, {kind = .Timeout}
@@ -551,7 +545,6 @@ task_read :: proc(task: ^Connection_Task, destination: []u8) -> (int, async.Erro
 	return n, err
 }
 
-@(private)
 init_connection_arena :: proc(task: ^Connection_Task) {
 	allocator := charged.allocator(task.resource_binding)
 	if allocator.procedure == nil {
@@ -569,7 +562,6 @@ init_connection_arena :: proc(task: ^Connection_Task) {
 	)
 }
 
-@(private)
 release_upgrade_request :: proc(task: ^Connection_Task) -> bool {
 	finish_request_context(task)
 	observe_finish(task)
@@ -607,7 +599,6 @@ release_upgrade_request :: proc(task: ^Connection_Task) -> bool {
 	return true
 }
 
-@(private)
 queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 	// HTTP/2 streams use this same queue so gzip policy stays in one place.
 	if task.http2 != nil {
@@ -709,7 +700,6 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 	return true
 }
 
-@(private)
 dispatch_request :: proc(task: ^Connection_Task) -> Response {
 	if !begin_request_context(task) {
 		return Response{status = .Internal_Server_Error, close_connection = true}
@@ -728,7 +718,6 @@ dispatch_request :: proc(task: ^Connection_Task) -> Response {
 	}
 }
 
-@(private)
 finish_connection :: proc(data: rawptr) {
 	task := cast(^Connection_Task)data
 	h2_destroy(task)
@@ -825,7 +814,6 @@ server_endpoint :: proc(control: ^Server_Control) -> (net.Endpoint, bool) {
 	return control._endpoint, control._runtime != nil
 }
 
-@(private)
 claim_server :: proc(control: ^Server_Control) -> bool {
 	if control == nil {
 		return true
@@ -840,7 +828,6 @@ claim_server :: proc(control: ^Server_Control) -> bool {
 	return true
 }
 
-@(private)
 release_server :: proc(control: ^Server_Control) {
 	if control == nil {
 		return
@@ -858,7 +845,6 @@ release_server :: proc(control: ^Server_Control) {
 	control._drain_timeout = 0
 }
 
-@(private)
 publish_server :: proc(control: ^Server_Control, runtime: ^Server_Runtime, endpoint: net.Endpoint) {
 	if control == nil {
 		return
@@ -882,7 +868,6 @@ publish_server :: proc(control: ^Server_Control, runtime: ^Server_Runtime, endpo
 	}
 }
 
-@(private)
 unpublish_server :: proc(control: ^Server_Control) {
 	if control == nil {
 		return
@@ -893,7 +878,6 @@ unpublish_server :: proc(control: ^Server_Control) {
 	control._server = nil
 }
 
-@(private)
 server_stop_requested :: proc(control: ^Server_Control) -> bool {
 	if control == nil {
 		return false
@@ -918,9 +902,7 @@ server_http3_endpoint :: proc(control: ^Server_Control) -> (net.Endpoint, bool) 
 	return control._server.http3.config.endpoint, true
 }
 
-@(private)
 CAPACITY_GROWTH_RETRY_INTERVAL :: time.Second
-@(private)
 CAPACITY_WARNING_INTERVAL :: 10 * time.Second
 
 // Current is allocated admission capacity; maximum is the configured ceiling.
@@ -952,7 +934,6 @@ server_capacity :: proc(control: ^Server_Control) -> (Connection_Capacity, bool)
 	return result, true
 }
 
-@(private)
 server_limits :: proc(config: Server) -> (int, int, int, bool) {
 	maximum := config.max_connections
 	if maximum == 0 {
@@ -998,7 +979,6 @@ server_limits :: proc(config: Server) -> (int, int, int, bool) {
 // Only the accept task changes capacity. The mutex also protects snapshots.
 // Evaluate projected occupancy so growth is complete before publishing the task
 // that crosses 80%. A failed attempt is retried at most once per second.
-@(private)
 server_capacity_admit :: proc(runtime: ^Server_Runtime) -> bool {
 	sync.lock(&runtime.capacity_mutex)
 	event: Capacity_Event
@@ -1025,7 +1005,6 @@ server_capacity_admit :: proc(runtime: ^Server_Runtime) -> bool {
 	return true
 }
 
-@(private)
 server_capacity_grow_locked :: proc(runtime: ^Server_Runtime, active: int) -> Capacity_Event {
 	state := &runtime.capacity_state
 
@@ -1064,7 +1043,6 @@ server_capacity_grow_locked :: proc(runtime: ^Server_Runtime, active: int) -> Ca
 	return {previous = previous, state = state^, active = active}
 }
 
-@(private)
 server_capacity_allocation_failed :: proc(runtime: ^Server_Runtime) {
 	sync.lock(&runtime.capacity_mutex)
 	runtime.capacity_state.admission_failures += 1
@@ -1077,7 +1055,6 @@ server_capacity_allocation_failed :: proc(runtime: ^Server_Runtime) {
 	server_capacity_log(event)
 }
 
-@(private)
 server_capacity_warn_locked :: proc(
 	runtime: ^Server_Runtime,
 	reason: string,
@@ -1093,7 +1070,6 @@ server_capacity_warn_locked :: proc(
 	return {state = runtime.capacity_state, active = active, reason = reason, error = err}
 }
 
-@(private)
 Capacity_Event :: struct {
 	state:            Connection_Capacity,
 	active, previous: int,
@@ -1101,7 +1077,6 @@ Capacity_Event :: struct {
 	error:            async.Error,
 }
 
-@(private)
 server_capacity_log :: proc(event: Capacity_Event) {
 	state := event.state
 
@@ -1175,7 +1150,6 @@ retain_server_resources :: proc(control: ^Server_Control) -> (budget.Scope, bool
 
 	return owner, error == .None
 }
-@(private)
 initialize_resources :: proc(runtime: ^Server_Runtime) -> bool {
 	config := runtime.config.resources
 	runtime.operation_limits = DEFAULT_OPERATION_RESOURCES
@@ -1210,12 +1184,10 @@ initialize_resources :: proc(runtime: ^Server_Runtime) -> bool {
 
 	return true
 }
-@(private)
 scope_managed :: proc(scope: budget.Scope) -> bool {
 	return budget.same_scope(scope, scope)
 }
 
-@(private)
 start_connection_resources :: proc(task: ^Connection_Task) -> bool {
 	if !scope_managed(task.runtime.resources) {
 		return true
@@ -1229,7 +1201,6 @@ start_connection_resources :: proc(task: ^Connection_Task) -> bool {
 
 	return start_operation_resources(task)
 }
-@(private)
 start_operation_resources :: proc(task: ^Connection_Task) -> bool {
 	if !scope_managed(task.resource_connection) {
 		return true
@@ -1250,13 +1221,11 @@ start_operation_resources :: proc(task: ^Connection_Task) -> bool {
 
 	return true
 }
-@(private)
 finish_operation_resources :: proc(task: ^Connection_Task) {
 	_ = budget.close(task.resource_operation)
 	charged.release(&task.resource_binding)
 	budget.release_scope(&task.resource_operation)
 }
-@(private)
 release_task_storage :: proc(task: ^Connection_Task) {
 	mem.dynamic_arena_destroy(&task.arena)
 	finish_operation_resources(task)
@@ -1264,12 +1233,10 @@ release_task_storage :: proc(task: ^Connection_Task) {
 	budget.release_scope(&task.resource_connection)
 }
 
-@(private)
 resource_pressure :: proc(task: ^Connection_Task) -> bool {
 	return charged.stats(task.resource_binding).rejected != 0
 }
 // Fixed task storage remains usable after payload admission is exhausted.
-@(private)
 resource_reject :: proc(task: ^Connection_Task, status: HTTP_Status = .Service_Unavailable) -> bool {
 	if task.http2_request != nil {
 		return h2_request_emergency(task, status)
@@ -1294,7 +1261,6 @@ resource_reject :: proc(task: ^Connection_Task, status: HTTP_Status = .Service_U
 	return true
 }
 // Unknown raw borrows have no full-allocation provenance. Copy before suspension.
-@(private)
 resource_copy_response :: proc(task: ^Connection_Task, response: ^Response) -> bool {
 	if len(response.trailers) > 0 && task.request.version != "HTTP/3" {
 		return false
@@ -1334,7 +1300,6 @@ resource_copy_response :: proc(task: ^Connection_Task, response: ^Response) -> b
 
 	return true
 }
-@(private)
 clone_headers :: proc(fields: []Header, allocator: mem.Allocator) -> ([]Header, bool) {
 	cloned, error := make([]Header, len(fields), allocator)
 
@@ -1356,7 +1321,6 @@ clone_headers :: proc(fields: []Header, allocator: mem.Allocator) -> ([]Header, 
 	return cloned, true
 }
 
-@(private)
 connection_storage_allocator :: proc(task: ^Connection_Task) -> mem.Allocator {
 	if !scope_managed(task.resource_connection) {
 		return rt.heap_allocator()
@@ -1376,7 +1340,6 @@ connection_storage_allocator :: proc(task: ^Connection_Task) -> mem.Allocator {
 	return allocator
 }
 
-@(private)
 resource_failure_status :: proc(status: HTTP_Status) -> HTTP_Status {
 	if status == .Request_Timeout || status == .Content_Too_Large {
 		return status
@@ -1446,12 +1409,10 @@ server_metrics :: proc(control: ^Server_Control) -> (Request_Metrics, bool) {
 	return runtime.metrics, true
 }
 
-@(private)
 observability_enabled :: proc(config: Observability_Config) -> bool {
 	return config.enabled || config.on_complete != nil
 }
 
-@(private)
 observe_start :: proc(task: ^Connection_Task) {
 	if !observability_enabled(task.runtime.config.observability) {
 		return
@@ -1466,7 +1427,6 @@ observe_start :: proc(task: ^Connection_Task) {
 	sync.unlock(&task.runtime.observability_mutex)
 }
 
-@(private)
 observe_io_error :: proc(task: ^Connection_Task, error: async.Error) {
 	status: Request_Status
 	outcome: Request_Outcome
@@ -1487,7 +1447,6 @@ observe_io_error :: proc(task: ^Connection_Task, error: async.Error) {
 	observe_failure(task, outcome)
 }
 
-@(private)
 event_method :: proc(method: string) -> string {
 	switch method {
 	case "GET", "POST", "HEAD", "PUT", "DELETE", "PATCH", "OPTIONS", "CONNECT", "TRACE":
@@ -1497,7 +1456,6 @@ event_method :: proc(method: string) -> string {
 	return "OTHER"
 }
 
-@(private)
 observe_finish :: proc(task: ^Connection_Task) {
 	if !task.observed || task.observation_finished {
 		return
@@ -1542,7 +1500,6 @@ observe_finish :: proc(task: ^Connection_Task) {
 	}
 }
 
-@(private)
 observe_failure :: proc(task: ^Connection_Task, outcome: Request_Outcome) {
 	if task.observed {
 		task.event.outcome = outcome
@@ -1566,13 +1523,11 @@ Request_Context :: struct {
 	_state: ^Request_Cancellation,
 }
 
-@(private)
 Server_Cancellation :: struct {
 	references: i64,
 	stopping:   bool,
 	drain_at:   i64,
 }
-@(private)
 Request_Cancellation :: struct {
 	resources:            budget.Scope,
 	connection_resources: budget.Scope,
@@ -1645,7 +1600,6 @@ request_cancelled :: proc(ctx: Request_Context) -> bool {
 	return status != .Active && status != .Unavailable
 }
 
-@(private)
 cancel_request_context :: proc(ctx: Request_Context, status: Request_Status) {
 	if ctx._state == nil {
 		return
@@ -1654,7 +1608,6 @@ cancel_request_context :: proc(ctx: Request_Context, status: Request_Status) {
 	sync.atomic_compare_exchange_strong(&ctx._state.status, .Active, status)
 }
 
-@(private)
 new_request_context :: proc(
 	server: ^Server_Cancellation,
 	deadline: time.Tick,
@@ -1679,14 +1632,12 @@ new_request_context :: proc(
 	return {node}, true
 }
 
-@(private)
 release_server_cancellation :: proc(state: ^Server_Cancellation) {
 	if state != nil && sync.atomic_sub(&state.references, 1) == 1 {
 		free(state, rt.heap_allocator())
 	}
 }
 
-@(private)
 shutdown_runtime :: proc(runtime: ^Server_Runtime) {
 	if runtime.cancellation != nil {
 		sync.atomic_store(&runtime.cancellation.stopping, true)
@@ -1696,7 +1647,6 @@ shutdown_runtime :: proc(runtime: ^Server_Runtime) {
 	async.shutdown(&runtime.executor)
 }
 
-@(private)
 begin_request_context :: proc(task: ^Connection_Task) -> bool {
 	if task.request.cancellation._state != nil {
 		return true
@@ -1730,7 +1680,6 @@ begin_request_context :: proc(task: ^Connection_Task) -> bool {
 	return true
 }
 
-@(private)
 finish_request_context :: proc(task: ^Connection_Task) {
 	ctx := task.request.cancellation
 	if ctx._state == nil {
@@ -1751,7 +1700,6 @@ finish_request_context :: proc(task: ^Connection_Task) {
 	release_request_context(&task.request.cancellation)
 }
 
-@(private)
 server_cancellation_expired :: proc(state: ^Server_Cancellation) -> bool {
 	at := sync.atomic_load(&state.drain_at)
 
@@ -1818,12 +1766,10 @@ Deferred_IO :: struct {
 	wake:              signal.Signal,
 }
 
-@(private)
 deferred_present :: proc(value: Deferred_Response) -> bool {
 	return value.data != nil || value.poll != nil || value.drop != nil || value.timeout != 0
 }
 
-@(private)
 drop_deferred :: proc(task: ^Connection_Task) {
 	old := task.deferred
 	task.deferred = {}
@@ -1835,7 +1781,6 @@ drop_deferred :: proc(task: ^Connection_Task) {
 }
 
 // queue_deferred wakes the TCP task; multiplexed transports hand the wake to their owner task.
-@(private)
 rebind_deferred_signal :: proc(task: ^Connection_Task, owner: ^async.Task) -> bool {
 	signal.detach(task.deferred_signal)
 	signal.release(&task.deferred_signal)
@@ -1845,7 +1790,6 @@ rebind_deferred_signal :: proc(task: ^Connection_Task, owner: ^async.Task) -> bo
 	return created
 }
 
-@(private)
 queue_deferred :: proc(task: ^Connection_Task, response: Response) -> bool {
 	prepared := response
 	value := response.deferred
@@ -1914,7 +1858,6 @@ queue_deferred :: proc(task: ^Connection_Task, response: Response) -> bool {
 	return true
 }
 
-@(private)
 await_response :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	if deadline_expired(task.deferred_expires) {
 		cancel_request_context(task.request.cancellation, .Deadline)
@@ -1997,7 +1940,6 @@ await_response :: proc(task: ^Connection_Task) -> async.Resume_Result {
 
 // Read readiness detects EOF while work is blocked. Preserve bounded pipelined
 // input for the next request, and never spin on an unread readable socket.
-@(private)
 await_peer_or_result :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	if task.deferred_used == len(task.deferred_buffer) {
 		if task.deferred_used == REQUEST_HEADER_LIMIT {
@@ -2114,12 +2056,10 @@ drain_server :: proc(control: ^Server_Control, timeout: time.Duration = 0) -> bo
 	return true
 }
 
-@(private)
 drain_duration_valid :: proc(timeout: time.Duration) -> bool {
 	return timeout >= 0 && timeout <= MAX_DRAIN_TIMEOUT
 }
 
-@(private)
 server_is_draining :: proc(runtime: ^Server_Runtime) -> bool {
 	if runtime == nil {
 		return false
@@ -2130,7 +2070,6 @@ server_is_draining :: proc(runtime: ^Server_Runtime) -> bool {
 	return runtime.draining
 }
 
-@(private)
 request_runtime_drain :: proc(runtime: ^Server_Runtime, timeout: time.Duration) {
 	budget := timeout
 	if budget == 0 {
@@ -2161,7 +2100,6 @@ request_runtime_drain :: proc(runtime: ^Server_Runtime, timeout: time.Duration) 
 	}
 }
 
-@(private)
 drain_connections :: proc(runtime: ^Server_Runtime) -> async.Resume_Result {
 	// This is the accept task itself, so close cannot race its socket operations.
 	async.close(runtime.listener)
@@ -2184,7 +2122,6 @@ drain_connections :: proc(runtime: ^Server_Runtime) -> async.Resume_Result {
 	return .Done
 }
 
-@(private)
 drain_connection_finished :: proc(runtime: ^Server_Runtime) {
 	if server_is_draining(runtime) {
 		async.wake(&runtime.executor, &runtime.accept_task)

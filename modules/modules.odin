@@ -69,7 +69,6 @@ serve_modules :: proc(
 	return assets.representation_response(request, body, "text/javascript; charset=utf-8", development), true
 }
 
-@(private = "file")
 serve_jsx :: proc(request: ^Request, source_path: string) -> Response {
 	source, read_error := os.read_entire_file(source_path, request.allocator)
 
@@ -131,7 +130,6 @@ serve_prepared_modules :: proc(request: ^Request, mounts: []Module_Cache, develo
 	return {}, false
 }
 
-@(private = "file")
 module_request :: proc(request: ^Request, prefix: string) -> (path: string, invalid, matched: bool) {
 	if (request.method != "GET" && request.method != "HEAD") ||
 	   !strings.has_prefix(prefix, "/") ||
@@ -223,7 +221,6 @@ prepare_module_mounts :: proc(
 	return prepared, true
 }
 
-@(private = "file")
 compile_module_directory :: proc(cache: ^Module_Cache, allocator: mem.Allocator) -> bool {
 	root := cache.mount.directory
 	cache.files = make(map[string]assets.Prepared_Representation, allocator)

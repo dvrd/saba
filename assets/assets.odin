@@ -65,7 +65,6 @@ serve_assets :: proc(request: ^Request, caches: []Asset_Cache, development := fa
 	return {}, false
 }
 
-@(private)
 asset_content_type :: proc(path: string) -> string {
 	extension := filepath.ext(path)
 
@@ -358,7 +357,6 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 	return response
 }
 
-@(private)
 File_Producer :: struct {
 	binding:           charged.Binding,
 	file:              ^os.File,
@@ -369,14 +367,12 @@ File_Producer :: struct {
 	allocator:         mem.Allocator,
 }
 
-@(private)
 file_release :: proc(_: []u8, data: rawptr) {
 	producer := cast(^File_Producer)data
 	assert(producer.borrowed)
 	producer.borrowed = false
 }
 
-@(private)
 file_next :: proc(data: rawptr, io: ^core.Stream_IO) -> core.Stream_Step {
 	producer := cast(^File_Producer)data
 	assert(!producer.borrowed)
@@ -425,7 +421,6 @@ file_next :: proc(data: rawptr, io: ^core.Stream_IO) -> core.Stream_Step {
 	return .Chunk
 }
 
-@(private)
 file_drop :: proc(data: rawptr) {
 	producer := cast(^File_Producer)data
 	assert(!producer.borrowed)
@@ -436,7 +431,6 @@ file_drop :: proc(data: rawptr) {
 	charged.release(&binding)
 }
 
-@(private)
 file_strong_tag :: proc(tag: string) -> bool {
 	if len(tag) < 2 || tag[0] != '"' || tag[len(tag) - 1] != '"' {
 		return false
@@ -451,7 +445,6 @@ file_strong_tag :: proc(tag: string) -> bool {
 	return true
 }
 
-@(private)
 file_relative_decode :: proc(relative: string, allocator: mem.Allocator) -> (string, bool) {
 	decoded, valid := net.percent_decode(relative, allocator)
 	if !valid || !module_relative_ok(decoded) || strings.has_suffix(decoded, ".jsx") {
@@ -462,7 +455,6 @@ file_relative_decode :: proc(relative: string, allocator: mem.Allocator) -> (str
 }
 
 // A lone `*` or a matching validator; any malformed If-None-Match field disables the match.
-@(private)
 not_modified :: proc(request: ^Request, tag: string) -> bool {
 	fields, stars := 0, 0
 	matched, valid := false, true
@@ -483,7 +475,6 @@ not_modified :: proc(request: ^Request, tag: string) -> bool {
 	return matched && valid && (stars == 0 || fields == 1)
 }
 
-@(private)
 file_request_range :: proc(request: ^Request, size: i64, tag: string) -> http.Byte_Range {
 	if request.method != "GET" {
 		return {}
@@ -516,7 +507,6 @@ file_request_range :: proc(request: ^Request, size: i64, tag: string) -> http.By
 
 // The ordinary request arena cannot free individual producer allocations. Use
 // its retained backing Binding, or wrap an explicit host backing allocator.
-@(private)
 file_storage_allocator :: proc(
 	request: ^Request,
 	configured: mem.Allocator,
@@ -612,7 +602,6 @@ prepare_assets :: proc(mounts: []Asset_Mount, allocator: mem.Allocator) -> ([]As
 	return caches, error.kind == .None
 }
 
-@(private)
 normalize_limits :: proc(l: Asset_Limits) -> (Asset_Limits, bool) {
 	out := l
 
@@ -709,12 +698,10 @@ destroy_assets :: proc(caches: ^[]Asset_Cache, allocator: mem.Allocator) {
 	delete(old, allocator)
 }
 
-@(private)
 Asset_Counts :: struct {
 	files, entries, bytes: int,
 }
 
-@(private)
 preload_mount :: proc(
 	cache: ^Asset_Cache,
 	mount: Asset_Mount,
@@ -791,7 +778,6 @@ preload_mount :: proc(
 	return {}
 }
 
-@(private)
 preload_directory :: proc(
 	cache: ^Asset_Cache,
 	directory: string,

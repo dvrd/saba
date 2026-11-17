@@ -22,7 +22,6 @@ Retry_Saba_Server :: struct {
 	control: Server_Control,
 	ok:      bool,
 }
-@(private)
 retry_saba_handler :: proc(data: rawptr, conn: ^Connection, request: ^Request) -> Response {
 	probe := cast(^Retry_Saba_Probe)data
 	probe.calls += 1

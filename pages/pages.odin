@@ -169,7 +169,6 @@ serve_prepared_pages :: proc(request: ^Request, cache: Page_Cache, development: 
 	return assets.representation_response(request, transmute([]u8)html, "text/html; charset=utf-8", development), true
 }
 
-@(private)
 page_attribute :: proc(value: string, allocator: mem.Allocator) -> string {
 	result := value
 

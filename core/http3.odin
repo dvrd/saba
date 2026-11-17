@@ -62,7 +62,6 @@ Http3 :: struct {
 	_pending: bool,
 }
 
-@(private)
 Http3_Request :: struct {
 	owner:                      ^Http3,
 	connection:                 Connection_Task,
@@ -155,7 +154,6 @@ http3_close :: proc(state: ^Http3) {
 	}
 }
 
-@(private)
 http3_resume :: proc(data: rawptr) -> async.Resume_Result {
 	state := cast(^Http3)data
 	if async.cancelled(&state.task) {
@@ -187,14 +185,12 @@ http3_resume :: proc(data: rawptr) -> async.Resume_Result {
 
 	return .Waiting if error.kind == .Pending else .Yield
 }
-@(private)
 http3_retire :: proc(data: rawptr) {
 	state := cast(^Http3)data
 	http3_close(state)
 	sync.atomic_store(&state._pending, false)
 }
 
-@(private)
 http3_create_request :: proc(owner: ^Http3, wire: ^http3.Server_Request) -> ^Http3_Request {
 	state, error := new(Http3_Request, rt.heap_allocator())
 	if error != nil {
@@ -295,7 +291,6 @@ http3_create_request :: proc(owner: ^Http3, wire: ^http3.Server_Request) -> ^Htt
 	return state
 }
 
-@(private)
 http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server_Response) -> http3.Response_Status {
 	owner := cast(^Http3)user
 	state := cast(^Http3_Request)wire.user_data
@@ -518,7 +513,6 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 	return .Ready
 }
 
-@(private)
 http3_stream_next :: proc(data: rawptr, dst: []u8) -> (int, http3.Stream_Status) {
 	state := cast(^Http3_Request)data
 	if len(dst) == 0 {
@@ -569,12 +563,10 @@ http3_stream_next :: proc(data: rawptr, dst: []u8) -> (int, http3.Stream_Status)
 
 	return n, .Chunk
 }
-@(private)
 http3_stream_drop :: proc(data: rawptr) {
 	state := cast(^Http3_Request)data
 	drop_response_stream(&state.connection)
 }
-@(private)
 http3_release :: proc(user: rawptr, wire: ^http3.Server_Request) {
 	state := cast(^Http3_Request)wire.user_data
 	wire.user_data = nil
@@ -593,7 +585,6 @@ http3_release :: proc(user: rawptr, wire: ^http3.Server_Request) {
 	free(state, rt.heap_allocator())
 }
 
-@(private)
 http3_allow_early :: proc(data: rawptr, wire: ^http3.Server_Request) -> bool {
 	owner := cast(^Http3)data
 
@@ -623,7 +614,6 @@ Http3_Phase_Config :: struct {
 	connect_accept, connect_close: time.Duration,
 }
 
-@(private)
 http3_phases_valid :: proc(config: Http3_Phase_Config) -> bool {
 	if !config.enabled {
 		return true
@@ -637,7 +627,6 @@ http3_phases_valid :: proc(config: Http3_Phase_Config) -> bool {
 	)
 }
 
-@(private)
 http3_phase_policy :: proc(config: Http3_Phase_Config, timeouts: Resolved_Timeouts) -> http3.Request_Phase_Policy {
 	if !config.enabled {
 		return {}
@@ -655,12 +644,10 @@ http3_phase_policy :: proc(config: Http3_Phase_Config, timeouts: Resolved_Timeou
 	}
 }
 
-@(private)
 Http3_Upgrade_IO :: struct {
 	state:    ^Http3_Request,
 	endpoint: ^http3.Connect_Stream,
 }
-@(private)
 http3_upgrade_response :: proc(
 	owner: ^Http3,
 	wire: ^http3.Server_Request,
@@ -714,7 +701,6 @@ http3_upgrade_response :: proc(
 	}
 	return true, .Ready
 }
-@(private)
 http3_upgrade_resume :: proc(data: rawptr, endpoint: ^http3.Connect_Stream) -> http3.Duplex_Status {
 	state := cast(^Http3_Request)data
 	task := &state.connection
@@ -741,15 +727,12 @@ http3_upgrade_resume :: proc(data: rawptr, endpoint: ^http3.Connect_Stream) -> h
 
 	return .Done if result == .Done else .Pending
 }
-@(private)
 http3_upgrade_drop :: proc(data: rawptr) {
 	drop_upgrade(&(cast(^Http3_Request)data).connection)
 }
-@(private)
 http3_upgrade_expired :: proc(io: ^Http3_Upgrade_IO, deadline: async.Deadline) -> bool {
 	return deadline.epoch != 0 && async.deadline_after(&io.state.owner.runtime.executor, 0).at >= deadline.at
 }
-@(private)
 http3_upgrade_error :: proc(status: http3.Connect_IO_Status) -> async.Error {
 	switch status {
 	case .None:
@@ -762,7 +745,6 @@ http3_upgrade_error :: proc(status: http3.Connect_IO_Status) -> async.Error {
 
 	return {kind = .Closed}
 }
-@(private)
 http3_upgrade_read :: proc(data: rawptr, dst: []u8, deadline: async.Deadline) -> (int, async.Error) {
 	io := cast(^Http3_Upgrade_IO)data
 
@@ -774,7 +756,6 @@ http3_upgrade_read :: proc(data: rawptr, dst: []u8, deadline: async.Deadline) ->
 
 	return n, http3_upgrade_error(status)
 }
-@(private)
 http3_upgrade_write :: proc(data: rawptr, src: []u8, deadline: async.Deadline) -> (int, async.Error) {
 	io := cast(^Http3_Upgrade_IO)data
 
@@ -786,7 +767,6 @@ http3_upgrade_write :: proc(data: rawptr, src: []u8, deadline: async.Deadline) -
 
 	return n, http3_upgrade_error(status)
 }
-@(private)
 http3_upgrade_wait :: proc(data: rawptr, read, write: bool, deadline: async.Deadline) -> async.Error {
 	io := cast(^Http3_Upgrade_IO)data
 

@@ -31,7 +31,6 @@ Dispatch_Context :: struct {
 	reload:     ^development.Reload_State,
 }
 
-@(private)
 State :: struct {
 	config:  Config,
 	modules: []modules_api.Module_Cache,
@@ -83,7 +82,6 @@ serve :: proc(config: Config) -> bool {
 	return core.serve(server)
 }
 
-@(private)
 prepare :: proc(state: ^State, allocator: mem.Allocator) -> bool {
 	config := &state.config
 	valid: bool
@@ -112,7 +110,6 @@ prepare :: proc(state: ^State, allocator: mem.Allocator) -> bool {
 	return true
 }
 
-@(private)
 start_watcher :: proc(state: ^State) -> ^thread.Thread {
 	directory := state.config.hot_reload_directory
 	if directory == "" {
@@ -131,7 +128,6 @@ start_watcher :: proc(state: ^State) -> ^thread.Thread {
 	return thread.create_and_start_with_poly_data(&state.reload, development.watch_web)
 }
 
-@(private)
 handle_request :: proc(data: rawptr, connection: ^core.Connection, request: ^core.Request) -> core.Response {
 	state := cast(^State)data
 	response, matched := builtin_response(state, request)
@@ -169,7 +165,6 @@ handle_request :: proc(data: rawptr, connection: ^core.Connection, request: ^cor
 	return response
 }
 
-@(private)
 builtin_response :: proc(state: ^State, request: ^core.Request) -> (core.Response, bool) {
 	if state.config.development {
 		response, matched := development.handle(&state.reload, request)

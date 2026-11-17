@@ -17,7 +17,6 @@ MAX_MESSAGE_BYTES :: 64 << 20
 MAX_OUTPUT_CAPACITY :: 1024
 MAX_SUBPROTOCOLS :: 32
 
-@(private)
 config_normalize :: proc(config: Config) -> (Config, Error) {
 	result := config
 	if result.max_frame_bytes == 0 {
@@ -78,7 +77,6 @@ config_normalize :: proc(config: Config) -> (Config, Error) {
 	return result, {}
 }
 
-@(private)
 new_session :: proc(
 	scope: budget.Scope,
 	config: Config,
@@ -123,7 +121,6 @@ new_session :: proc(
 	return session, {}
 }
 
-@(private)
 clear_outputs :: proc(session: ^Session) {
 	for &output in session.outputs {
 		delete(output.payload, session.allocator)
@@ -134,7 +131,6 @@ clear_outputs :: proc(session: ^Session) {
 	session.metrics.queued_bytes, session.metrics.queued_messages = 0, 0
 }
 
-@(private)
 drop_session :: proc(data: rawptr) {
 	session := cast(^Session)data
 	if session == nil {
@@ -182,7 +178,6 @@ drop_session :: proc(data: rawptr) {
 	}
 }
 
-@(private)
 reset_read :: proc(session: ^Session, io: ^IO) {
 	session.header_used, session.header_expected, session.payload_used = 0, 2, 0
 	session.reading_payload, session.payload = false, nil
@@ -193,13 +188,11 @@ reset_read :: proc(session: ^Session, io: ^IO) {
 	}
 }
 
-@(private)
 protocol_close :: proc(session: ^Session, code: u16, reason: Close_Reason) {
 	payload := [2]u8{u8(code >> 8), u8(code & 255)}
 	request_close(session, payload[:], reason, true)
 }
 
-@(private)
 accept_header :: proc(session: ^Session, io: ^IO) -> Step {
 	header, _, error := codec.frame_header_decode(session.input_header[:session.header_used], true)
 
@@ -263,7 +256,6 @@ accept_header :: proc(session: ^Session, io: ^IO) -> Step {
 	return .Progress
 }
 
-@(private)
 finish_frame :: proc(session: ^Session, io: ^IO) -> Step {
 	session.metrics.frames_in += 1
 	opcode := session.header.opcode
@@ -321,7 +313,6 @@ finish_frame :: proc(session: ^Session, io: ^IO) -> Step {
 	return .Progress
 }
 
-@(private)
 read_step :: proc(session: ^Session, io: ^IO) -> Step {
 	if session.reading_payload && session.payload_used == len(session.payload) {
 		return finish_frame(session, io)
@@ -406,7 +397,6 @@ read_step :: proc(session: ^Session, io: ^IO) -> Step {
 	return .Progress
 }
 
-@(private)
 valid_io :: proc(io: ^IO) -> bool {
 	return io != nil && io._active && io._session != nil && io._session.opened && !io._session.dropped
 }
@@ -498,7 +488,6 @@ stats :: proc(io: ^IO) -> Stats {
 	return result
 }
 
-@(private)
 request_close :: proc(session: ^Session, payload: []u8, reason: Close_Reason, abort: bool) {
 	if session.close_requested {
 		// Escalate termination without replacing close bytes already in flight.
@@ -516,10 +505,8 @@ request_close :: proc(session: ^Session, payload: []u8, reason: Close_Reason, ab
 	}
 }
 
-@(private)
 SESSION_WORK_LIMIT :: 32
 
-@(private)
 semantic_deadline :: proc(session: ^Session) -> async.Deadline {
 	result := session.read_deadline
 
@@ -545,7 +532,6 @@ semantic_deadline :: proc(session: ^Session) -> async.Deadline {
 
 // A semantic cutoff cannot wait behind an accepted outbound write. Returning
 // Done leaves its stable buffers untouched until Core drains the I/O callbacks.
-@(private)
 session_budget_expired :: proc(session: ^Session, runtime: ^async.Runtime) -> bool {
 	deadline := semantic_deadline(session)
 	if deadline.epoch == 0 || async.deadline_after(runtime, 0).at < deadline.at {
@@ -565,7 +551,6 @@ session_budget_expired :: proc(session: ^Session, runtime: ^async.Runtime) -> bo
 	return true
 }
 
-@(private)
 wait_session :: proc(session: ^Session, io: ^IO, read, write: bool) -> async.Resume_Result {
 	transport := io._transport
 	deadline := semantic_deadline(session)
@@ -612,7 +597,6 @@ wait_session :: proc(session: ^Session, io: ^IO, read, write: bool) -> async.Res
 	return .Waiting
 }
 
-@(private)
 resume_session :: proc(data: rawptr, transport: ^core.Upgrade_IO) -> async.Resume_Result {
 	session := cast(^Session)data
 	io := IO {
@@ -767,14 +751,12 @@ IO :: struct {
 	_active:    bool,
 }
 
-@(private)
 Output :: struct {
 	opcode:   codec.Opcode,
 	payload:  []u8,
 	offset:   int,
 	deadline: async.Deadline,
 }
-@(private)
 Session :: struct {
 	config:                                                      Config,
 	app:                                                         Application,
@@ -809,7 +791,6 @@ Session :: struct {
 	read_deadline, message_deadline:                             async.Deadline,
 }
 
-@(private)
 Upgrade_Fields :: struct {
 	key, version, origin:                          string,
 	origin_present, upgrade_seen, connection_seen: bool,
@@ -818,7 +799,6 @@ Upgrade_Fields :: struct {
 }
 
 // RFC 8441 / RFC 9220 Extended CONNECT carries no Upgrade handshake fields.
-@(private)
 extended_connect :: proc(request: ^core.Request) -> bool {
 	return(
 		(request.version == "HTTP/2" || request.version == "HTTP/3") &&
@@ -827,7 +807,6 @@ extended_connect :: proc(request: ^core.Request) -> bool {
 	)
 }
 
-@(private)
 request_fields :: proc(request: ^core.Request) -> (Upgrade_Fields, Error) {
 	fields: Upgrade_Fields
 	extended := request != nil && extended_connect(request)
@@ -917,7 +896,6 @@ request_fields :: proc(request: ^core.Request) -> (Upgrade_Fields, Error) {
 // Application ownership transfers only on success. Dispose an unused successful
 // Response with core.discard_response; its drop remains exact if the handshake fails.
 // Config hooks run only now; request headers and policy_data are not retained.
-@(private)
 prepare_upgrade :: proc(request: ^core.Request, config: Config, app: Application) -> (core.Response, Error) {
 	resolved, validation := config_normalize(config)
 
@@ -1058,7 +1036,6 @@ upgrade :: proc(request: ^core.Request, config: Config, app: Application) -> (co
 	return response, {}
 }
 
-@(private)
 Step :: enum {
 	Idle,
 	Progress,
@@ -1066,14 +1043,12 @@ Step :: enum {
 	Done,
 }
 
-@(private)
 set_write_deadline :: proc(io: ^core.Upgrade_IO, deadline: async.Deadline) {
 	now := async.deadline_after(io.runtime, 0)
 	io.connection.write_deadline = time.tick_add(time.tick_now(), time.Duration(max(i64(0), deadline.at - now.at)))
 }
 
 // The first transport error and the first close reason win.
-@(private)
 record_io_failure :: proc(session: ^Session, error: async.Error) {
 	if error.kind != .None && session.event.transport.kind == .None {
 		session.event.transport = error
@@ -1083,7 +1058,6 @@ record_io_failure :: proc(session: ^Session, error: async.Error) {
 	}
 }
 
-@(private)
 notify_writable :: proc(session: ^Session, io: ^IO) {
 	if !session.writable_wanted || session.close_requested {
 		return
@@ -1094,7 +1068,6 @@ notify_writable :: proc(session: ^Session, io: ^IO) {
 	}
 }
 
-@(private)
 finish_output :: proc(session: ^Session, io: ^IO) {
 	index := session.output_head
 	payload := session.outputs[index].payload
@@ -1108,7 +1081,6 @@ finish_output :: proc(session: ^Session, io: ^IO) {
 	notify_writable(session, io)
 }
 
-@(private)
 write_step :: proc(session: ^Session, io: ^IO) -> Step {
 	transport := io._transport
 

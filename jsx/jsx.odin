@@ -11,7 +11,6 @@ JSX_Error :: struct {
 	message:      string,
 }
 
-@(private)
 JSX_Parser :: struct {
 	source, file:            string,
 	position, depth:         int,
@@ -78,7 +77,6 @@ transform_jsx :: proc(source, file: string, allocator := context.allocator) -> (
 
 // Reserve names across every scope, including escaped identifiers. Reserving text
 // in strings/comments too is harmless and avoids needing a JavaScript scope tree.
-@(private)
 jsx_helper_name :: proc(source, base: string) -> string {
 	decoded := strings.builder_make()
 	defer strings.builder_destroy(&decoded)
@@ -141,7 +139,6 @@ jsx_helper_name :: proc(source, base: string) -> string {
 	return name
 }
 
-@(private)
 jsx_fail :: proc(p: ^JSX_Parser, message: string) {
 	if p.error.message != "" {
 		return
@@ -160,12 +157,10 @@ jsx_fail :: proc(p: ^JSX_Parser, message: string) {
 	p.error = {p.file, line, column, message}
 }
 
-@(private)
 jsx_emit :: proc(p: ^JSX_Parser, text: string) {
 	strings.write_string(&p.output, text)
 }
 
-@(private)
 jsx_quoted :: proc(p: ^JSX_Parser, text: string) {
 	encoded, err := json.marshal(text)
 
@@ -178,14 +173,12 @@ jsx_quoted :: proc(p: ^JSX_Parser, text: string) {
 	jsx_emit(p, string(encoded))
 }
 
-@(private)
 jsx_peek :: proc(p: ^JSX_Parser, offset := 0) -> u8 {
 	index := p.position + offset
 
 	return p.source[index] if index < len(p.source) else 0
 }
 
-@(private)
 jsx_take :: proc(p: ^JSX_Parser, text: string) -> bool {
 	if !strings.has_prefix(p.source[p.position:], text) {
 		return false
@@ -195,31 +188,25 @@ jsx_take :: proc(p: ^JSX_Parser, text: string) -> bool {
 	return true
 }
 
-@(private)
 jsx_space :: proc(c: u8) -> bool {
 	return c == ' ' || c == '\n' || c == '\r' || c == '\t'
 }
-@(private)
 jsx_identifier_start :: proc(c: u8) -> bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' || c == '$' || c >= 128
 }
-@(private)
 jsx_digit :: proc(c: u8) -> bool {
 	return c >= '0' && c <= '9'
 }
-@(private)
 jsx_identifier_part :: proc(c: u8) -> bool {
 	return jsx_identifier_start(c) || jsx_digit(c)
 }
 
-@(private)
 jsx_whitespace :: proc(p: ^JSX_Parser) {
 	for jsx_space(jsx_peek(p)) {
 		p.position += 1
 	}
 }
 
-@(private)
 jsx_name :: proc(p: ^JSX_Parser) -> string {
 	start := p.position
 
@@ -238,7 +225,6 @@ jsx_name :: proc(p: ^JSX_Parser) -> string {
 
 // JSX whitespace follows the usual line-trimming rule, retaining intentional
 // spaces on a single line and joining nonempty indented lines with one space.
-@(private)
 jsx_text_child :: proc(p: ^JSX_Parser, text: string) {
 	b := strings.builder_make()
 	defer strings.builder_destroy(&b)
@@ -277,7 +263,6 @@ jsx_text_child :: proc(p: ^JSX_Parser, text: string) {
 	}
 }
 
-@(private)
 jsx_expression :: proc(p: ^JSX_Parser, allow_empty := false) {
 	if !jsx_take(p, "{") {
 		jsx_fail(p, "Expected an expression in braces")
@@ -302,7 +287,6 @@ jsx_expression :: proc(p: ^JSX_Parser, allow_empty := false) {
 	}
 }
 
-@(private)
 jsx_element :: proc(p: ^JSX_Parser) {
 	p.depth += 1
 	defer p.depth -= 1
@@ -528,7 +512,6 @@ jsx_element :: proc(p: ^JSX_Parser) {
 
 // Keep entity decoding deliberately strict: XML's five named entities and
 // numeric Unicode entities are portable; other names receive a clear error.
-@(private)
 jsx_entity_string :: proc(p: ^JSX_Parser, text: string) {
 	b := strings.builder_make()
 	defer strings.builder_destroy(&b)
@@ -612,7 +595,6 @@ jsx_entity_string :: proc(p: ^JSX_Parser, text: string) {
 
 // This is a lexical pass, not a JavaScript compiler. Balanced groups, comments,
 // strings, regex literals and template interpolations protect embedded syntax.
-@(private)
 jsx_javascript_scan :: proc(
 	p: ^JSX_Parser,
 	stop: u8 = 0,

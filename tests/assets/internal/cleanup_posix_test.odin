@@ -6,7 +6,6 @@ import "core:os"
 import "core:sys/posix"
 import "core:testing"
 
-@(private)
 asset_count_fds :: proc() -> int {
 	count := 0
 

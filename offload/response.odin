@@ -11,7 +11,6 @@ import signal "shared:async/signal"
 // every response byte into allocator before the job is released. It must not
 // return another deferred response, block, or return job-owned continuations.
 Build :: #type proc(data: rawptr, allocator: mem.Allocator) -> (server.Response, bool)
-@(private)
 State :: struct {
 	lane:            ^pool.Pool,
 	work:            pool.Work,
@@ -20,7 +19,6 @@ State :: struct {
 	started:         bool,
 	unmanaged_bytes: u64,
 }
-@(private)
 Notice :: struct {
 	signal: signal.Signal,
 }
@@ -64,18 +62,15 @@ response_with_unmanaged_bytes :: proc(
 	return {deferred = {data = state, poll = poll_result, drop = drop, timeout = timeout}}, true
 }
 
-@(private)
 wake :: proc(data: rawptr) {
 	_ = signal.wake((cast(^Notice)data).signal)
 }
-@(private)
 drop_notice :: proc(data: rawptr) {
 	notice := cast(^Notice)data
 	signal.release(&notice.signal)
 	free(notice, rt.heap_allocator())
 }
 
-@(private)
 start :: proc(state: ^State, io: ^server.Deferred_IO) -> pool.Error {
 	notice, error := new(Notice, rt.heap_allocator())
 	if error != nil || notice == nil {
@@ -109,7 +104,6 @@ start :: proc(state: ^State, io: ^server.Deferred_IO) -> pool.Error {
 	return .None
 }
 
-@(private)
 poll_result :: proc(data: rawptr, io: ^server.Deferred_IO) -> (server.Response, server.Deferred_Step) {
 	state := cast(^State)data
 
@@ -153,7 +147,6 @@ poll_result :: proc(data: rawptr, io: ^server.Deferred_IO) -> (server.Response, 
 	return {}, .Failed
 }
 
-@(private)
 drop :: proc(data: rawptr) {
 	state := cast(^State)data
 

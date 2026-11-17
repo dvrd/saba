@@ -240,7 +240,6 @@ stream_wait :: proc(io: ^Stream_IO, deadline: async.Deadline) -> async.Error {
 streaming_response :: proc(response: Response) -> bool {
 	return stream_present(response.stream)
 }
-@(private)
 stream_present :: proc(producer: Response_Stream) -> bool {
 	return(
 		producer.next != nil ||
@@ -253,7 +252,6 @@ stream_present :: proc(producer: Response_Stream) -> bool {
 	)
 }
 
-@(private)
 Response_Stream_State :: struct {
 	allocator:                  mem.Allocator,
 	producer:                   Response_Stream,
@@ -265,7 +263,6 @@ Response_Stream_State :: struct {
 	max_chunk_bytes:            int,
 }
 
-@(private)
 drop_response_stream :: proc(task: ^Connection_Task) {
 	old := task.streaming
 	task.streaming = nil
@@ -281,7 +278,6 @@ drop_response_stream :: proc(task: ^Connection_Task) {
 	free(old, old.allocator)
 }
 
-@(private)
 stream_write_budget :: proc(task: ^Connection_Task) -> bool {
 	state := task.streaming
 	remaining := time.tick_diff(time.tick_now(), state.expires)
@@ -300,7 +296,6 @@ stream_write_budget :: proc(task: ^Connection_Task) -> bool {
 	return true
 }
 
-@(private)
 queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 	producer := response.stream
 	if producer.next == nil ||
@@ -450,7 +445,6 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 }
 
 // Records the outcome when the stream budget or its request context has ended.
-@(private)
 stream_interrupted :: proc(task: ^Connection_Task) -> bool {
 	if deadline_expired(task.streaming.expires) {
 		observe_failure(task, .Timeout)
@@ -467,7 +461,6 @@ stream_interrupted :: proc(task: ^Connection_Task) -> bool {
 	return false
 }
 
-@(private)
 produce_stream :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	state := task.streaming
 	if stream_interrupted(task) {
@@ -558,7 +551,6 @@ produce_stream :: proc(task: ^Connection_Task) -> async.Resume_Result {
 }
 
 // Called only after every output slice has finished its final socket use.
-@(private)
 stream_write_complete :: proc(task: ^Connection_Task) -> (produce, ok: bool) {
 	state := task.streaming
 
@@ -636,7 +628,6 @@ upgrade_read :: proc(io: ^Upgrade_IO, dst: []u8, deadline: async.Deadline) -> (i
 	return transport_read(io.connection._task, dst, deadline)
 }
 
-@(private)
 drop_upgrade :: proc(task: ^Connection_Task) {
 	owned := task.upgrade
 	task.upgrade = {}
@@ -646,7 +637,6 @@ drop_upgrade :: proc(task: ^Connection_Task) {
 }
 
 // Callback borrows remain valid until resume returns, even after consumption.
-@(private)
 upgrade_resume_finished :: proc(task: ^Connection_Task) {
 	if len(task.connection.read_buffer) == 0 && task.upgrade_prefetched != nil {
 		delete(task.upgrade_prefetched, connection_storage_allocator(task))

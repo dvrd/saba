@@ -8,7 +8,6 @@ import "core:strings"
 
 // Resolve links before reading so a directory mount cannot expose files outside
 // its root. The returned path and stat storage belong to the request allocator.
-@(private)
 module_file :: proc(root, relative: string, allocator: mem.Allocator) -> (path: string, found, allowed: bool) {
 	resolved, error := filepath.abs(fmt.tprintf("%s/%s", root, relative), allocator)
 
@@ -25,7 +24,6 @@ module_file :: proc(root, relative: string, allocator: mem.Allocator) -> (path: 
 	return resolved, stat_error == nil && info.type == .Regular, true
 }
 
-@(private)
 module_relative_ok :: proc(relative: string) -> bool {
 	for c in relative {
 		if c < 32 || c == 127 || c == '\\' || c == ':' {

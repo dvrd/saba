@@ -28,7 +28,6 @@ Connection :: struct {
 	_transport:                    ^core.Connection,
 }
 
-@(private)
 connection_view :: proc(transport: ^core.Connection, database: ^db.SQLite_DB) -> Connection {
 	return {
 		socket = transport.socket,
@@ -40,7 +39,6 @@ connection_view :: proc(transport: ^core.Connection, database: ^db.SQLite_DB) ->
 	}
 }
 
-@(private)
 connection_writeback :: proc(view: ^Connection, transport: ^core.Connection) {
 	transport.socket = view.socket
 	transport.read_buffer = view.read_buffer
@@ -48,7 +46,6 @@ connection_writeback :: proc(view: ^Connection, transport: ^core.Connection) {
 	transport.write_deadline = view.write_deadline
 }
 
-@(private)
 connection_transport :: proc(view: ^Connection, local: ^core.Connection) -> ^core.Connection {
 	transport := view._transport
 	if transport == nil {
@@ -59,7 +56,6 @@ connection_transport :: proc(view: ^Connection, local: ^core.Connection) -> ^cor
 	return transport
 }
 
-@(private)
 connection_refresh :: proc(view: ^Connection, transport: ^core.Connection) {
 	view.socket = transport.socket
 	view.read_buffer = transport.read_buffer
@@ -300,17 +296,14 @@ load_environment_file :: proc(path := ".env") -> bool {
 	return true
 }
 
-@(private)
 is_alpha :: proc(c: rune) -> bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
-@(private)
 is_digit :: proc(c: rune) -> bool {
 	return c >= '0' && c <= '9'
 }
 
-@(private)
 environment_key_ok :: proc(key: string) -> bool {
 	if len(key) == 0 {
 		return false
@@ -331,7 +324,6 @@ environment_key_ok :: proc(key: string) -> bool {
 	return true
 }
 
-@(private)
 environment_value :: proc(raw: string, allocator: mem.Allocator) -> (string, bool) {
 	value := strings.builder_make(allocator = allocator)
 	line := strings.trim_left_space(raw)
@@ -392,7 +384,6 @@ environment_value :: proc(raw: string, allocator: mem.Allocator) -> (string, boo
 	return strings.to_string(value)[:kept], true
 }
 
-@(private)
 environment_parse :: proc(source: string, allocator: mem.Allocator) -> (map[string]string, int) {
 	values := make(map[string]string, allocator)
 	rest := strings.trim_prefix(source, "\xef\xbb\xbf")
@@ -502,7 +493,6 @@ serve :: proc(config: Server) -> bool {
 	)
 }
 
-@(private)
 legacy_dispatch :: proc(data: rawptr, input: ^application.Dispatch_Context) -> core.Response {
 	config := cast(^Server)data
 	view := connection_view(input.connection, config.database)

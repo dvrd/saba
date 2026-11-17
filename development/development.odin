@@ -25,12 +25,9 @@ Development :: struct {
 	build_arguments:   []string,
 }
 
-@(private)
 development_stopping: bool
-@(private)
 DEVELOPMENT_CHILD :: "SABA_DEVELOPMENT_CHILD"
 
-@(private)
 development_signal :: proc "c" (signal: posix.Signal) {
 	sync.atomic_store(&development_stopping, true)
 }
@@ -129,7 +126,6 @@ develop :: proc(config: Development) -> (handled, success: bool) {
 	return true, true
 }
 
-@(private)
 development_compiler :: proc(config: Development) -> string {
 	if config.compiler != "" {
 		return config.compiler
@@ -139,7 +135,6 @@ development_compiler :: proc(config: Development) -> string {
 	return "odin" if compiler == "" else compiler
 }
 
-@(private)
 development_paths :: proc(config: Development, compiler: string) -> ([]string, bool) {
 	paths := make([dynamic]string, context.temp_allocator)
 	append(&paths, config.package_directory)
@@ -186,7 +181,6 @@ development_paths :: proc(config: Development, compiler: string) -> ([]string, b
 	return paths[:], true
 }
 
-@(private)
 development_start :: proc(command, environment: []string) -> (os.Process, os.Error) {
 	return os.process_start(
 		{command = command, env = environment, stdin = os.stdin, stdout = os.stdout, stderr = os.stderr},
@@ -195,7 +189,6 @@ development_start :: proc(command, environment: []string) -> (os.Process, os.Err
 
 // The caller owns the process handle and command storage until shutdown. This
 // loop ends on SIGINT/SIGTERM; no build can replace a child after that signal.
-@(private)
 development_supervise :: proc(
 	config: Development,
 	compiler, directory, executable: string,
@@ -281,7 +274,6 @@ development_supervise :: proc(
 	}
 }
 
-@(private)
 development_build :: proc(config: Development, compiler, next: string) -> (bool, time.Tick) {
 	args := make([dynamic]string)
 	append(&args, compiler, "build", config.package_directory, "-warnings-as-errors")
@@ -334,7 +326,6 @@ development_build :: proc(config: Development, compiler, next: string) -> (bool,
 	return built, build_started
 }
 
-@(private)
 development_stop :: proc(process: os.Process) {
 	_ = os.process_terminate(process)
 	state, err := os.process_wait(process, 2 * time.Second)
@@ -345,7 +336,6 @@ development_stop :: proc(process: os.Process) {
 	}
 }
 
-@(private)
 development_signature :: proc(paths: []string) -> (signature: u64, ok: bool) {
 	ok = true
 
@@ -543,13 +533,11 @@ watch_web :: proc(state: ^Reload_State) {
 	}
 }
 
-@(private)
 Session_Phase :: enum {
 	Header,
 	Frame,
 	Write,
 }
-@(private)
 Reload_Session :: struct {
 	state:                      ^Reload_State,
 	phase:                      Session_Phase,
@@ -603,12 +591,10 @@ handle :: proc(state: ^Reload_State, request: ^Request) -> (Response, bool) {
 	return response, true
 }
 
-@(private)
 drop_session :: proc(data: rawptr) {
 	free(cast(^Reload_Session)data, rt.heap_allocator())
 }
 
-@(private)
 reset_session_read :: proc(session: ^Reload_Session, io: ^core.Upgrade_IO) {
 	session.used, session.expected = 0, 2
 	session.phase = .Header
@@ -616,7 +602,6 @@ reset_session_read :: proc(session: ^Reload_Session, io: ^core.Upgrade_IO) {
 	io.connection.read_deadline = time.tick_add(time.tick_now(), RELOAD_INTERVAL)
 }
 
-@(private)
 queue_session_output :: proc(session: ^Reload_Session, io: ^core.Upgrade_IO, count: int, close_after: bool) {
 	session.output_used, session.output_offset = count, 0
 	session.close_after = close_after
@@ -625,7 +610,6 @@ queue_session_output :: proc(session: ^Reload_Session, io: ^core.Upgrade_IO, cou
 	io.connection.write_deadline = time.tick_add(time.tick_now(), RESPONSE_SEND_TIMEOUT)
 }
 
-@(private)
 append_websocket_frame :: proc(storage: []u8, opcode: Opcode, payload: []u8) -> int {
 	assert(len(payload) <= 125 && len(storage) >= len(payload) + 2)
 	storage[0], storage[1] = 0x80 | u8(opcode), u8(len(payload))
@@ -634,7 +618,6 @@ append_websocket_frame :: proc(storage: []u8, opcode: Opcode, payload: []u8) -> 
 	return len(payload) + 2
 }
 
-@(private)
 queue_session_close :: proc(session: ^Reload_Session, io: ^core.Upgrade_IO, code: u16, reason: string) {
 	payload: [125]u8
 	assert(len(reason) <= 123)
@@ -644,7 +627,6 @@ queue_session_close :: proc(session: ^Reload_Session, io: ^core.Upgrade_IO, code
 	queue_session_output(session, io, count, true)
 }
 
-@(private)
 resume_session :: proc(data: rawptr, io: ^core.Upgrade_IO) -> async.Resume_Result {
 	session := cast(^Reload_Session)data
 
@@ -831,7 +813,6 @@ UNSUPPORTED_DATA :: 1003
 INVALID_PAYLOAD_DATA :: 1007
 
 // Returns an accept value borrowing caller storage; no stack-backed value escapes.
-@(private)
 websocket_accept :: proc(request: ^Request, storage: []u8) -> (string, HTTP_Status) {
 	key := header_value(request, "Sec-WebSocket-Key")
 	if !codec.upgrade_request_fields_valid(

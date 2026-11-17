@@ -9,7 +9,6 @@ import "core:sys/posix"
 import "core:testing"
 import "core:time"
 
-@(private)
 development_test_read :: proc(path: string) -> string {
 	bytes, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil {
@@ -18,7 +17,6 @@ development_test_read :: proc(path: string) -> string {
 
 	return string(bytes)
 }
-@(private)
 development_test_wait :: proc(path, text: string, different := "") -> bool {
 	deadline := time.tick_add(time.tick_now(), 20 * time.Second)
 

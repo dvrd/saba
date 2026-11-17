@@ -5,7 +5,6 @@ import "core:testing"
 import "core:time"
 
 // Disabled benchmarks still need file imports to be referenced under strict vet.
-@(private)
 observability_benchmark_imports :: proc() {
 	_ = fmt.printf
 	_ = testing.expect

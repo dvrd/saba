@@ -38,7 +38,6 @@ parse_request :: proc(raw: string, storage: []Header) -> (Request, HTTP_Status) 
 }
 
 // A zero body timeout means the connection was built without resolved timeouts.
-@(private)
 connection_timeouts :: proc(conn: ^Connection) -> Resolved_Timeouts {
 	if conn._timeouts.body == 0 {
 		return resolve_timeouts({})
@@ -177,13 +176,11 @@ read_json :: proc(request: ^Request, input: ^$T) -> HTTP_Status {
 	return .None
 }
 
-@(private)
 Chunk_Request :: struct {
 	decoder: http1.Chunk_Decoder,
 	input:   [2048]u8,
 }
 
-@(private)
 chunk_error_status :: proc(error: http.Error) -> HTTP_Status {
 	#partial switch error.kind {
 	case .Body_Oversized, .Header_Oversized, .Header_Limit:
@@ -193,7 +190,6 @@ chunk_error_status :: proc(error: http.Error) -> HTTP_Status {
 	}
 }
 
-@(private)
 read_chunked_body :: proc(conn: ^Connection, request: ^Request, buffer: []u8) -> (HTTP_Status, bool) {
 	decoder: http1.Chunk_Decoder
 	if http1.chunk_decoder_init(&decoder, u64(len(buffer))).kind != .None {

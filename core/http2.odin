@@ -72,7 +72,6 @@ http2_config_valid :: proc(config: Http2_Config) -> bool {
 	return config.max_concurrent_streams >= 0 && config.max_concurrent_streams <= H2_MAX_STREAMS
 }
 
-@(private)
 h2_stream_allowance :: proc(task: ^Connection_Task) -> int {
 	configured := task.runtime.config.http2.max_concurrent_streams
 
@@ -100,7 +99,6 @@ h2_stream_allowance :: proc(task: ^Connection_Task) -> int {
 	return int(view.limits.streams)
 }
 
-@(private)
 h2_begin :: proc(task: ^Connection_Task) -> bool {
 	if task.http2 != nil {
 		return true
@@ -162,7 +160,6 @@ h2_begin :: proc(task: ^Connection_Task) -> bool {
 	return true
 }
 
-@(private)
 h2_session_free :: proc(session: ^HTTP2_Session) {
 	allocator := session.allocator
 	delete(session.requests, allocator)
@@ -171,7 +168,6 @@ h2_session_free :: proc(session: ^HTTP2_Session) {
 	free(session, allocator)
 }
 
-@(private)
 h2_destroy :: proc(task: ^Connection_Task) {
 	session := task.http2
 	if session == nil {
@@ -211,7 +207,6 @@ h2_destroy :: proc(task: ^Connection_Task) {
 	h2_session_free(session)
 }
 
-@(private)
 h2_shutdown :: proc(task: ^Connection_Task) {
 	session := task.http2
 	if session == nil || !session.engine_ready || session.shutdown || session.failed {
@@ -223,7 +218,6 @@ h2_shutdown :: proc(task: ^Connection_Task) {
 	}
 }
 
-@(private)
 h2_remember :: proc(session: ^HTTP2_Session, handle: h2.Stream_Handle) {
 	if session == nil || handle.stream_id == 0 {
 		return
@@ -244,7 +238,6 @@ h2_remember :: proc(session: ^HTTP2_Session, handle: h2.Stream_Handle) {
 
 // Release a finished stream's exchange lease and metadata before the next
 // HEADERS frame. The grace barrier can outlive the lease; spare slots cover that.
-@(private)
 h2_settle :: proc(task: ^Connection_Task) {
 	session := task.http2
 	if session == nil || !session.engine_ready || session.failed {
@@ -280,7 +273,6 @@ h2_settle :: proc(task: ^Connection_Task) {
 	}
 }
 
-@(private)
 h2_skip_response_header :: proc(name: string) -> bool {
 	switch name {
 	case "connection", "proxy-connection", "keep-alive", "upgrade", "transfer-encoding", "te", "content-length":
@@ -290,7 +282,6 @@ h2_skip_response_header :: proc(name: string) -> bool {
 	return len(name) > 0 && name[0] == ':'
 }
 
-@(private)
 h2_clone :: proc(value: string, allocator: mem.Allocator) -> (string, bool) {
 	if len(value) == 0 {
 		return "", true
@@ -300,7 +291,6 @@ h2_clone :: proc(value: string, allocator: mem.Allocator) -> (string, bool) {
 	return copy, error == nil
 }
 
-@(private)
 h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 	session := task.http2
 	progress := false
@@ -385,7 +375,6 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 	return progress
 }
 
-@(private)
 h2_next_deadline :: proc(task: ^Connection_Task) -> time.Tick {
 	session := task.http2
 	deadline := session.idle_deadline
@@ -407,7 +396,6 @@ h2_next_deadline :: proc(task: ^Connection_Task) -> time.Tick {
 	return deadline
 }
 
-@(private)
 h2_check_deadlines :: proc(task: ^Connection_Task) -> bool {
 	session := task.http2
 
@@ -423,7 +411,6 @@ h2_check_deadlines :: proc(task: ^Connection_Task) -> bool {
 	return false
 }
 
-@(private)
 h2_read :: proc(task: ^Connection_Task) -> (bool, bool) {
 	session := task.http2
 	if session.failed || session.peer_gone {
@@ -469,7 +456,6 @@ h2_read :: proc(task: ^Connection_Task) -> (bool, bool) {
 	return n > 0, false
 }
 
-@(private)
 h2_feed :: proc(task: ^Connection_Task) -> bool {
 	session := task.http2
 	if !session.engine_ready {
@@ -510,14 +496,12 @@ h2_feed :: proc(task: ^Connection_Task) -> bool {
 	return progress
 }
 
-@(private)
 h2_output_pending :: proc(session: ^HTTP2_Session) -> bool {
 	stats, ok := h2.connection_stats(&session.engine)
 
 	return ok && (stats.output_count > 0 || stats.output_borrowed)
 }
 
-@(private)
 h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 	session := task.http2
 	state := task.tls_state
@@ -578,7 +562,6 @@ h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 	return true, false
 }
 
-@(private)
 h2_pump_engine :: proc(task: ^Connection_Task) {
 	session := task.http2
 	work := u32(session.limits.work_per_feed)
@@ -599,7 +582,6 @@ h2_pump_engine :: proc(task: ^Connection_Task) {
 	}
 }
 
-@(private)
 h2_connection_fatal :: proc(kind: h2.Error_Kind) -> bool {
 	switch kind {
 	case .None, .Limit_Exceeded, .Allocation_Failed, .Budget_Rejected, .Closed:
@@ -616,7 +598,6 @@ h2_connection_fatal :: proc(kind: h2.Error_Kind) -> bool {
 	return true
 }
 
-@(private)
 h2_finished :: proc(task: ^Connection_Task) -> bool {
 	session := task.http2
 	if session == nil || !session.engine_ready {
@@ -646,7 +627,6 @@ h2_finished :: proc(task: ^Connection_Task) -> bool {
 	return stats.phase == .Draining || stats.phase == .Complete || stats.phase == .Aborted
 }
 
-@(private)
 h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	session := task.http2
 	if session == nil || !session.engine_ready {
@@ -739,13 +719,11 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	return .Yield
 }
 
-@(private)
 H2_Upgrade_Input :: struct {
 	owner:  h2.Incoming_Data,
 	credit: h2.Data_Token,
 	offset: int,
 }
-@(private)
 H2_Upgrade :: struct {
 	parent:                                                                       ^Connection_Task,
 	handle:                                                                       h2.Stream_Handle,
@@ -757,7 +735,6 @@ H2_Upgrade :: struct {
 	input_head, input_count:                                                      int,
 }
 
-@(private)
 h2_upgrade_find :: proc(task: ^Connection_Task, handle: h2.Stream_Handle) -> ^H2_Upgrade {
 	for stream in task.http2.upgrades {
 		if stream != nil && stream.handle == handle {
@@ -767,7 +744,6 @@ h2_upgrade_find :: proc(task: ^Connection_Task, handle: h2.Stream_Handle) -> ^H2
 
 	return nil
 }
-@(private)
 h2_has_streams :: proc(task: ^Connection_Task) -> bool {
 	for stream in task.http2.upgrades {
 		if stream != nil {
@@ -783,7 +759,6 @@ h2_has_streams :: proc(task: ^Connection_Task) -> bool {
 
 	return false
 }
-@(private)
 h2_upgrade_release :: proc(stream: ^H2_Upgrade) {
 	if stream == nil {
 		return
@@ -817,7 +792,6 @@ h2_upgrade_release :: proc(stream: ^H2_Upgrade) {
 	free(stream, session.allocator)
 }
 
-@(private)
 h2_upgrade_open :: proc(parent: ^Connection_Task, event: h2.Headers_Event) -> bool {
 	session := parent.http2
 	slot := -1
@@ -969,7 +943,6 @@ h2_upgrade_open :: proc(parent: ^Connection_Task, event: h2.Headers_Event) -> bo
 	return true
 }
 
-@(private)
 h2_upgrade_data :: proc(stream: ^H2_Upgrade, event: h2.Event_View, value: h2.Data_Event) -> bool {
 	session := stream.parent.http2
 
@@ -993,7 +966,6 @@ h2_upgrade_data :: proc(stream: ^H2_Upgrade, event: h2.Event_View, value: h2.Dat
 
 	return true
 }
-@(private)
 h2_upgrade_read :: proc(data: rawptr, destination: []u8, deadline: async.Deadline) -> (int, async.Error) {
 	stream := cast(^H2_Upgrade)data
 	session := stream.parent.http2
@@ -1048,7 +1020,6 @@ h2_upgrade_read :: proc(data: rawptr, destination: []u8, deadline: async.Deadlin
 
 	return 0, {kind = .Pending}
 }
-@(private)
 h2_upgrade_write :: proc(data: rawptr, source: []u8, deadline: async.Deadline) -> (int, async.Error) {
 	stream := cast(^H2_Upgrade)data
 
@@ -1085,7 +1056,6 @@ h2_upgrade_write :: proc(data: rawptr, source: []u8, deadline: async.Deadline) -
 
 	return amount, {}
 }
-@(private)
 h2_upgrade_wait :: proc(data: rawptr, read, write: bool, deadline: async.Deadline) -> async.Error {
 	stream := cast(^H2_Upgrade)data
 
@@ -1104,7 +1074,6 @@ h2_upgrade_wait :: proc(data: rawptr, read, write: bool, deadline: async.Deadlin
 	return {kind = .Pending}
 }
 
-@(private)
 h2_upgrade_io :: proc(stream: ^H2_Upgrade) -> Upgrade_IO {
 	return {
 		runtime = &stream.parent.runtime.executor,
@@ -1116,7 +1085,6 @@ h2_upgrade_io :: proc(stream: ^H2_Upgrade) -> Upgrade_IO {
 	}
 }
 
-@(private)
 h2_status_digits :: proc(status: HTTP_Status) -> [3]u8 {
 	code := int(status)
 
@@ -1125,7 +1093,6 @@ h2_status_digits :: proc(status: HTTP_Status) -> [3]u8 {
 
 // Appends the ASCII-lowercased name to scratch and returns the view of it.
 // The caller has already checked len(name) <= len(scratch)-used^.
-@(private)
 h2_append_lower :: proc(scratch: []u8, used: ^int, name: string) -> string {
 	start := used^
 
@@ -1145,7 +1112,6 @@ h2_append_lower :: proc(scratch: []u8, used: ^int, name: string) -> string {
 
 // Appends the lowercased, non-connection-specific headers as HPACK fields.
 // False means the field table or name scratch is full.
-@(private)
 h2_append_response_fields :: proc(
 	fields: []hpack.Field,
 	count: ^int,
@@ -1172,7 +1138,6 @@ h2_append_response_fields :: proc(
 	return true
 }
 
-@(private)
 h2_upgrade_headers :: proc(stream: ^H2_Upgrade) -> bool {
 	if stream.headers_sent {
 		return true
@@ -1208,7 +1173,6 @@ h2_upgrade_headers :: proc(stream: ^H2_Upgrade) -> bool {
 
 	return true
 }
-@(private)
 h2_upgrade_pump :: proc(parent: ^Connection_Task) -> bool {
 	progress := false
 
@@ -1303,12 +1267,10 @@ h2_upgrade_pump :: proc(parent: ^Connection_Task) -> bool {
 	return progress
 }
 
-@(private)
 h2_upgrade_expired :: proc(stream: ^H2_Upgrade, deadline: async.Deadline) -> bool {
 	return deadline.epoch != 0 && async.deadline_after(&stream.parent.runtime.executor, 0).at >= deadline.at
 }
 
-@(private)
 h2_upgrade_reset :: proc(stream: ^H2_Upgrade) {
 	stream.remote_reset = true
 	cancel_request_context(stream.connection.request.cancellation, .Peer_Closed)
@@ -1325,7 +1287,6 @@ h2_upgrade_reset :: proc(stream: ^H2_Upgrade) {
 
 // Only the parent task touches the engine or socket. A lazy request context owns
 // the arena, cancellation, continuation and producer until its own stream ends.
-@(private)
 H2_Request :: struct {
 	parent:                                                            ^Connection_Task,
 	task:                                                              Connection_Task,
@@ -1335,7 +1296,6 @@ H2_Request :: struct {
 	body_deadline, response_deadline:                                  time.Tick,
 	response:                                                          Response,
 }
-@(private)
 h2_request_allocator :: proc(task: ^Connection_Task) -> mem.Allocator {
 	allocator := charged.allocator(task.resource_binding)
 
@@ -1345,7 +1305,6 @@ h2_request_allocator :: proc(task: ^Connection_Task) -> mem.Allocator {
 
 	return allocator
 }
-@(private)
 h2_request_find :: proc(parent: ^Connection_Task, handle: h2.Stream_Handle) -> ^H2_Request {
 	for request in parent.http2.requests {
 		if request != nil && request.handle == handle {
@@ -1355,7 +1314,6 @@ h2_request_find :: proc(parent: ^Connection_Task, handle: h2.Stream_Handle) -> ^
 
 	return nil
 }
-@(private)
 h2_request_release :: proc(request: ^H2_Request, success: bool, status: Request_Status) {
 	parent := request.parent
 	task := &request.task
@@ -1384,7 +1342,6 @@ h2_request_release :: proc(request: ^H2_Request, success: bool, status: Request_
 	session.idle_deadline = time.tick_add(time.tick_now(), parent.runtime.timeouts.idle)
 	free(request, session.allocator)
 }
-@(private)
 h2_request_open :: proc(parent: ^Connection_Task, event: h2.Headers_Event) -> bool {
 	session := parent.http2
 	slot := -1
@@ -1460,7 +1417,6 @@ h2_request_open :: proc(parent: ^Connection_Task, event: h2.Headers_Event) -> bo
 
 	return true
 }
-@(private)
 h2_request_complete :: proc(task: ^Connection_Task) {
 	request := task.http2_request
 
@@ -1486,7 +1442,6 @@ h2_request_complete :: proc(task: ^Connection_Task) {
 		request.failed = true
 	}
 }
-@(private)
 h2_request_emergency :: proc(task: ^Connection_Task, status: HTTP_Status) -> bool {
 	request := task.http2_request
 	drop_deferred(task)
@@ -1515,7 +1470,6 @@ h2_request_emergency :: proc(task: ^Connection_Task, status: HTTP_Status) -> boo
 
 	return true
 }
-@(private)
 h2_queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 	request := task.http2_request
 
@@ -1584,7 +1538,6 @@ h2_queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 
 	return true
 }
-@(private)
 h2_request_trailers :: proc(request: ^H2_Request, fields: []hpack.Field) {
 	task := &request.task
 	allocator := mem.dynamic_arena_allocator(&task.arena)
@@ -1609,7 +1562,6 @@ h2_request_trailers :: proc(request: ^H2_Request, fields: []hpack.Field) {
 
 	task.request.trailers = trailers
 }
-@(private)
 h2_request_data :: proc(request: ^H2_Request, event: h2.Event_View, value: h2.Data_Event) -> bool {
 	engine := &request.parent.http2.engine
 	incoming: h2.Incoming_Data
@@ -1643,7 +1595,6 @@ h2_request_data :: proc(request: ^H2_Request, event: h2.Event_View, value: h2.Da
 	return true
 }
 // Headers are copied by the engine before these bounded stack buffers expire.
-@(private)
 h2_request_headers :: proc(request: ^H2_Request, trailers: bool) -> h2.Error {
 	fields: [H2_FIELD_CAP]hpack.Field
 	names: [H2_NAME_SCRATCH]u8
@@ -1691,7 +1642,6 @@ h2_request_headers :: proc(request: ^H2_Request, trailers: bool) -> h2.Error {
 
 	return h2.connection_send_headers(&request.parent.http2.engine, request.handle, fields[:count], false)
 }
-@(private)
 h2_request_output :: proc(request: ^H2_Request) -> bool {
 	task := &request.task
 	engine := &request.parent.http2.engine
@@ -1834,7 +1784,6 @@ h2_request_output :: proc(request: ^H2_Request) -> bool {
 
 	return true
 }
-@(private)
 h2_requests_pump :: proc(parent: ^Connection_Task) -> bool {
 	previous_temp := context.temp_allocator
 	defer context.temp_allocator = previous_temp
@@ -1916,7 +1865,6 @@ h2_requests_pump :: proc(parent: ^Connection_Task) -> bool {
 
 	return progress
 }
-@(private)
 h2_request_decode :: proc(task: ^Connection_Task, summary: h2.Header_Summary, end_stream: bool) -> bool {
 	session := task.http2_request
 

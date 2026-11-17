@@ -9,13 +9,9 @@ import "core:strings"
 
 // Identity is always acceptable. Gzip is the only other coding. x-gzip is an alias.
 // Absent or malformed Accept-Encoding stays identity and does not add Vary.
-@(private)
 GZIP_MIN_BYTES :: 1024
-@(private)
 GZIP_MAX_INPUT :: 1 << 20
-@(private)
 GZIP_MAX_OUTPUT :: (1 << 20) + (1 << 18)
-@(private)
 gzip_compress :: proc(src: []u8, allocator: mem.Allocator) -> []u8 {
 	// Scratch is heap-owned so a request arena, which cannot free individuals, is
 	// only charged the exact encoded body.
@@ -48,22 +44,18 @@ gzip_compress :: proc(src: []u8, allocator: mem.Allocator) -> []u8 {
 	return exact
 }
 
-@(private)
 is_digit :: proc(c: u8) -> bool {
 	return c >= '0' && c <= '9'
 }
-@(private)
 is_alpha :: proc(c: u8) -> bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 // HTTP optional whitespace.
-@(private)
 is_blank :: proc(c: u8) -> bool {
 	return c == ' ' || c == '\t'
 }
 
 // Index of the next list element: skips optional whitespace and empty elements.
-@(private)
 skip_list_separators :: proc(value: string, from: int) -> int {
 	index := from
 
@@ -74,13 +66,11 @@ skip_list_separators :: proc(value: string, from: int) -> int {
 	return index
 }
 
-@(private)
 Coding_Choice :: struct {
 	gzip, identity, star: int,
 	present, valid:       bool,
 }
 
-@(private)
 coding_token :: proc(value: u8) -> bool {
 	if is_digit(value) || is_alpha(value) {
 		return true
@@ -94,7 +84,6 @@ coding_token :: proc(value: u8) -> bool {
 	return false
 }
 
-@(private)
 parse_qvalue :: proc(value: string) -> (q, next: int, ok: bool) {
 	if len(value) == 0 {
 		return
@@ -143,7 +132,6 @@ parse_qvalue :: proc(value: string) -> (q, next: int, ok: bool) {
 	return q, index, true
 }
 
-@(private)
 accept_coding :: proc(choice: ^Coding_Choice, name: string, q: int) {
 	if name == "*" {
 		if choice.star < 0 {
@@ -164,7 +152,6 @@ accept_coding :: proc(choice: ^Coding_Choice, name: string, q: int) {
 	}
 }
 
-@(private)
 parse_coding_list :: proc(value: string, choice: ^Coding_Choice) -> bool {
 	index := 0
 
@@ -223,7 +210,6 @@ parse_coding_list :: proc(value: string, choice: ^Coding_Choice) -> bool {
 	return true
 }
 
-@(private)
 parse_accept_encoding :: proc(headers: []Header) -> Coding_Choice {
 	choice := Coding_Choice {
 		gzip     = -1,
@@ -246,7 +232,6 @@ parse_accept_encoding :: proc(headers: []Header) -> Coding_Choice {
 	return choice
 }
 
-@(private)
 gzip_preferred :: proc(choice: Coding_Choice) -> bool {
 	quality := choice.gzip
 
@@ -265,7 +250,6 @@ gzip_preferred :: proc(choice: Coding_Choice) -> bool {
 	return choice.identity < 0 || choice.identity <= quality
 }
 
-@(private)
 cache_forbids_coding :: proc(value: string) -> bool {
 	index := 0
 
@@ -289,7 +273,6 @@ cache_forbids_coding :: proc(value: string) -> bool {
 	return false
 }
 
-@(private)
 compressible_type :: proc(value: string) -> bool {
 	start := 0
 	for start < len(value) && is_blank(value[start]) {
@@ -328,7 +311,6 @@ compressible_type :: proc(value: string) -> bool {
 	return false
 }
 
-@(private)
 coding_eligible :: proc(response: Response, plain: int) -> bool {
 	status := int(response.status)
 	if status == 0 {
@@ -363,7 +345,6 @@ coding_eligible :: proc(response: Response, plain: int) -> bool {
 	return typed && compressible
 }
 
-@(private)
 header_room :: proc(headers: []Header) -> bool {
 	used := 96
 
@@ -377,7 +358,6 @@ header_room :: proc(headers: []Header) -> bool {
 	return true
 }
 
-@(private)
 vary_lists_encoding :: proc(headers: []Header) -> bool {
 	for header in headers {
 		if !strings.equal_fold(header.name, "Vary") {
@@ -404,7 +384,6 @@ vary_lists_encoding :: proc(headers: []Header) -> bool {
 	return false
 }
 
-@(private)
 append_response_headers :: proc(request: ^Request, response: ^Response, extra: []Header) -> bool {
 	if request.allocator.procedure == nil {
 		return false
@@ -420,7 +399,6 @@ append_response_headers :: proc(request: ^Request, response: ^Response, extra: [
 	return true
 }
 
-@(private)
 Gzip_Stream :: struct {
 	allocator:                      mem.Allocator,
 	inner:                          Response_Stream,
@@ -432,7 +410,6 @@ Gzip_Stream :: struct {
 	have, inner_done, busy, failed: bool,
 }
 
-@(private)
 gzip_stream_free :: proc(state: ^Gzip_Stream) {
 	if state == nil {
 		return
@@ -442,7 +419,6 @@ gzip_stream_free :: proc(state: ^Gzip_Stream) {
 	free(state, state.allocator)
 }
 
-@(private)
 gzip_drop :: proc(data: rawptr) {
 	state := cast(^Gzip_Stream)data
 	if state == nil {
@@ -456,14 +432,12 @@ gzip_drop :: proc(data: rawptr) {
 	}
 }
 
-@(private)
 gzip_fail :: proc(state: ^Gzip_Stream) -> Stream_Step {
 	state.failed = true
 
 	return .Failed
 }
 
-@(private)
 gzip_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 	state := cast(^Gzip_Stream)data
 	if state == nil || io == nil || state.failed || state.busy {
@@ -576,14 +550,12 @@ gzip_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 	return .Yield
 }
 
-@(private)
 gzip_wire_release :: proc(_: []u8, data: rawptr) {
 	if data != nil {
 		(cast(^Gzip_Stream)data).busy = false
 	}
 }
 
-@(private)
 gzip_stream_attach :: proc(request: ^Request, response: ^Response) -> bool {
 	allocator := request.backing_allocator
 	if allocator.procedure == nil {
@@ -636,7 +608,6 @@ gzip_stream_attach :: proc(request: ^Request, response: ^Response) -> bool {
 	return true
 }
 
-@(private)
 gzip_stream_detach :: proc(response: ^Response) {
 	state := cast(^Gzip_Stream)response.stream.data
 	response.stream = state.inner
@@ -647,7 +618,6 @@ gzip_stream_detach :: proc(response: ^Response) {
 // Applies after the handler returns. Buffered bodies keep identity unless gzip is
 // strictly smaller. Eligible streams become one gzip member with chunked framing.
 // HEAD advertises that framing and does not poll or allocate an encoder.
-@(private)
 content_coding_prepare :: proc(request: ^Request, response: ^Response) {
 	if request == nil || response == nil || request.allocator.procedure == nil {
 		return

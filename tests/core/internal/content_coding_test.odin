@@ -8,7 +8,6 @@ import "core:strings"
 import "core:testing"
 import async "shared:async"
 
-@(private)
 coding_repeat :: proc(count: int, allocator: mem.Allocator) -> []u8 {
 	text := "Saba keeps identity available and gzips textual responses. "
 	data, err := make([]u8, count, allocator)
@@ -22,7 +21,6 @@ coding_repeat :: proc(count: int, allocator: mem.Allocator) -> []u8 {
 	return data
 }
 
-@(private)
 coding_field :: proc(headers: []Header, name: string) -> (string, bool) {
 	for header in headers {
 		if strings.equal_fold(header.name, name) {
@@ -33,7 +31,6 @@ coding_field :: proc(headers: []Header, name: string) -> (string, bool) {
 	return "", false
 }
 
-@(private)
 coding_decode :: proc(t: ^testing.T, encoded, expected: []u8) {
 	buffer: bytes.Buffer
 	defer bytes.buffer_destroy(&buffer)
@@ -233,7 +230,6 @@ content_coding_negotiates_encodings_thresholds_and_sensitive_bodies :: proc(t: ^
 	testing.expect(t, !encoded)
 }
 
-@(private)
 Coding_Probe :: struct {
 	calls, releases, drops, offset: int,
 	chunk:                          int,
@@ -241,7 +237,6 @@ Coding_Probe :: struct {
 	pending:                        owned.Chunk,
 }
 
-@(private)
 coding_probe_release :: proc(storage: []u8, data: rawptr) {
 	probe := cast(^Coding_Probe)data
 	assert(len(storage) == probe.chunk)
@@ -249,7 +244,6 @@ coding_probe_release :: proc(storage: []u8, data: rawptr) {
 	delete(storage)
 }
 
-@(private)
 coding_probe_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 	probe := cast(^Coding_Probe)data
 	probe.calls += 1
@@ -279,14 +273,12 @@ coding_probe_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 	return .Chunk
 }
 
-@(private)
 coding_probe_drop :: proc(data: rawptr) {
 	probe := cast(^Coding_Probe)data
 	owned.destroy(&probe.pending)
 	probe.drops += 1
 }
 
-@(private)
 coding_drive :: proc(task: ^Connection_Task) -> (header: string, body: []u8, ok: bool) {
 	header = string(task.output[0])
 	parts: [dynamic]u8
@@ -321,7 +313,6 @@ coding_drive :: proc(task: ^Connection_Task) -> (header: string, body: []u8, ok:
 	return header, nil, false
 }
 
-@(private)
 coding_clone :: proc(src: []u8) -> []u8 {
 	dst, err := make([]u8, len(src))
 	if err != nil {

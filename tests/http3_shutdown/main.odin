@@ -136,7 +136,9 @@ client_shutdown :: proc(port,cert_path:string) {
  _,n,we=surf.websocket_read_message(&second_socket,buffer[:]);assert(we.kind==.None && string(buffer[:n])=="global-live")
  assert(surf.websocket_close(&second_socket,1000,"").kind==.None)
  h3.pool_drain(&pool);deadline=time.time_add(time.now(),3*time.Second)
- for h3.pool_pending(&pool) && time.diff(time.now(),deadline)>0 {_=h3.pool_drain_step(&pool,deadline)}
+ for h3.pool_pending(&pool) && time.diff(time.now(), deadline) > 0 {
+  _ = h3.pool_maintain(&pool, deadline)
+ }
  assert(!h3.pool_pending(&pool));surf.websocket_release_message(&socket);surf.websocket_release_message(&second_socket)
  fmt.println("OK per-peer and global GOAWAY preserve WebSockets and ordinary requests")
 }
@@ -154,7 +156,9 @@ client_peer :: proc(mode,port,cert_path:string) {
   buffer:[64]u8;_,n,e:=surf.websocket_read_message(&socket,buffer[:]);assert(e.kind==.None && string(buffer[:n])=="client-drain-live")
   assert(surf.websocket_close(&socket,1000,"").kind==.None);surf.websocket_release_message(&socket)
   deadline:=time.time_add(time.now(),4*time.Second)
-  for h3.pool_pending(&pool) && time.diff(time.now(),deadline)>0 {_=h3.pool_drain_step(&pool,deadline)}
+  for h3.pool_pending(&pool) && time.diff(time.now(), deadline) > 0 {
+   _ = h3.pool_maintain(&pool, deadline)
+  }
   assert(!h3.pool_pending(&pool));fmt.println("OK client GOAWAY preserves WS and closes H3_NO_ERROR");return
  }
  request:=h3.Client_Request{method="GET",target="/health",authority="localhost"}
@@ -171,7 +175,9 @@ client_peer :: proc(mode,port,cert_path:string) {
   assert(result.error==.Protocol)
  }
  h3.pool_drain(&pool);deadline:=time.time_add(time.now(),2*time.Second)
- for h3.pool_pending(&pool) && time.diff(time.now(),deadline)>0 {_=h3.pool_drain_step(&pool,deadline)}
+ for h3.pool_pending(&pool) && time.diff(time.now(), deadline) > 0 {
+  _ = h3.pool_maintain(&pool, deadline)
+ }
  fmt.printf("OK independent GOAWAY %s rejected=%v sent=%v\n",mode,result.rejected,result.sent)
 }
 main :: proc() {

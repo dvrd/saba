@@ -161,3 +161,59 @@ explicit_watch_roots_do_not_require_sdk_relative_shared_packages :: proc(t: ^tes
 	_, valid = development_paths({package_directory = directory, watch_directories = missing[:]}, "/not/executed")
 	testing.expect(t, !valid)
 }
+
+signature_test_write :: proc(path, text: string) {
+	assert(os.write_entire_file(path, text) == nil)
+}
+
+@(test)
+signature_hashes_content_only_when_size_or_mtime_change :: proc(t: ^testing.T) {
+	directory, err := os.make_directory_temp("", "saba-signature-test-*", context.temp_allocator)
+	if !testing.expect(t, err == nil, "isolated directory") {
+		return
+	}
+	defer _ = os.remove_all(directory)
+	first := fmt.tprintf("%s/a.js", directory)
+	second := fmt.tprintf("%s/b.js", directory)
+	signature_test_write(first, "alpha")
+	signature_test_write(second, "beta")
+	epoch := time.unix(1_700_000_000, 0)
+	assert(os.change_times(first, epoch, epoch) == nil)
+	assert(os.change_times(second, epoch, epoch) == nil)
+
+	cache: Signature_Cache
+	defer signature_cache_destroy(&cache)
+	base, ok := web_signature(directory, &cache)
+	testing.expect(t, ok)
+	testing.expect_value(t, cache.hashed, 2)
+	uncached, _ := web_signature(directory)
+	testing.expect_value(t, base, uncached)
+
+	// Unchanged (path, size, mtime): no file is read again.
+	again, _ := web_signature(directory, &cache)
+	testing.expect_value(t, again, base)
+	testing.expect_value(t, cache.hashed, 2)
+
+	// A touch re-reads one file but identical bytes keep the signature.
+	later := time.unix(1_700_000_100, 0)
+	assert(os.change_times(first, later, later) == nil)
+	touched, _ := web_signature(directory, &cache)
+	testing.expect_value(t, touched, base)
+	testing.expect_value(t, cache.hashed, 3)
+
+	// Same size, new mtime, new bytes: the signature changes.
+	signature_test_write(first, "omega")
+	latest := time.unix(1_700_000_200, 0)
+	assert(os.change_times(first, latest, latest) == nil)
+	edited, _ := web_signature(directory, &cache)
+	testing.expect(t, edited != base)
+	testing.expect_value(t, cache.hashed, 4)
+	testing.expect_value(t, len(cache.files), 2)
+
+	// Removed files leave the cache and the signature.
+	assert(os.remove(second) == nil)
+	removed, _ := web_signature(directory, &cache)
+	testing.expect(t, removed != edited)
+	testing.expect_value(t, len(cache.files), 1)
+	testing.expect_value(t, cache.hashed, 4)
+}

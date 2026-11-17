@@ -81,7 +81,9 @@ develop :: proc(config: Development) -> (handled, success: bool) {
 	command := make([]string, len(os.args), context.temp_allocator)
 	copy(command, os.args)
 	command[0] = executable
-	observed, scanned := development_signature(paths[:])
+	cache: Signature_Cache
+	defer signature_cache_destroy(&cache)
+	observed, scanned := development_signature(paths[:], &cache)
 
 	if !scanned {
 		return
@@ -118,6 +120,7 @@ develop :: proc(config: Development) -> (handled, success: bool) {
 		&child,
 		&active,
 		observed,
+		&cache,
 	)
 	if command[0] != executable {
 		delete(command[0])
@@ -196,6 +199,7 @@ development_supervise :: proc(
 	child: ^os.Process,
 	active: ^bool,
 	observed_start: u64,
+	cache: ^Signature_Cache,
 ) {
 	observed, published := observed_start, observed_start
 	generation := 0
@@ -211,7 +215,7 @@ development_supervise :: proc(
 			}
 		}
 
-		current, valid := development_signature(paths[:])
+		current, valid := development_signature(paths[:], cache)
 
 		if !valid {
 			continue
@@ -230,7 +234,7 @@ development_supervise :: proc(
 		// Scratch output never overwrites the executable that is still serving.
 		next := fmt.aprintf("%s/server-%d", directory, generation)
 		built, build_started := development_build(config, compiler, next)
-		latest, checked := development_signature(paths[:])
+		latest, checked := development_signature(paths[:], cache)
 
 		if !built || !checked || latest != current || sync.atomic_load(&development_stopping) {
 			_ = os.remove(next)
@@ -336,8 +340,100 @@ development_stop :: proc(process: os.Process) {
 	}
 }
 
-development_signature :: proc(paths: []string) -> (signature: u64, ok: bool) {
+// Files are compared by (path, size, modification time) first; the content is
+// read and hashed only when those change. A touch re-hashes but, with identical
+// bytes, leaves the signature (and therefore the rebuild decision) unchanged.
+File_Stamp :: struct {
+	size:  i64,
+	mtime: time.Time,
+	hash:  u64,
+	seen:  u64,
+}
+
+Signature_Cache :: struct {
+	files:  map[string]File_Stamp,
+	scan:   u64,
+	// Files whose content was read and hashed, for tests and diagnostics.
+	hashed: int,
+}
+
+signature_cache_destroy :: proc(cache: ^Signature_Cache) {
+	for path in cache.files {
+		delete(path)
+	}
+
+	delete(cache.files)
+	cache^ = {}
+}
+
+signature_cache_begin :: proc(cache: ^Signature_Cache) {
+	if cache != nil {
+		cache.scan += 1
+	}
+}
+
+// Forgets files that were not seen by the finished scan; a failed scan may
+// have stopped early, so it keeps everything.
+signature_cache_finish :: proc(cache: ^Signature_Cache, complete: bool) {
+	if cache == nil || !complete {
+		return
+	}
+
+	stale := make([dynamic]string)
+	defer delete(stale)
+
+	for path, stamp in cache.files {
+		if stamp.seen != cache.scan {
+			append(&stale, path)
+		}
+	}
+
+	for path in stale {
+		delete_key(&cache.files, path)
+		delete(path)
+	}
+}
+
+// Path and content folded into one value, so a rename changes the signature.
+file_signature :: proc(info: os.File_Info, cache: ^Signature_Cache) -> (signature: u64, ok: bool) {
+	if cache != nil {
+		stamp, found := cache.files[info.fullpath]
+
+		if found && stamp.size == info.size && stamp.mtime == info.modification_time {
+			stamp.seen = cache.scan
+			cache.files[info.fullpath] = stamp
+
+			return stamp.hash, true
+		}
+	}
+
+	bytes, err := os.read_entire_file(info.fullpath, context.allocator)
+
+	if err != nil {
+		return 0, false
+	}
+
+	defer delete(bytes)
+	signature = hash.fnv64a(bytes, hash.fnv64a(transmute([]byte)info.fullpath))
+
+	if cache != nil {
+		cache.hashed += 1
+		stamp := File_Stamp{info.size, info.modification_time, signature, cache.scan}
+
+		if _, found := cache.files[info.fullpath]; found {
+			cache.files[info.fullpath] = stamp
+		} else {
+			cache.files[strings.clone(info.fullpath)] = stamp
+		}
+	}
+
+	return signature, true
+}
+
+development_signature :: proc(paths: []string, cache: ^Signature_Cache = nil) -> (signature: u64, ok: bool) {
 	ok = true
+	signature_cache_begin(cache)
+	defer signature_cache_finish(cache, ok)
 
 	for path in paths {
 		walker := os.walker_create(path)
@@ -369,15 +465,14 @@ development_signature :: proc(paths: []string) -> (signature: u64, ok: bool) {
 			if strings.contains(info.fullpath, "/.git/") {
 				continue
 			}
-			bytes, err := os.read_entire_file(info.fullpath, context.allocator)
+			file_signature, readable := file_signature(info, cache)
 
-			if err != nil {
+			if !readable {
 				ok = false
 				break
 			}
 
-			signature ~= hash.fnv64a(bytes, hash.fnv64a(transmute([]byte)info.fullpath))
-			delete(bytes)
+			signature ~= file_signature
 		}
 
 		_, err := os.walker_error(&walker)
@@ -466,34 +561,28 @@ inject_reload_client :: proc(html: []u8, allocator := context.allocator) -> (inj
 	return injected, true
 }
 
-web_signature :: proc(directory: string) -> (signature: u64, ok: bool) {
+web_signature :: proc(directory: string, cache: ^Signature_Cache = nil) -> (signature: u64, ok: bool) {
 	walker := os.walker_create(directory)
 	defer os.walker_destroy(&walker)
 
 	ok = true
+	signature_cache_begin(cache)
+	defer signature_cache_finish(cache, ok)
 
 	for info in os.walker_walk(&walker) {
 		if info.type != .Regular {
 			continue
 		}
 
-		data, err := os.read_entire_file(info.fullpath, context.allocator)
+		file_signature, readable := file_signature(info, cache)
 
-		if err != nil {
-			log.error("Could not read watched file:", info.fullpath, err)
+		if !readable {
+			log.error("Could not read watched file:", info.fullpath)
 			ok = false
 			return
 		}
 
-		file_hash := hash.fnv64a(transmute([]u8)info.fullpath)
-		file_hash = hash.fnv64a(data, file_hash)
-
-		signature ~= file_hash
-
-		if free_err := delete(data); free_err != nil {
-			log.error("Could not free watched file:", free_err)
-			ok = false
-		}
+		signature ~= file_signature
 	}
 
 	if path, err := os.walker_error(&walker); err != nil {
@@ -509,11 +598,13 @@ watch_web :: proc(state: ^Reload_State) {
 
 	observed := state.initial_signature
 	published := state.initial_signature
+	cache: Signature_Cache
+	defer signature_cache_destroy(&cache)
 
 	for !sync.atomic_load(&state.stopped) {
 		time.sleep(RELOAD_INTERVAL)
 
-		current, ok := web_signature(state.directory)
+		current, ok := web_signature(state.directory, &cache)
 		if !ok {
 			continue
 		}

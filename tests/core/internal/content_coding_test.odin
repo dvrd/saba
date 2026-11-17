@@ -38,44 +38,44 @@ coding_decode :: proc(t: ^testing.T, encoded, expected: []u8) {
 
 @(test)
 gzip_round_trip_and_short_writes_match_limits :: proc(t: ^testing.T) {
-	testing.expect(t, gzip_output_bound(GZIP_MAX_INPUT) <= GZIP_MAX_OUTPUT)
+	testing.expect(t, gzip.stream_bound(GZIP_MAX_INPUT) <= GZIP_MAX_OUTPUT)
 	plain := coding_repeat(4096, context.allocator)
 	defer delete(plain)
-	encoder, alloc_error := new(Gzip_Encoder)
+	encoder, alloc_error := new(gzip.Stream_Encoder)
 	testing.expect(t, alloc_error == nil && encoder != nil)
 	defer free(encoder)
-	gzip_encoder_reset(encoder)
-	encoded, encode_error := make([]u8, gzip_output_bound(len(plain)))
+	gzip.stream_reset(encoder, GZIP_MAX_OUTPUT)
+	encoded, encode_error := make([]u8, gzip.stream_bound(len(plain)))
 	testing.expect(t, encode_error == nil)
 	defer delete(encoded)
 	offset, written := 0, 0
 
 	for offset < len(plain) {
 		if len(encoder.out) - encoder.out_len < 32 {
-			count := gzip_pull(encoder, encoded[written:])
+			count := gzip.stream_pull(encoder, encoded[written:])
 			testing.expect(t, count > 0)
 			written += count
 			continue
 		}
 
 		step := min(5, len(plain) - offset)
-		count := gzip_write(encoder, plain[offset:offset + step])
+		count := gzip.stream_write(encoder, plain[offset:offset + step])
 		testing.expect(t, count > 0 && count <= step)
 		offset += count
 	}
 
 	for !encoder.finished {
 		if len(encoder.out) - encoder.out_len < 32 {
-			written += gzip_pull(encoder, encoded[written:])
+			written += gzip.stream_pull(encoder, encoded[written:])
 			continue
 		}
 
-		testing.expect(t, gzip_finish(encoder) || encoder.overflow == false)
+		testing.expect(t, gzip.stream_finish(encoder) || encoder.overflow == false)
 		if encoder.overflow do break
 	}
 
 	for encoder.out_len != encoder.out_off {
-		written += gzip_pull(encoder, encoded[written:])
+		written += gzip.stream_pull(encoder, encoded[written:])
 	}
 
 	testing.expect(t, !encoder.overflow && written > 0 && written < len(plain))

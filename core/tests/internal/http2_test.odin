@@ -4,15 +4,6 @@ import "core:testing"
 import h2 "shared:http/v2"
 
 @(test)
-h2_protocol_token_is_exact :: proc(t: ^testing.T) {
-	testing.expect(t, h2_selected_protocol("h2"))
-	testing.expect(t, !h2_selected_protocol(""))
-	testing.expect(t, !h2_selected_protocol("http/1.1"))
-	testing.expect(t, !h2_selected_protocol("h2c"))
-	testing.expect(t, !h2_selected_protocol("h3"))
-}
-
-@(test)
 h2_limits_match_exchange_budgets :: proc(t: ^testing.T) {
 	one := h2_make_limits(1)
 	testing.expect_value(t, one.streams, 1)

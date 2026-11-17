@@ -51,10 +51,6 @@ make_response :: proc(
 	return Response{status = status, headers = stored_headers, body = body}
 }
 
-http_field_value :: proc(value: string) -> bool {
-	return http.header_value_valid(value)
-}
-
 response_headers :: proc(response: Response, buffer: []u8, keep_alive: bool = false) -> (data: []u8, ok: bool) {
  if len(response.trailers)>0 {return nil,false}
 	if stream_present(response.stream) || deferred_present(response.deferred) do return nil, false
@@ -326,22 +322,26 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 	return stream_write_budget(task)
 }
 
+// Records the outcome when the stream budget or its request context has ended.
+@(private)
+stream_interrupted :: proc(task: ^Connection_Task) -> bool {
+	if deadline_expired(task.streaming.expires) {
+		observe_failure(task, .Timeout)
+		cancel_request_context(task.request.cancellation, .Deadline)
+		return true
+	}
+	if request_cancelled(task.request.cancellation) {
+		status := request_context_status(task.request.cancellation)
+		observe_failure(task, .Timeout if status == .Deadline else .Cancelled)
+		return true
+	}
+	return false
+}
+
 @(private)
 produce_stream :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	state := task.streaming
-	if deadline_expired(state.expires) {
-		observe_failure(task, .Timeout)
-		cancel_request_context(task.request.cancellation, .Deadline); return .Done
-	}
-	if request_cancelled(task.request.cancellation) {
-		observe_failure(
-			task,
-			.Timeout if \
-				request_context_status(task.request.cancellation) == .Deadline else \
-				.Cancelled,
-		)
-		return .Done
-	}
+	if stream_interrupted(task) do return .Done
 	io := Stream_IO {
 		resources = task.resource_operation,
 		backing_allocator = task.request.backing_allocator,
@@ -352,19 +352,7 @@ produce_stream :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		_deadline       = state.deadline,
 	}
 	step := state.producer.next(state.producer.data, &io)
-	if deadline_expired(state.expires) {
-		observe_failure(task, .Timeout)
-		cancel_request_context(task.request.cancellation, .Deadline); return .Done
-	}
-	if request_cancelled(task.request.cancellation) {
-		observe_failure(
-			task,
-			.Timeout if \
-				request_context_status(task.request.cancellation) == .Deadline else \
-				.Cancelled,
-		)
-		return .Done
-	}
+	if stream_interrupted(task) do return .Done
 	switch step {
 	case .Waiting:
 		if !io._waiting || io._submitted {

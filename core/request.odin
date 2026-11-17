@@ -13,10 +13,6 @@ REQUEST_HEADER_LIMIT :: 8192
 REQUEST_HEADER_COUNT_LIMIT :: 128
 REQUEST_BODY_LIMIT :: 4096
 
-http_token :: proc(value: string) -> bool {
-	return http.header_name_valid(value)
-}
-
 // Decode shared wire semantics, then attach Saba-owned routing/body state.
 // The transport's smaller head limit remains independent of the codec limit.
 parse_request :: proc(raw: string, storage: []Header) -> (Request, HTTP_Status) {
@@ -232,11 +228,10 @@ read_chunked_body :: proc(
 route_parameter_name :: proc(name: string) -> bool {
 	if name == "" do return false
 
-	for character, index in name {
-		if character >= 'a' && character <= 'z' do continue
-		if character >= 'A' && character <= 'Z' do continue
-		if character == '_' do continue
-		if index > 0 && character >= '0' && character <= '9' do continue
+	for index in 0 ..< len(name) {
+		c := name[index]
+		if is_alpha(c) || c == '_' do continue
+		if index > 0 && is_digit(c) do continue
 
 		return false
 	}

@@ -507,9 +507,7 @@ finish_connection :: proc(data: rawptr) {
 	task := cast(^Connection_Task)data
 	h2_destroy(task)
 	keep_alive_leave_idle(task)
-	if budget.same_scope(task.resource_connection, task.resource_connection) {
-		_ = budget.close(task.resource_connection)
-	}
+	_ = budget.close(task.resource_connection)
 	drop_deferred(task)
 	finish_request_context(task)
 	observe_finish(task)
@@ -909,9 +907,7 @@ start_operation_resources :: proc(task: ^Connection_Task) -> bool {
 }
 @(private)
 finish_operation_resources :: proc(task: ^Connection_Task) {
-	if budget.same_scope(task.resource_operation, task.resource_operation) {
-		_ = budget.close(task.resource_operation)
-	}
+	_ = budget.close(task.resource_operation)
 	charged.release(&task.resource_binding)
 	budget.release_scope(&task.resource_operation)
 }
@@ -1067,21 +1063,17 @@ observe_start :: proc(task: ^Connection_Task) {
 
 @(private)
 observe_io_error :: proc(task: ^Connection_Task, error: async.Error) {
-	#partial switch error.kind {
-    case .Timeout: cancel_request_context(task.request.cancellation,.Deadline)
-    case .Cancelled,.Stopping: cancel_request_context(task.request.cancellation,.Shutdown)
-    case .Peer_Closed: cancel_request_context(task.request.cancellation,.Peer_Closed)
-    case .None,.Pending:
-    case: cancel_request_context(task.request.cancellation,.Failed)
-    }
-    if !task.observed do return
+	status: Request_Status
+	outcome: Request_Outcome
 	#partial switch error.kind {
 	case .None, .Pending: return
-	case .Timeout: task.event.outcome = .Timeout
-	case .Cancelled, .Stopping: task.event.outcome = .Cancelled
-	case .Peer_Closed: task.event.outcome = .Peer_Closed
-	case: task.event.outcome = .IO_Error
+	case .Timeout: status, outcome = .Deadline, .Timeout
+	case .Cancelled, .Stopping: status, outcome = .Shutdown, .Cancelled
+	case .Peer_Closed: status, outcome = .Peer_Closed, .Peer_Closed
+	case: status, outcome = .Failed, .IO_Error
 	}
+	cancel_request_context(task.request.cancellation, status)
+	observe_failure(task, outcome)
 }
 
 @(private)
@@ -1240,7 +1232,7 @@ release_server_cancellation :: proc(state: ^Server_Cancellation) {
 shutdown_runtime :: proc(runtime: ^Server_Runtime) {
 	if runtime.cancellation != nil do sync.atomic_store(&runtime.cancellation.stopping, true)
 	// Existing shutdown owns sockets, task cancellation and worker joins.
-	if budget.same_scope(runtime.resources, runtime.resources) do _ = budget.close(runtime.resources)
+	_ = budget.close(runtime.resources)
 	async.shutdown(&runtime.executor)
 }
 

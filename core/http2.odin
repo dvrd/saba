@@ -69,11 +69,6 @@ h2_make_limits :: proc(streams: int) -> h2.Limits {
 	}
 }
 
-// Exactly the negotiated token. Absent ALPN, http/1.1 and h3 stay off this path.
-h2_selected_protocol :: proc(protocol: string) -> bool {
-	return protocol == "h2"
-}
-
 http2_config_valid :: proc(config:Http2_Config)->bool {return config.max_concurrent_streams>=0 && config.max_concurrent_streams<=H2_MAX_STREAMS}
 
 @(private)
@@ -103,29 +98,32 @@ h2_begin :: proc(task: ^Connection_Task) -> bool {
 	if alloc_error != nil || session == nil do return false
 	session.allocator = allocator
 	session.limits = limits
- requests,request_error:=make([]^H2_Request,allowance,allocator)
- reap,reap_error:=make([]h2.Stream_Handle,max(2,2*allowance),allocator)
- upgrades,upgrade_error:=make([]^H2_Upgrade,allowance,allocator)
- if request_error!=nil || reap_error!=nil || upgrade_error!=nil {delete(requests,allocator);delete(reap,allocator);delete(upgrades,allocator);free(session,allocator);return false}
- session.requests=requests;session.reap=reap;session.upgrades=upgrades
-	scope: budget.Scope
-	if budget.same_scope(task.resource_connection, task.resource_connection) {
-		scope = task.resource_connection
+	capacity := max(2, 2 * allowance)
+	request_error, reap_error, upgrade_error: mem.Allocator_Error
+	session.requests, request_error = make([]^H2_Request, allowance, allocator)
+	session.reap, reap_error = make([]h2.Stream_Handle, capacity, allocator)
+	session.upgrades, upgrade_error = make([]^H2_Upgrade, allowance, allocator)
+	ready := request_error == nil && reap_error == nil && upgrade_error == nil
+	if ready {
+		options := h2.Engine_Options{
+			max_stream_capacity = capacity,
+			control_frame_bytes = 256,
+			header_sections = 4,
+			enable_push = false,
+			promise_policy = .Decline,
+			enable_connect_protocol = true,
+		}
+		// An absent connection scope is the zero Scope, which leaves the engine unbudgeted.
+		ready = h2.connection_init(&session.engine, {
+			role = .Server, limits = limits, initial_stream_capacity = min(H2_STREAM_SLOTS, capacity),
+			scope = task.resource_connection,
+		}, options, allocator).kind == .None
 	}
-	options := h2.Engine_Options{
-		max_stream_capacity = max(2,2*allowance),
-		control_frame_bytes = 256,
-		header_sections = 4,
-		enable_push = false,
-		promise_policy = .Decline,
-		enable_connect_protocol = true,
-	}
-	init_error := h2.connection_init(&session.engine, {
-		role = .Server, limits = limits, initial_stream_capacity = min(H2_STREAM_SLOTS,max(2,2*allowance)), scope = scope,
-	}, options, allocator)
-	if init_error.kind != .None {
-		delete(session.requests,allocator);delete(session.reap,allocator);delete(session.upgrades,allocator)
-  free(session, allocator)
+	if !ready {
+		delete(session.requests, allocator)
+		delete(session.reap, allocator)
+		delete(session.upgrades, allocator)
+		free(session, allocator)
 		return false
 	}
 	session.engine_ready = true
@@ -277,12 +275,6 @@ h2_next_deadline :: proc(task: ^Connection_Task) -> time.Tick {
 	if deadline == {} {return time.tick_add(time.tick_now(),task.runtime.timeouts.header)}
  return deadline
 }
-@(private)
-h2_wait_budget :: proc(task:^Connection_Task)->time.Duration {
-	remaining := time.tick_diff(time.tick_now(), h2_next_deadline(task))
-	if remaining < 0 do return 0
-	return remaining
-}
 
 @(private)
 h2_check_deadlines :: proc(task: ^Connection_Task) -> bool {
@@ -316,9 +308,7 @@ h2_read :: proc(task: ^Connection_Task) -> (bool, bool) {
 		if task.tls_state != nil && task.tls_state.error.kind == .Timeout do task.tls_state.error = {}
 		return n > 0, false
 	}
-	if error.kind != .None || (error.kind == .None && n == 0) {
-		session.peer_gone = true
-	}
+	if error.kind != .None || n == 0 do session.peer_gone = true
 	return n > 0, false
 }
 
@@ -331,9 +321,7 @@ h2_feed :: proc(task: ^Connection_Task) -> bool {
 	fed := h2.connection_feed(&session.engine, source, u32(session.limits.work_per_feed))
 	if fed.consumed > 0 {
 		remain := session.ingress_len - fed.consumed
-		for index in 0 ..< remain {
-			session.ingress[index] = session.ingress[fed.consumed + index]
-		}
+		copy(session.ingress[:], session.ingress[fed.consumed:session.ingress_len])
 		session.ingress_len = remain
 		progress = true
 	}
@@ -363,7 +351,10 @@ h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 	session := task.http2
 	state := task.tls_state
 	if state == nil do return false, false
-	task.deadline = async.deadline_after(&task.runtime.executor, h2_wait_budget(task))
+	task.deadline = async.deadline_after(
+		&task.runtime.executor,
+		max(0, time.tick_diff(time.tick_now(), h2_next_deadline(task))),
+	)
 	if state.write_started {
 		n, error := transport_write(task, nil, task.deadline)
   if error.kind == .Pending do return false, true
@@ -634,6 +625,18 @@ h2_upgrade_wait :: proc(data:rawptr,read,write:bool,deadline:async.Deadline)->as
 }
 
 @(private)
+h2_upgrade_io :: proc(stream: ^H2_Upgrade) -> Upgrade_IO {
+	return {
+		runtime = &stream.parent.runtime.executor,
+		connection = &stream.connection.connection,
+		stream_data = stream,
+		stream_read = h2_upgrade_read,
+		stream_write = h2_upgrade_write,
+		stream_wait = h2_upgrade_wait,
+	}
+}
+
+@(private)
 h2_upgrade_headers :: proc(stream:^H2_Upgrade)->bool {
  if stream.headers_sent {return true}
  fields:[H2_FIELD_CAP]hpack.Field;names:[H2_NAME_SCRATCH]u8;used:=0;count:=1
@@ -674,8 +677,7 @@ h2_upgrade_pump :: proc(parent:^Connection_Task)->bool {
    }
    stream.app_done=true
   } else if !stream.app_done {
-   io:=Upgrade_IO{runtime=&parent.runtime.executor,connection=&stream.connection.connection,
-    stream_data=stream,stream_read=h2_upgrade_read,stream_write=h2_upgrade_write,stream_wait=h2_upgrade_wait}
+   io:=h2_upgrade_io(stream)
    result:=stream.connection.upgrade.resume(stream.connection.upgrade.data,&io)
 
    if result==.Done {stream.app_done=true;drop_upgrade(&stream.connection);progress=true}
@@ -708,8 +710,7 @@ h2_upgrade_reset :: proc(stream:^H2_Upgrade) {
  stream.remote_reset=true
  cancel_request_context(stream.connection.request.cancellation,.Peer_Closed)
  if stream.accepted && stream.headers_sent && !stream.app_done {
-  io:=Upgrade_IO{runtime=&stream.parent.runtime.executor,connection=&stream.connection.connection,
-   stream_data=stream,stream_read=h2_upgrade_read,stream_write=h2_upgrade_write,stream_wait=h2_upgrade_wait}
+  io:=h2_upgrade_io(stream)
   // One final serialized callback observes cancellation; the owner retires the
   // stream regardless of whether application code correctly returns Done.
   _=stream.connection.upgrade.resume(stream.connection.upgrade.data,&io)

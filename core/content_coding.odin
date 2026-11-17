@@ -3,6 +3,7 @@ package saba_core
 import exchange "../../http/exchange"
 import rt "base:runtime"
 import "core:hash"
+import "core:math/bits"
 import "core:mem"
 import owned "core:mem/owned"
 import "core:strings"
@@ -92,12 +93,7 @@ gzip_put :: proc(e: ^Gzip_Encoder, value: u32, count: int) {
 
 @(private)
 gzip_rev :: proc(code: u32, count: int) -> u32 {
-	reversed, value := u32(0), code
-	for _ in 0 ..< count {
-		reversed = (reversed << 1) | (value & 1)
-		value >>= 1
-	}
-	return reversed
+	return bits.reverse_bits(code) >> uint(32 - count)
 }
 
 @(private)
@@ -316,6 +312,14 @@ gzip_compress :: proc(src: []u8, allocator: mem.Allocator) -> []u8 {
 }
 
 @(private)
+is_digit :: proc(c: u8) -> bool {return c >= '0' && c <= '9'}
+@(private)
+is_alpha :: proc(c: u8) -> bool {return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')}
+// HTTP optional whitespace.
+@(private)
+is_blank :: proc(c: u8) -> bool {return c == ' ' || c == '\t'}
+
+@(private)
 Coding_Choice :: struct {
 	gzip, identity, star: int,
 	present, valid: bool,
@@ -323,9 +327,7 @@ Coding_Choice :: struct {
 
 @(private)
 coding_token :: proc(value: u8) -> bool {
-	if (value >= '0' && value <= '9') || (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z') {
-		return true
-	}
+	if is_digit(value) || is_alpha(value) do return true
 	switch value {
 	case '!', '#', '$', '%', '&', '\'', '+', '-', '.', '^', '_', '`', '|', '~':
 		return true
@@ -343,7 +345,7 @@ parse_qvalue :: proc(value: string) -> (q, next: int, ok: bool) {
 		if index < len(value) && value[index] == '.' {
 			index += 1
 			digits := 0
-			for digits < 3 && index < len(value) && value[index] >= '0' && value[index] <= '9' {
+			for digits < 3 && index < len(value) && is_digit(value[index]) {
 				if value[index] != '0' do return
 				index += 1
 				digits += 1
@@ -355,7 +357,7 @@ parse_qvalue :: proc(value: string) -> (q, next: int, ok: bool) {
 			index += 1
 			weight := 100
 			digits := 0
-			for digits < 3 && index < len(value) && value[index] >= '0' && value[index] <= '9' {
+			for digits < 3 && index < len(value) && is_digit(value[index]) {
 				q += int(value[index] - '0') * weight
 				weight /= 10
 				index += 1
@@ -365,7 +367,7 @@ parse_qvalue :: proc(value: string) -> (q, next: int, ok: bool) {
 	} else {
 		return
 	}
-	if index < len(value) && value[index] >= '0' && value[index] <= '9' do return
+	if index < len(value) && is_digit(value[index]) do return
 	return q, index, true
 }
 
@@ -386,7 +388,7 @@ accept_coding :: proc(choice: ^Coding_Choice, name: string, q: int) {
 parse_coding_list :: proc(value: string, choice: ^Coding_Choice) -> bool {
 	index := 0
 	for index < len(value) {
-		for index < len(value) && (value[index] == ' ' || value[index] == '\t' || value[index] == ',') {
+		for index < len(value) && (is_blank(value[index]) || value[index] == ',') {
 			index += 1
 		}
 		if index >= len(value) do return true
@@ -400,10 +402,10 @@ parse_coding_list :: proc(value: string, choice: ^Coding_Choice) -> bool {
 		name := value[start:index]
 		quality := 1000
 		cursor := index
-		for cursor < len(value) && (value[cursor] == ' ' || value[cursor] == '\t') do cursor += 1
+		for cursor < len(value) && is_blank(value[cursor]) do cursor += 1
 		if cursor < len(value) && value[cursor] == ';' {
 			cursor += 1
-			for cursor < len(value) && (value[cursor] == ' ' || value[cursor] == '\t') do cursor += 1
+			for cursor < len(value) && is_blank(value[cursor]) do cursor += 1
 			if cursor + 1 >= len(value) || (value[cursor] != 'q' && value[cursor] != 'Q') || value[cursor + 1] != '=' {
 				return false
 			}
@@ -411,7 +413,7 @@ parse_coding_list :: proc(value: string, choice: ^Coding_Choice) -> bool {
 			if !ok do return false
 			quality = parsed
 			cursor = cursor + 2 + consumed
-			if cursor < len(value) && value[cursor] != ' ' && value[cursor] != '\t' && value[cursor] != ',' {
+			if cursor < len(value) && !is_blank(value[cursor]) && value[cursor] != ',' {
 				return false
 			}
 			index = cursor
@@ -449,11 +451,11 @@ gzip_preferred :: proc(choice: Coding_Choice) -> bool {
 cache_forbids_coding :: proc(value: string) -> bool {
 	index := 0
 	for index < len(value) {
-		for index < len(value) && (value[index] == ' ' || value[index] == '\t' || value[index] == ',') {
+		for index < len(value) && (is_blank(value[index]) || value[index] == ',') {
 			index += 1
 		}
 		start := index
-		for index < len(value) && value[index] != ',' && value[index] != '=' && value[index] != ' ' && value[index] != '\t' {
+		for index < len(value) && value[index] != ',' && value[index] != '=' && !is_blank(value[index]) {
 			index += 1
 		}
 		if strings.equal_fold(value[start:index], "no-store") || strings.equal_fold(value[start:index], "private") {
@@ -467,9 +469,9 @@ cache_forbids_coding :: proc(value: string) -> bool {
 @(private)
 compressible_type :: proc(value: string) -> bool {
 	start := 0
-	for start < len(value) && (value[start] == ' ' || value[start] == '\t') do start += 1
+	for start < len(value) && is_blank(value[start]) do start += 1
 	end := start
-	for end < len(value) && value[end] != ';' && value[end] != ' ' && value[end] != '\t' do end += 1
+	for end < len(value) && value[end] != ';' && !is_blank(value[end]) do end += 1
 	media := value[start:end]
 	if len(media) >= 5 && strings.equal_fold(media[:5], "text/") do return true
 	if strings.equal_fold(media, "image/svg+xml") do return true
@@ -522,11 +524,11 @@ vary_lists_encoding :: proc(headers: []Header) -> bool {
 		index := 0
 		value := header.value
 		for index < len(value) {
-			for index < len(value) && (value[index] == ' ' || value[index] == '\t' || value[index] == ',') {
+			for index < len(value) && (is_blank(value[index]) || value[index] == ',') {
 				index += 1
 			}
 			start := index
-			for index < len(value) && value[index] != ',' && value[index] != ' ' && value[index] != '\t' {
+			for index < len(value) && value[index] != ',' && !is_blank(value[index]) {
 				index += 1
 			}
 			token := value[start:index]

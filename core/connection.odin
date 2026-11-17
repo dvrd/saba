@@ -13,6 +13,7 @@ import async "shared:async"
 import store "core:crypto/tls/credentials/store"
 import bridge "shared:async/connection"
 import "core:strings"
+import http "../../http"
 
 Connection :: struct {
 	_task: ^Connection_Task,
@@ -817,7 +818,7 @@ request_wants_close :: proc(request: ^Request) -> bool {
 		for token in strings.split_iterator(&remaining, ",") {
 			value := strings.trim_space(token)
 			// Invalid token lists conservatively disable persistence.
-			if !http_token(value) || strings.equal_fold(value, "close") do return true
+			if !http.header_name_valid(value) || strings.equal_fold(value, "close") do return true
 		}
 	}
 	return false

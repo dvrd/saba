@@ -4,7 +4,6 @@ import "core:log"
 import "core:net"
 import "core:path/filepath"
 import "core:strings"
-import files "shared:files"
 import http "../../http"
 import "core:crypto/sha2"
 import core "../core"
@@ -43,7 +42,7 @@ serve_assets :: proc(
 			if limit == 0 {
 				limit = DEFAULT_ASSET_LIMITS.max_file_bytes
 			}
-			body, read_error := files.read_limited(path, limit, request.allocator)
+			body, read_error := read_limited(path, limit, request.allocator)
 			if read_error.kind != .None {
 				log.errorf("Could not read asset: %s", path)
 				return Response{status = .Internal_Server_Error}, true
@@ -437,7 +436,7 @@ Asset_Error_Kind :: enum {
 Asset_Error :: struct {
 	kind:                         Asset_Error_Kind,
 	mount_index, limit, observed: int,
-	read:                         files.Read_Error,
+	read:                         Read_Error,
 	io:                           os.Error,
 	allocation:                   mem.Allocator_Error,
 }
@@ -480,7 +479,7 @@ normalize_limits :: proc(l: Asset_Limits) -> (Asset_Limits, bool) {
 		out.max_files > 0 &&
 		out.max_entries > 0 &&
 		out.max_file_bytes > 0 &&
-		out.max_file_bytes <= files.FILE_BYTES_MAX &&
+		out.max_file_bytes <= FILE_BYTES_MAX &&
 		out.max_total_bytes > 0
 }
 
@@ -679,7 +678,7 @@ preload_directory :: proc(
 			return {kind = .Unavailable}
 		}
 		remaining := l.max_total_bytes - counts.bytes
-		body, read := files.read_limited(path, max(1, min(l.max_file_bytes, remaining)), allocator)
+		body, read := read_limited(path, max(1, min(l.max_file_bytes, remaining)), allocator)
 		if read.kind != .None {
 			if read.kind == .Limit_Exceeded {
 				if remaining < l.max_file_bytes {

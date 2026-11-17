@@ -12,7 +12,6 @@ import "core:strconv"
 import "core:strings"
 import "core:sys/posix"
 import "core:time"
-import files "shared:files"
 
 main :: proc() {
 	assert(len(os.args) == 5)
@@ -33,8 +32,8 @@ main :: proc() {
 		assert(error.kind == .None)
 	} else if mode == "manifest" {
 		path := fmt.aprintf("%s.manifest", directory); defer delete(path)
-		error: files.Read_Error
-		manifest_data, error = files.read_limited(path, 1 << 20)
+		error: assets.Read_Error
+		manifest_data, error = assets.read_limited(path, 1 << 20)
 		assert(error.kind == .None)
 		text := string(manifest_data)
 		for line in strings.split_iterator(&text, "\n") {
@@ -62,8 +61,8 @@ main :: proc() {
 			item, found := caches[0].files[name]; assert(found); body = item.body
 		} else {
 			path := fmt.aprintf("%s/%s", directory, name)
-			error: files.Read_Error
-			body, error = files.read_limited(path, 8 << 20)
+			error: assets.Read_Error
+			body, error = assets.read_limited(path, 8 << 20)
 			delete(path)
 			assert(error.kind == .None)
 			if mode == "manifest" {

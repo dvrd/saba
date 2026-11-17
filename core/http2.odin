@@ -194,7 +194,7 @@ h2_destroy :: proc(task: ^Connection_Task) {
 
 	if session.engine_ready {
 		if view, borrowed := h2.connection_output_front(&session.engine); borrowed {
-			_ = h2.connection_output_release(&session.engine, view.token)
+			_ = h2.connection_output_advance(&session.engine, view.token, 0)
 		}
 
 		for _ in 0 ..< H2_EVENTS {
@@ -544,7 +544,7 @@ h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 					task.event.bytes_sent += u64(n)
 				}
 			} else {
-				_ = h2.connection_output_release(&session.engine, view.token)
+				_ = h2.connection_output_advance(&session.engine, view.token, 0)
 				session.peer_gone = true
 			}
 		}
@@ -565,7 +565,7 @@ h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 	}
 
 	if error.kind != .None || n <= 0 {
-		_ = h2.connection_output_release(&session.engine, view.token)
+		_ = h2.connection_output_advance(&session.engine, view.token, 0)
 		session.peer_gone = true
 		return false, false
 	}

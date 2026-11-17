@@ -156,43 +156,20 @@ read_websocket_bytes :: proc(conn: ^Connection, buffer: []u8) -> bool {
 }
 
 Server_Control :: core.Server_Control
-Server_State :: core.Server_State
-Connection_Capacity :: core.Connection_Capacity
 Timeout_Config :: core.Timeout_Config
 Keep_Alive_Config :: core.Keep_Alive_Config
 Observability_Config :: core.Observability_Config
-Request_Metrics :: core.Request_Metrics
 Request_Event :: core.Request_Event
-Request_Outcome :: core.Request_Outcome
 Request :: core.Request
 Response :: core.Response
 Header :: core.Header
-Path_Parameter :: core.Path_Parameter
 HTTP_Status :: core.HTTP_Status
-Upgrade :: core.Upgrade
 Upgrade_IO :: core.Upgrade_IO
 Connection_Task :: core.Connection_Task
 Server_Runtime :: core.Server_Runtime
-DEFAULT_MAX_CONNECTIONS :: core.DEFAULT_MAX_CONNECTIONS
-DEFAULT_INITIAL_CONNECTIONS :: core.DEFAULT_INITIAL_CONNECTIONS
-DEFAULT_WORKERS :: core.DEFAULT_WORKERS
 REQUEST_HEADER_LIMIT :: core.REQUEST_HEADER_LIMIT
-REQUEST_HEADER_COUNT_LIMIT :: core.REQUEST_HEADER_COUNT_LIMIT
 REQUEST_BODY_LIMIT :: core.REQUEST_BODY_LIMIT
-REQUEST_HEADER_TIMEOUT :: core.REQUEST_HEADER_TIMEOUT
-REQUEST_BODY_TIMEOUT :: core.REQUEST_BODY_TIMEOUT
-RESPONSE_SEND_TIMEOUT :: core.RESPONSE_SEND_TIMEOUT
 RESPONSE_HEADER_LIMIT :: core.RESPONSE_HEADER_LIMIT
-MAX_SERVER_TIMEOUT :: core.MAX_SERVER_TIMEOUT
-MAX_EVENT_ROUTE_BYTES :: core.MAX_EVENT_ROUTE_BYTES
-DEFAULT_KEEP_ALIVE_REQUESTS :: core.DEFAULT_KEEP_ALIVE_REQUESTS
-MAX_KEEP_ALIVE_REQUESTS :: core.MAX_KEEP_ALIVE_REQUESTS
-DEFAULT_DRAIN_TIMEOUT :: core.DEFAULT_DRAIN_TIMEOUT
-MAX_DRAIN_TIMEOUT :: core.MAX_DRAIN_TIMEOUT
-MAX_PATH_PARAMETERS :: core.MAX_PATH_PARAMETERS
-CRLF :: core.CRLF
-HTTP_HEADERS_END :: core.HTTP_HEADERS_END
-HTTP_VERSION :: core.HTTP_VERSION
 stop_server :: core.stop_server
 server_endpoint :: core.server_endpoint
 server_capacity :: core.server_capacity
@@ -200,10 +177,7 @@ server_metrics :: core.server_metrics
 server_state :: core.server_state
 server_ready :: core.server_ready
 drain_server :: core.drain_server
-timeouts_valid :: core.timeouts_valid
-keep_alive_valid :: core.keep_alive_valid
 deadline_expired :: core.deadline_expired
-wait_ready :: core.wait_ready
 parse_request :: core.parse_request
 read_json :: core.read_json
 header_value :: core.header_value
@@ -214,38 +188,19 @@ match_route :: core.match_route
 path_value :: core.path_value
 status_text :: core.status_text
 
-Request_Context :: core.Request_Context
-Request_Status :: core.Request_Status
-retain_request_context :: core.retain_request_context
-release_request_context :: core.release_request_context
-request_deadline :: core.request_deadline
-request_context_status :: core.request_context_status
-request_cancelled :: core.request_cancelled
-discard_response :: core.discard_response
 
-Response_Stream :: core.Response_Stream
 Stream_IO :: core.Stream_IO
 Stream_Step :: core.Stream_Step
 stream_submit :: core.stream_submit
 stream_wait :: core.stream_wait
 
-Deferred_Response :: core.Deferred_Response
 Deferred_IO :: core.Deferred_IO
 Deferred_Step :: core.Deferred_Step
 
 Resource_Config :: core.Resource_Config
-server_resources :: core.server_resources
-retain_server_resources :: core.retain_server_resources
-request_resources :: core.request_resources
 
-Stream_Backing :: core.Stream_Backing
 
-stream_submit_backing :: core.stream_submit_backing
-DEFAULT_OPERATION_RESOURCES :: core.DEFAULT_OPERATION_RESOURCES
-DEFAULT_CONNECTION_RESOURCES :: core.DEFAULT_CONNECTION_RESOURCES
-DEFAULT_SERVER_RESOURCES :: core.DEFAULT_SERVER_RESOURCES
 
-request_connection_resources :: core.request_connection_resources
 
 Http2_Config :: core.Http2_Config
 Http3_Config :: core.Http3_Config
@@ -420,8 +375,6 @@ environment_parse :: proc(source: string, allocator: mem.Allocator) -> (map[stri
 Handler :: #type proc(conn: ^Connection, request: ^Request) -> Response
 
 TLS_Config :: core.TLS_Config
-TLS_Event :: core.TLS_Event
-TLS_Event_Kind :: core.TLS_Event_Kind
 
 Server :: struct {
 	tls:                                  ^TLS_Config,
@@ -504,21 +457,13 @@ legacy_dispatch :: proc(data: rawptr, input: ^application.Dispatch_Context) -> c
 }
 
 Asset_Mount :: assets.Asset_Mount
-Asset_File :: assets.Asset_File
-Asset_Cache :: assets.Asset_Cache
 Asset_Limits :: assets.Asset_Limits
-Asset_Error :: assets.Asset_Error
-Asset_Error_Kind :: assets.Asset_Error_Kind
-DEFAULT_ASSET_LIMITS :: assets.DEFAULT_ASSET_LIMITS
-prepare_assets_bounded :: assets.prepare_assets_bounded
-destroy_assets :: assets.destroy_assets
 prepare_assets :: assets.prepare_assets
 serve_assets :: assets.serve_assets
 serve_file :: assets.serve_file
 File_Stream_Config :: assets.File_Stream_Config
 serve_file_stream :: assets.serve_file_stream
 Module_Mount :: modules.Module_Mount
-Module_Cache :: modules.Module_Cache
 serve_modules :: modules.serve_modules
 prepare_module_mounts :: modules.prepare_module_mounts
 serve_prepared_modules :: modules.serve_prepared_modules
@@ -526,31 +471,18 @@ JSX_RUNTIME_URL :: modules.JSX_RUNTIME_URL
 JSX_RUNTIME :: modules.JSX_RUNTIME
 PAGE_ENTRY_URL :: modules.PAGE_ENTRY_URL
 PAGE_ENTRY :: modules.PAGE_ENTRY
-jsx_runtime_response :: modules.jsx_runtime_response
-page_entry_response :: modules.page_entry_response
 Page_Mount :: pages.Page_Mount
-Page_Cache :: pages.Page_Cache
 prepare_pages :: pages.prepare_pages
 serve_prepared_pages :: pages.serve_prepared_pages
-JSX_Error :: jsx.JSX_Error
 transform_jsx :: jsx.transform_jsx
 Development :: dev.Development
 develop :: dev.develop
 Reload_State :: dev.Reload_State
-RELOAD_INTERVAL :: dev.RELOAD_INTERVAL
 RELOAD_CLIENT :: dev.RELOAD_CLIENT
 RELOAD_CLIENT_TAG :: dev.RELOAD_CLIENT_TAG
-reload_client_response :: dev.reload_client_response
 reload_html_response :: dev.reload_html_response
 inject_reload_client :: dev.inject_reload_client
-web_signature :: dev.web_signature
-watch_web :: dev.watch_web
 Opcode :: dev.Opcode
-REGULAR_CLOSE :: dev.REGULAR_CLOSE
-PROTOCOL_ERROR :: dev.PROTOCOL_ERROR
-UNSUPPORTED_DATA :: dev.UNSUPPORTED_DATA
-INVALID_PAYLOAD_DATA :: dev.INVALID_PAYLOAD_DATA
-valid_close_code :: dev.valid_close_code
 S3_Config :: s3.S3_Config
 AWS_Credentials :: s3.AWS_Credentials
 S3_Result :: s3.S3_Result
@@ -562,8 +494,6 @@ s3_put_file :: s3.s3_put_file
 s3_delete :: s3.s3_delete
 s3_download_url :: s3.s3_download_url
 
-TLS_Client_Auth_Config :: tls.Client_Auth_Config
-TLS_Client_Auth_Mode :: tls.Client_Auth_Mode
 TLS_Peer_Identity :: tls.Peer_Identity
 
 // The facade borrows the normal authenticated connection during its handler.
@@ -576,5 +506,3 @@ tls_peer_identity :: proc(connection: ^Connection) -> TLS_Peer_Identity {
 	return core.tls_peer_identity(connection._transport)
 }
 
-TLS_Server_Ticket_Config :: tls.Server_Ticket_Config
-TLS_Server_Ticket_Keys :: tls.Server_Ticket_Keys

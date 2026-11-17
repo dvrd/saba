@@ -90,7 +90,7 @@ new_session :: proc(
 	if validation.kind != .None {
 		return nil, validation
 	}
-	if !budget.same_scope(scope, scope) {
+	if !scope_managed(scope) {
 		return nil, {kind = .Invalid_Context}
 	}
 	binding, binding_error := charged.create(scope, {backing = backing})
@@ -1205,4 +1205,10 @@ write_step :: proc(session: ^Session, io: ^IO) -> Step {
 	session.frame_used, session.frame_sent, session.frame_final = n, 0, final
 
 	return .Progress
+}
+
+// A scope is managed when it names a live budget node. Replace with
+// budget.managed once core:sync/budget exports it.
+scope_managed :: proc(scope: budget.Scope) -> bool {
+	return budget.same_scope(scope, scope)
 }

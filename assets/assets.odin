@@ -515,7 +515,7 @@ file_storage_allocator :: proc(
 	charged.Binding,
 	bool,
 ) {
-	managed := budget.same_scope(request.resources, request.resources)
+	managed := scope_managed(request.resources)
 	if configured.procedure == nil {
 		allocator := request.backing_allocator
 		if allocator.procedure == nil {
@@ -928,3 +928,9 @@ Response :: core.Response
 Header :: core.Header
 make_response :: core.make_response
 not_found :: core.not_found
+
+// A scope is managed when it names a live budget node. Replace with
+// budget.managed once core:sync/budget exports it.
+scope_managed :: proc(scope: budget.Scope) -> bool {
+	return budget.same_scope(scope, scope)
+}

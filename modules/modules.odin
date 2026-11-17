@@ -286,7 +286,11 @@ compile_module_directory :: proc(cache: ^Module_Cache, allocator: mem.Allocator)
 			return false
 		}
 
-		cache.files[key] = assets.prepare_representation(transmute([]u8)output, "text/javascript; charset=utf-8")
+		cache.files[key], _ = assets.prepare_encoded_representation(
+			transmute([]u8)output,
+			"text/javascript; charset=utf-8",
+			allocator,
+		)
 	}
 
 	if path, error := os.walker_error(&walker); error != nil {

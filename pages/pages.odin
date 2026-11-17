@@ -144,7 +144,11 @@ prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allo
 
 	for route, module_url in cache.modules {
 		html := page_html(cache.shell, module_url, allocator)
-		cache.routes[route] = assets.prepare_representation(transmute([]u8)html, "text/html; charset=utf-8")
+		cache.routes[route], _ = assets.prepare_encoded_representation(
+			transmute([]u8)html,
+			"text/html; charset=utf-8",
+			allocator,
+		)
 	}
 
 	// Production serves only the prepared bytes; the table lives in the caller's arena.

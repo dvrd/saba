@@ -126,13 +126,28 @@ representation_response :: proc(
 	return prepared_representation_response(request, &prepared)
 }
 
-// Metadata is inline and allocation-free. Body and content_type remain borrowed and
-// must stay immutable through every response send. Prepare once after loading a
-// production representation; development must use representation_response(..., true).
+// One precompressed body and the validator of those exact bytes.
+Encoded_Representation :: struct {
+	body:    []u8,
+	tag:     [72]u8,
+	tag_len: int,
+}
+
+// Metadata is inline. Body, content_type and any encoded bodies remain borrowed
+// and must stay immutable through every response send. Prepare once after loading
+// a production representation; development must use representation_response(..., true).
+// prepare_representation is allocation-free and identity-only;
+// prepare_encoded_representation also stores gzip and Brotli variants (each kept only
+// when smaller than the original), chosen per request by Accept-Encoding with
+// `Vary: Accept-Encoding`. Each variant has its own strong tag: "<sha>-gzip", "<sha>-br".
 Prepared_Representation :: struct {
 	body:         []u8,
 	content_type: string,
 	tag:          [66]u8,
+	gzip, brotli: Encoded_Representation,
+	// Set by prepare_encoded_representation: the variants are final, so the
+	// post-handler content coding must not run again for this response.
+	prepared:     bool,
 }
 
 prepare_representation :: proc(body: []u8, content_type: string) -> Prepared_Representation {
@@ -158,23 +173,146 @@ prepare_representation :: proc(body: []u8, content_type: string) -> Prepared_Rep
 	return prepared
 }
 
+// Compresses once, at prepare time: Brotli at its best level and gzip, each only when
+// smaller than the original and while `budget` bytes remain. A variant that cannot
+// be allocated or is not smaller is simply absent. Returns the bytes retained.
+prepare_encoded_representation :: proc(
+	body: []u8,
+	content_type: string,
+	allocator: mem.Allocator,
+	budget := max(int),
+) -> (
+	prepared: Prepared_Representation,
+	retained: int,
+) {
+	prepared = prepare_representation(body, content_type)
+	prepared.prepared = true
+
+	if len(body) < core.GZIP_MIN_BYTES || len(body) > core.GZIP_MAX_INPUT || !core.compressible_type(content_type) {
+		return
+	}
+
+	remaining := budget
+
+	if smaller := core.encode_smaller(.Brotli, body, core.BROTLI_PREPARED_LEVEL, allocator); smaller != nil {
+		if len(smaller) <= remaining {
+			prepared.brotli = encoded_representation(&prepared, smaller, "-br\"")
+			remaining -= len(smaller)
+			retained += len(smaller)
+		} else {
+			delete(smaller, allocator)
+		}
+	}
+
+	if smaller := core.encode_smaller(.Gzip, body, core.BROTLI_PREPARED_LEVEL, allocator); smaller != nil {
+		if len(smaller) <= remaining {
+			prepared.gzip = encoded_representation(&prepared, smaller, "-gzip\"")
+			retained += len(smaller)
+		} else {
+			delete(smaller, allocator)
+		}
+	}
+
+	return
+}
+
+encoded_representation :: proc(base: ^Prepared_Representation, body: []u8, suffix: string) -> Encoded_Representation {
+	encoded := Encoded_Representation {
+		body = body,
+	}
+
+	// The identity tag without its closing quote, then the coding and the quote.
+	encoded.tag_len = copy(encoded.tag[:], base.tag[:65])
+	encoded.tag_len += copy(encoded.tag[encoded.tag_len:], suffix)
+
+	return encoded
+}
+
+// Frees the encoded variants; the identity body belongs to the caller.
+destroy_encoded_representation :: proc(prepared: Prepared_Representation, allocator: mem.Allocator) {
+	delete(prepared.gzip.body, allocator)
+	delete(prepared.brotli.body, allocator)
+}
+
+// The variant Accept-Encoding selects among those that exist; identity otherwise.
+representation_coding :: proc(request: ^Request, representation: ^Prepared_Representation) -> core.Content_Coding {
+	available: bit_set[core.Content_Coding]
+
+	if representation.brotli.body != nil {
+		available += {.Brotli}
+	}
+
+	if representation.gzip.body != nil {
+		available += {.Gzip}
+	}
+
+	if available == {} {
+		return .Identity
+	}
+
+	return core.negotiate_coding(core.parse_accept_encoding(request.headers), available)
+}
+
 prepared_representation_response :: proc(request: ^Request, representation: ^Prepared_Representation) -> Response {
 	assert(representation != nil)
-	tag, allocation_error := strings.clone(string(representation.tag[:]), request.allocator)
+	coding := representation_coding(request, representation)
+	body := representation.body
+	tag_bytes := representation.tag[:]
+
+	switch coding {
+	case .Brotli:
+		body = representation.brotli.body
+		tag_bytes = representation.brotli.tag[:representation.brotli.tag_len]
+	case .Gzip:
+		body = representation.gzip.body
+		tag_bytes = representation.gzip.tag[:representation.gzip.tag_len]
+	case .Identity:
+	}
+
+	tag, allocation_error := strings.clone(string(tag_bytes), request.allocator)
 	if allocation_error != nil {
 		return Response{status = .Internal_Server_Error}
 	}
 
+	// Another Accept-Encoding selects another representation of the same URL.
+	varies := representation.gzip.body != nil || representation.brotli.body != nil
+	fields: [5]Header
+	count := 0
+	response: Response
+
 	if (request.method == "GET" || request.method == "HEAD") && not_modified(request, tag) {
-		return make_response(request, .Not_Modified, {{"Cache-Control", "no-cache"}, {"ETag", tag}})
+		fields[0] = {"Cache-Control", "no-cache"}
+		fields[1] = {"ETag", tag}
+		count = 2
+
+		if varies {
+			fields[count] = {"Vary", "Accept-Encoding"}
+			count += 1
+		}
+
+		response = make_response(request, .Not_Modified, fields[:count])
+	} else {
+		fields[0] = {"Content-Type", representation.content_type}
+		fields[1] = {"Cache-Control", "no-cache"}
+		fields[2] = {"ETag", tag}
+		count = 3
+
+		if coding != .Identity {
+			fields[count] = {"Content-Encoding", core.content_coding_token(coding)}
+			count += 1
+		}
+
+		if varies {
+			fields[count] = {"Vary", "Accept-Encoding"}
+			count += 1
+		}
+
+		response = make_response(request, .OK, fields[:count], body)
 	}
 
-	return make_response(
-		request,
-		.OK,
-		{{"Content-Type", representation.content_type}, {"Cache-Control", "no-cache"}, {"ETag", tag}},
-		representation.body,
-	)
+	response.uncoded = representation.prepared
+
+	return response
 }
 
 File_Stream_Config :: struct {
@@ -688,6 +826,7 @@ destroy_assets :: proc(caches: ^[]Asset_Cache, allocator: mem.Allocator) {
 		for key, value in cache.files {
 			delete(key, allocator)
 			delete(value.body, allocator)
+			destroy_encoded_representation(value, allocator)
 		}
 
 		delete(cache.files)
@@ -905,16 +1044,23 @@ preload_directory :: proc(
 			return {kind = .Allocation_Failed, allocation = me}
 		}
 
-		inserted, me := map_insert(&cache.files, key, prepare_representation(body, asset_content_type(relative)))
+		prepared, extra := prepare_encoded_representation(
+			body,
+			asset_content_type(relative),
+			allocator,
+			remaining - len(body),
+		)
+		inserted, me := map_insert(&cache.files, key, prepared)
 
 		if me != nil || inserted == nil {
+			destroy_encoded_representation(prepared, allocator)
 			delete(key, allocator)
 			delete(body, allocator)
 			return {kind = .Allocation_Failed, allocation = me}
 		}
 
 		counts.files += 1
-		counts.bytes += len(body)
+		counts.bytes += len(body) + extra
 	}
 	_, ie := os.read_directory_iterator_error(&iterator)
 	if ie != nil {

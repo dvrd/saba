@@ -2,16 +2,84 @@ package saba_core
 
 import exchange "../../http/exchange"
 import rt "base:runtime"
+import "core:compress/brotli"
 import gzip "core:compress/gzip"
 import "core:mem"
 import owned "core:mem/owned"
 import "core:strings"
 
-// Identity is always acceptable. Gzip is the only other coding. x-gzip is an alias.
+// Identity is always acceptable. Gzip (x-gzip is an alias) and Brotli (br) are the
+// other codings; the higher q-value wins and Brotli wins a tie.
 // Absent or malformed Accept-Encoding stays identity and does not add Vary.
+// The size limits below apply to every coding.
 GZIP_MIN_BYTES :: 1024
 GZIP_MAX_INPUT :: 1 << 20
 GZIP_MAX_OUTPUT :: (1 << 20) + (1 << 18)
+// Dynamic responses trade ratio for speed; prepared assets use brotli.Level(11).
+BROTLI_DYNAMIC_LEVEL :: brotli.Level(4)
+BROTLI_PREPARED_LEVEL :: brotli.Level(11)
+
+Content_Coding :: enum {
+	Identity,
+	Gzip,
+	Brotli,
+}
+
+content_coding_token :: proc(coding: Content_Coding) -> string {
+	switch coding {
+	case .Gzip:
+		return "gzip"
+	case .Brotli:
+		return "br"
+	case .Identity:
+	}
+
+	return "identity"
+}
+
+// Encodes `src` once, smaller than the input or not at all; nil otherwise. The
+// result lives in `allocator`; scratch space is heap-owned and released.
+encode_smaller :: proc(coding: Content_Coding, src: []u8, level: brotli.Level, allocator: mem.Allocator) -> []u8 {
+	if allocator.procedure == nil || len(src) == 0 || len(src) > GZIP_MAX_INPUT {
+		return nil
+	}
+
+	scratch := rt.heap_allocator()
+	encoded: []u8
+	error: bool
+
+	switch coding {
+	case .Brotli:
+		result, brotli_error := brotli.encode(src, level, scratch)
+		encoded, error = result, brotli_error != nil
+	case .Gzip:
+		result, gzip_error := gzip.encode(src, .Best, scratch)
+		encoded, error = result, gzip_error != nil
+	case .Identity:
+		return nil
+	}
+
+	defer delete(encoded, scratch)
+
+	if error || len(encoded) == 0 || len(encoded) >= len(src) || len(encoded) > GZIP_MAX_OUTPUT {
+		return nil
+	}
+
+	exact, exact_error := make([]u8, len(encoded), allocator)
+
+	if exact_error != nil {
+		return nil
+	}
+
+	copy(exact, encoded)
+
+	return exact
+}
+
+brotli_compress :: proc(src: []u8, allocator: mem.Allocator) -> []u8 {
+	return encode_smaller(.Brotli, src, BROTLI_DYNAMIC_LEVEL, allocator)
+}
+
 gzip_compress :: proc(src: []u8, allocator: mem.Allocator) -> []u8 {
 	// Scratch is heap-owned so a request arena, which cannot free individuals, is
 	// only charged the exact encoded body.
@@ -67,8 +135,8 @@ skip_list_separators :: proc(value: string, from: int) -> int {
 }
 
 Coding_Choice :: struct {
-	gzip, identity, star: int,
-	present, valid:       bool,
+	gzip, brotli, identity, star: int,
+	present, valid:               bool,
 }
 
 coding_token :: proc(value: u8) -> bool {
@@ -147,6 +215,13 @@ accept_coding :: proc(choice: ^Coding_Choice, name: string, q: int) {
 		return
 	}
 
+	if strings.equal_fold(name, "br") {
+		if choice.brotli < 0 {
+			choice.brotli = q
+		}
+		return
+	}
+
 	if strings.equal_fold(name, "identity") && choice.identity < 0 {
 		choice.identity = q
 	}
@@ -213,6 +288,7 @@ parse_coding_list :: proc(value: string, choice: ^Coding_Choice) -> bool {
 parse_accept_encoding :: proc(headers: []Header) -> Coding_Choice {
 	choice := Coding_Choice {
 		gzip     = -1,
+		brotli   = -1,
 		identity = -1,
 		star     = -1,
 		valid    = true,
@@ -232,8 +308,10 @@ parse_accept_encoding :: proc(headers: []Header) -> Coding_Choice {
 	return choice
 }
 
-gzip_preferred :: proc(choice: Coding_Choice) -> bool {
-	quality := choice.gzip
+// Effective q-value of one coding: explicit, else the wildcard, else refused. An
+// identity entry ranked above the coding makes identity the better answer.
+coding_quality :: proc(choice: Coding_Choice, explicit: int) -> int {
+	quality := explicit
 
 	if quality < 0 {
 		if choice.star >= 0 {
@@ -244,10 +322,42 @@ gzip_preferred :: proc(choice: Coding_Choice) -> bool {
 	}
 
 	if quality <= 0 {
-		return false
+		return 0
 	}
 
-	return choice.identity < 0 || choice.identity <= quality
+	if choice.identity >= 0 && choice.identity > quality {
+		return 0
+	}
+
+	return quality
+}
+
+// The coding to use among `available`: the highest acceptable q-value, Brotli on a
+// tie, identity when nothing is acceptable or the header is absent or malformed.
+negotiate_coding :: proc(choice: Coding_Choice, available := bit_set[Content_Coding]{.Gzip, .Brotli}) -> Content_Coding {
+	if !choice.present || !choice.valid {
+		return .Identity
+	}
+
+	brotli_quality, gzip_quality := 0, 0
+
+	if .Brotli in available {
+		brotli_quality = coding_quality(choice, choice.brotli)
+	}
+
+	if .Gzip in available {
+		gzip_quality = coding_quality(choice, choice.gzip)
+	}
+
+	if brotli_quality > 0 && brotli_quality >= gzip_quality {
+		return .Brotli
+	}
+
+	if gzip_quality > 0 {
+		return .Gzip
+	}
+
+	return .Identity
 }
 
 cache_forbids_coding :: proc(value: string) -> bool {
@@ -399,18 +509,22 @@ append_response_headers :: proc(request: ^Request, response: ^Response, extra: [
 	return true
 }
 
-Gzip_Stream :: struct {
+Coding_Stream :: struct {
 	allocator:                      mem.Allocator,
 	inner:                          Response_Stream,
 	side:                           exchange.Exchange,
-	encoder:                        gzip.Stream_Encoder,
+	coding:                         Content_Coding,
+	encoder:                        struct #raw_union {
+		gzip:   gzip.Stream_Encoder,
+		brotli: brotli.Stream_Encoder,
+	},
 	held:                           []u8,
 	wire:                           []u8,
 	held_off, wire_len:             int,
 	have, inner_done, busy, failed: bool,
 }
 
-gzip_stream_free :: proc(state: ^Gzip_Stream) {
+coding_stream_free :: proc(state: ^Coding_Stream) {
 	if state == nil {
 		return
 	}
@@ -419,41 +533,97 @@ gzip_stream_free :: proc(state: ^Gzip_Stream) {
 	free(state, state.allocator)
 }
 
-gzip_drop :: proc(data: rawptr) {
-	state := cast(^Gzip_Stream)data
+coding_drop :: proc(data: rawptr) {
+	state := cast(^Coding_Stream)data
 	if state == nil {
 		return
 	}
 	inner := state.inner
 	state.inner = {}
-	gzip_stream_free(state)
+	coding_stream_free(state)
 	if inner.drop != nil {
 		inner.drop(inner.data)
 	}
 }
 
-gzip_fail :: proc(state: ^Gzip_Stream) -> Stream_Step {
+// Gzip and Brotli stream encoders share one shape: write a prefix, pull output,
+// finish. These adapters keep the polling loop independent of the coding.
+coding_encoder_pull :: proc(state: ^Coding_Stream, dst: []u8) -> int {
+	if state.coding == .Brotli {
+		return brotli.stream_pull(&state.encoder.brotli, dst)
+	}
+
+	return gzip.stream_pull(&state.encoder.gzip, dst)
+}
+
+coding_encoder_write :: proc(state: ^Coding_Stream, src: []u8) -> int {
+	if state.coding == .Brotli {
+		return brotli.stream_write(&state.encoder.brotli, src)
+	}
+
+	return gzip.stream_write(&state.encoder.gzip, src)
+}
+
+coding_encoder_finish :: proc(state: ^Coding_Stream) {
+	if state.coding == .Brotli {
+		brotli.stream_finish(&state.encoder.brotli)
+	} else {
+		gzip.stream_finish(&state.encoder.gzip)
+	}
+}
+
+coding_encoder_finished :: proc(state: ^Coding_Stream) -> bool {
+	if state.coding == .Brotli {
+		return state.encoder.brotli.finished
+	}
+
+	return state.encoder.gzip.finished
+}
+
+coding_encoder_overflow :: proc(state: ^Coding_Stream) -> bool {
+	if state.coding == .Brotli {
+		return state.encoder.brotli.overflow
+	}
+
+	return state.encoder.gzip.overflow
+}
+
+// A write that took nothing is a stall only when pulling cannot help: the output
+// buffer has room (gzip) or holds nothing to pull (Brotli), or the stream overflowed.
+coding_encoder_stalled :: proc(state: ^Coding_Stream) -> bool {
+	if coding_encoder_overflow(state) {
+		return true
+	}
+
+	if state.coding == .Brotli {
+		return state.encoder.brotli.out_len == state.encoder.brotli.out_off
+	}
+
+	return len(state.encoder.gzip.out) - state.encoder.gzip.out_len >= 16
+}
+
+coding_fail :: proc(state: ^Coding_Stream) -> Stream_Step {
 	state.failed = true
 
 	return .Failed
 }
 
-gzip_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
-	state := cast(^Gzip_Stream)data
+coding_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
+	state := cast(^Coding_Stream)data
 	if state == nil || io == nil || state.failed || state.busy {
 		return .Failed
 	}
 
 	for _ in 0 ..< 8 {
 		if state.wire_len == 0 {
-			state.wire_len = gzip.stream_pull(&state.encoder, state.wire)
+			state.wire_len = coding_encoder_pull(state, state.wire)
 		}
 
 		if state.wire_len > 0 {
 			chunk := owned.Chunk {
 				data      = state.wire[:state.wire_len],
 				storage   = state.wire,
-				release   = gzip_wire_release,
+				release   = coding_wire_release,
 				user_data = state,
 			}
 
@@ -462,22 +632,22 @@ gzip_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 
 			if stream_submit(io, &chunk) != .Accepted {
 				state.busy = false
-				return gzip_fail(state)
+				return coding_fail(state)
 			}
 
 			return .Chunk
 		}
 
-		if state.encoder.finished {
+		if coding_encoder_finished(state) {
 			return .Done
 		}
 
 		if state.have && state.held_off < len(state.held) {
-			count := gzip.stream_write(&state.encoder, state.held[state.held_off:])
+			count := coding_encoder_write(state, state.held[state.held_off:])
 
 			if count <= 0 {
-				if state.encoder.overflow || len(state.encoder.out) - state.encoder.out_len >= 16 {
-					return gzip_fail(state)
+				if coding_encoder_stalled(state) {
+					return coding_fail(state)
 				}
 
 				continue
@@ -489,16 +659,16 @@ gzip_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 
 		if state.have {
 			if !exchange.release_body(&state.side) {
-				return gzip_fail(state)
+				return coding_fail(state)
 			}
 			state.have, state.held, state.held_off = false, nil, 0
 		}
 
 		if state.inner_done {
-			gzip.stream_finish(&state.encoder)
+			coding_encoder_finish(state)
 
-			if state.encoder.overflow {
-				return gzip_fail(state)
+			if coding_encoder_overflow(state) {
+				return coding_fail(state)
 			}
 
 			continue
@@ -516,31 +686,31 @@ gzip_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 		switch step {
 		case .Waiting:
 			if !io._waiting || capture._submitted {
-				return gzip_fail(state)
+				return coding_fail(state)
 			}
 			return .Waiting
 		case .Yield:
 			if io._waiting || capture._submitted {
-				return gzip_fail(state)
+				return coding_fail(state)
 			}
 			return .Yield
 		case .Failed:
-			return gzip_fail(state)
+			return coding_fail(state)
 		case .Done:
 			if capture._submitted || capture._waiting {
-				return gzip_fail(state)
+				return coding_fail(state)
 			}
 			state.inner_done = true
 			if exchange.finish(&state.side).kind != .None {
-				return gzip_fail(state)
+				return coding_fail(state)
 			}
 		case .Chunk:
 			if !capture._submitted || capture._waiting {
-				return gzip_fail(state)
+				return coding_fail(state)
 			}
 			payload, ok := exchange.body(&state.side)
 			if !ok || len(payload) == 0 {
-				return gzip_fail(state)
+				return coding_fail(state)
 			}
 			state.held, state.held_off, state.have = payload, 0, true
 		}
@@ -550,13 +720,13 @@ gzip_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 	return .Yield
 }
 
-gzip_wire_release :: proc(_: []u8, data: rawptr) {
+coding_wire_release :: proc(_: []u8, data: rawptr) {
 	if data != nil {
-		(cast(^Gzip_Stream)data).busy = false
+		(cast(^Coding_Stream)data).busy = false
 	}
 }
 
-gzip_stream_attach :: proc(request: ^Request, response: ^Response) -> bool {
+coding_stream_attach :: proc(request: ^Request, response: ^Response, coding: Content_Coding) -> bool {
 	allocator := request.backing_allocator
 	if allocator.procedure == nil {
 		allocator = rt.heap_allocator()
@@ -569,13 +739,20 @@ gzip_stream_attach :: proc(request: ^Request, response: ^Response) -> bool {
 		return false
 	}
 	plain := response.stream.content_length
-	state, alloc_error := new(Gzip_Stream, allocator)
+	state, alloc_error := new(Coding_Stream, allocator)
 	if alloc_error != nil || state == nil {
 		return false
 	}
 	state.allocator = allocator
 	state.inner = response.stream
-	gzip.stream_reset(&state.encoder, GZIP_MAX_OUTPUT)
+	state.coding = coding
+
+	if coding == .Brotli {
+		brotli.stream_reset(&state.encoder.brotli, GZIP_MAX_OUTPUT)
+	} else {
+		gzip.stream_reset(&state.encoder.gzip, GZIP_MAX_OUTPUT)
+	}
+
 	wire, wire_error := make([]u8, chunk_cap, allocator)
 
 	if wire_error != nil {
@@ -586,19 +763,19 @@ gzip_stream_attach :: proc(request: ^Request, response: ^Response) -> bool {
 	state.wire = wire
 	if exchange.init(&state.side, .GET, {chunk_capacity = 1, max_retained_bytes = chunk_cap, max_body_bytes = plain}, allocator).kind !=
 	   .None {
-		gzip_stream_free(state)
+		coding_stream_free(state)
 		return false
 	}
 
 	if exchange.respond(&state.side, {status = 200, content_length = plain}).kind != .None {
-		gzip_stream_free(state)
+		coding_stream_free(state)
 		return false
 	}
 
 	response.stream = {
 		data            = state,
-		next            = gzip_next,
-		drop            = gzip_drop,
+		next            = coding_next,
+		drop            = coding_drop,
 		content_length  = -1,
 		max_chunk_bytes = chunk_cap,
 		max_body_bytes  = i64(GZIP_MAX_OUTPUT),
@@ -608,18 +785,38 @@ gzip_stream_attach :: proc(request: ^Request, response: ^Response) -> bool {
 	return true
 }
 
-gzip_stream_detach :: proc(response: ^Response) {
-	state := cast(^Gzip_Stream)response.stream.data
+coding_stream_detach :: proc(response: ^Response) {
+	state := cast(^Coding_Stream)response.stream.data
 	response.stream = state.inner
 	state.inner = {}
-	gzip_stream_free(state)
+	coding_stream_free(state)
 }
 
-// Applies after the handler returns. Buffered bodies keep identity unless gzip is
-// strictly smaller. Eligible streams become one gzip member with chunked framing.
-// HEAD advertises that framing and does not poll or allocate an encoder.
+// A strong validator names exact bytes, and the coded body is a different
+// representation. Weakening keeps If-None-Match (weak comparison) working across
+// codings without claiming byte equality. Headers must already be request-owned.
+weaken_etag :: proc(request: ^Request, headers: []Header) {
+	for &header in headers {
+		if !strings.equal_fold(header.name, "ETag") || strings.has_prefix(header.value, "W/") {
+			continue
+		}
+
+		weak, error := strings.concatenate({"W/", header.value}, request.allocator)
+
+		if error == nil {
+			header.value = weak
+		}
+
+		return
+	}
+}
+
+// Applies after the handler returns. Buffered bodies keep identity unless the
+// coded body is strictly smaller. Eligible streams become one coded body with
+// chunked framing. HEAD advertises that framing and does not poll or allocate an
+// encoder. Responses marked `uncoded` (prepared representations) are final.
 content_coding_prepare :: proc(request: ^Request, response: ^Response) {
-	if request == nil || response == nil || request.allocator.procedure == nil {
+	if request == nil || response == nil || request.allocator.procedure == nil || response.uncoded {
 		return
 	}
 	streaming := stream_present(response.stream)
@@ -642,22 +839,27 @@ content_coding_prepare :: proc(request: ^Request, response: ^Response) {
 	if !choice.present || !choice.valid {
 		return
 	}
-	want := gzip_preferred(choice)
+	coding := negotiate_coding(choice)
 	encoded: []u8
 	attached := false
 	head := streaming && strings.equal_fold(request.method, "HEAD")
 
-	if want && streaming && !head {
-		attached = gzip_stream_attach(request, response)
+	if coding != .Identity && streaming && !head {
+		attached = coding_stream_attach(request, response, coding)
 		if !attached {
-			want = false
+			coding = .Identity
 		}
 	}
 
-	if want && !streaming {
-		encoded = gzip_compress(response.body, request.allocator)
+	if coding != .Identity && !streaming {
+		if coding == .Brotli {
+			encoded = brotli_compress(response.body, request.allocator)
+		} else {
+			encoded = gzip_compress(response.body, request.allocator)
+		}
+
 		if encoded == nil {
-			want = false
+			coding = .Identity
 		}
 	}
 
@@ -669,8 +871,8 @@ content_coding_prepare :: proc(request: ^Request, response: ^Response) {
 		count += 1
 	}
 
-	if want {
-		extra[count] = {"Content-Encoding", "gzip"}
+	if coding != .Identity {
+		extra[count] = {"Content-Encoding", content_coding_token(coding)}
 		count += 1
 	}
 
@@ -684,7 +886,7 @@ content_coding_prepare :: proc(request: ^Request, response: ^Response) {
 	if !append_response_headers(request, response, extra[:count]) {
 		delete(encoded, request.allocator)
 		if attached {
-			gzip_stream_detach(response)
+			coding_stream_detach(response)
 		}
 		return
 	}
@@ -692,7 +894,10 @@ content_coding_prepare :: proc(request: ^Request, response: ^Response) {
 	if encoded != nil {
 		response.body = encoded
 	}
-	if want && head {
+	if coding != .Identity {
+		weaken_etag(request, response.headers)
+	}
+	if coding != .Identity && head {
 		response.stream.content_length = -1
 	}
 }

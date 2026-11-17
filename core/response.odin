@@ -27,6 +27,9 @@ Response :: struct {
 	upgrade:          Upgrade,
 	stream:           Response_Stream,
 	deferred:         Deferred_Response,
+	// The body is already the final representation (a prepared, possibly
+	// precompressed one): content coding is not applied after the handler.
+	uncoded:          bool,
 }
 
 // Copies the header list out of the caller's stack into the request arena.

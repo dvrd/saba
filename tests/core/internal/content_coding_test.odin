@@ -1,11 +1,16 @@
 package saba_core
 
+import "core:compress/brotli"
 import gzip "core:compress/gzip"
 import "core:bytes"
+import "core:fmt"
 import "core:mem"
 import owned "core:mem/owned"
+import "core:net"
 import "core:strings"
 import "core:testing"
+import "core:thread"
+import "core:time"
 import async "shared:async"
 
 coding_repeat :: proc(count: int, allocator: mem.Allocator) -> []u8 {
@@ -152,8 +157,8 @@ content_coding_negotiates_encodings_thresholds_and_sensitive_bodies :: proc(t: ^
 		{"star", "*", 2048, text[:], true, true},
 		{"explicit", "*;q=0, gzip;q=1", 2048, text[:], true, true},
 		{"tie", "gzip;q=0.5, identity;q=0.5", 2048, text[:], true, true},
-		{"br", "br, deflate", 2048, text[:], false, true},
-		{"refused", "gzip;q=0, *", 2048, text[:], false, true},
+		{"br-only", "deflate, compress", 2048, text[:], false, true},
+		{"refused", "gzip;q=0, *", 2048, text[:], true, true},
 		{"identity-higher", "identity;q=1, gzip;q=0.1", 2048, text[:], false, true},
 		{"identity-zero", "identity;q=0", 2048, text[:], false, true},
 		{"empty", "", 2048, text[:], false, true},
@@ -182,14 +187,20 @@ content_coding_negotiates_encodings_thresholds_and_sensitive_bodies :: proc(t: ^
 		content_coding_prepare(&request, &response)
 		coding, encoded := coding_field(response.headers, "Content-Encoding")
 		vary, varied := coding_field(response.headers, "Vary")
-		testing.expect_value(t, encoded && strings.equal_fold(coding, "gzip"), item.gzip)
+		// A wildcard accepts Brotli too: it wins the tie, and still applies once gzip is refused.
+		expected := "br" if item.name == "star" || item.name == "refused" else "gzip"
+		testing.expect_value(t, encoded && strings.equal_fold(coding, expected), item.gzip)
 		testing.expect_value(t, varied, item.vary)
 		if item.vary {
 			testing.expect(t, strings.equal_fold(vary, "Accept-Encoding"))
 		}
 
 		if item.gzip {
-			coding_decode(t, response.body, plain[:item.size])
+			if expected == "br" {
+				coding_decode_brotli(t, response.body, plain[:item.size])
+			} else {
+				coding_decode(t, response.body, plain[:item.size])
+			}
 			testing.expect(t, len(response.body) < item.size)
 		} else if item.size > 0 {
 			testing.expect(t, string(response.body) == string(plain[:item.size]))
@@ -462,4 +473,350 @@ content_coding_head_has_no_body_and_stream_keeps_backpressure :: proc(t: ^testin
 	testing.expect(t, strings.contains(fixed_text, "Content-Encoding: gzip\r\n"))
 	testing.expect(t, strings.contains(fixed_text, "Content-Length:"))
 	testing.expect(t, !strings.contains(fixed_text, "Transfer-Encoding:"))
+}
+
+coding_decode_brotli :: proc(t: ^testing.T, encoded, expected: []u8) {
+	buffer: bytes.Buffer
+	defer bytes.buffer_destroy(&buffer)
+	error := brotli.load(encoded, &buffer, expected_output_size = len(expected))
+	testing.expect_value(t, error, nil)
+	testing.expect(t, bytes.buffer_to_string(&buffer) == string(expected))
+}
+
+@(test)
+content_coding_negotiation_table_prefers_brotli_by_q_value :: proc(t: ^testing.T) {
+	both := bit_set[Content_Coding]{.Gzip, .Brotli}
+	cases := []struct {
+		accept:    string,
+		available: bit_set[Content_Coding],
+		expected:  Content_Coding,
+	} {
+		{"br", both, .Brotli},
+		{"gzip", both, .Gzip},
+		{"br, gzip", both, .Brotli},
+		{"gzip, br", both, .Brotli},
+		{"gzip, deflate, br", both, .Brotli},
+		{"BR, GZIP", both, .Brotli},
+		{"x-gzip, br;q=0.4", both, .Gzip},
+		{"br;q=0.5, gzip;q=1", both, .Gzip},
+		{"br;q=1, gzip;q=0.5", both, .Brotli},
+		{"br;q=0.8, gzip;q=0.8", both, .Brotli},
+		{"br;q=0, gzip", both, .Gzip},
+		{"gzip;q=0, br", both, .Brotli},
+		{"br;q=0, gzip;q=0", both, .Identity},
+		{"*", both, .Brotli},
+		{"*;q=0.5, gzip;q=0.9", both, .Gzip},
+		{"*;q=0, gzip", both, .Gzip},
+		{"*;q=0, br;q=0.1, gzip;q=0.1", both, .Brotli},
+		{"identity;q=1, br;q=0.5", both, .Identity},
+		{"identity;q=0.5, br;q=0.5", both, .Brotli},
+		{"identity;q=0", both, .Identity},
+		{"deflate", both, .Identity},
+		{"", both, .Identity},
+		{"br;q=2", both, .Identity},
+		{"br, gzip", {.Gzip}, .Gzip},
+		{"br, gzip", {.Brotli}, .Brotli},
+		{"br", {.Gzip}, .Identity},
+		{"br, gzip", {}, .Identity},
+	}
+
+	for item in cases {
+		headers := []Header{{"Accept-Encoding", item.accept}}
+		testing.expect_value(t, negotiate_coding(parse_accept_encoding(headers), item.available), item.expected)
+	}
+
+	// No header at all stays identity.
+	testing.expect_value(t, negotiate_coding(parse_accept_encoding(nil)), Content_Coding.Identity)
+	// Several header lines combine; the first mention of a coding wins.
+	lines := []Header{{"Accept-Encoding", "gzip"}, {"Accept-Encoding", "br"}}
+	testing.expect_value(t, negotiate_coding(parse_accept_encoding(lines)), Content_Coding.Brotli)
+}
+
+@(test)
+content_coding_brotli_round_trips_and_keeps_representation_metadata :: proc(t: ^testing.T) {
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
+	defer mem.dynamic_arena_destroy(&arena)
+	allocator := mem.dynamic_arena_allocator(&arena)
+	plain := coding_repeat(4096, allocator)
+	headers := []Header{{"Content-Type", "text/html"}, {"ETag", "\"v1\""}, {"Cache-Control", "no-cache"}}
+
+	for item in ([]struct {
+			accept:   string,
+			coding:   string,
+			weak:     bool,
+		} {
+			{"br", "br", true},
+			{"gzip, br", "br", true},
+			{"gzip", "gzip", true},
+			{"gzip;q=1, br;q=0.5", "gzip", true},
+			{"deflate", "", false},
+		}) {
+		request := Request {
+			allocator = allocator,
+			method    = "GET",
+			headers   = {{"Accept-Encoding", item.accept}},
+		}
+
+		response := Response {
+			status  = .OK,
+			headers = headers,
+			body    = plain,
+		}
+
+		content_coding_prepare(&request, &response)
+		coding, encoded := coding_field(response.headers, "Content-Encoding")
+		vary, varied := coding_field(response.headers, "Vary")
+		tag, _ := coding_field(response.headers, "ETag")
+		testing.expect_value(t, encoded, item.coding != "")
+		testing.expect_value(t, coding, item.coding)
+		testing.expect(t, varied && strings.equal_fold(vary, "Accept-Encoding"))
+		testing.expect_value(t, tag, "W/\"v1\"" if item.weak else "\"v1\"")
+
+		switch item.coding {
+		case "br":
+			testing.expect(t, len(response.body) < len(plain))
+			coding_decode_brotli(t, response.body, plain)
+		case "gzip":
+			coding_decode(t, response.body, plain)
+		case:
+			testing.expect(t, string(response.body) == string(plain))
+		}
+	}
+
+	// Weak validators and small or incompressible bodies are left alone.
+	request := Request {
+		allocator = allocator,
+		method    = "GET",
+		headers   = {{"Accept-Encoding", "br"}},
+	}
+
+	weak := Response {
+		status  = .OK,
+		headers = {{"Content-Type", "text/html"}, {"ETag", "W/\"v1\""}},
+		body    = plain,
+	}
+
+	content_coding_prepare(&request, &weak)
+	tag, _ := coding_field(weak.headers, "ETag")
+	testing.expect_value(t, tag, "W/\"v1\"")
+	noise, noise_error := make([]u8, 2048, allocator)
+	testing.expect_value(t, noise_error, nil)
+	state := u32(2463534242)
+
+	for &value in noise {
+		state ~= state << 13
+		state ~= state >> 17
+		state ~= state << 5
+		value = u8(state)
+	}
+
+	random := Response {
+		status  = .OK,
+		headers = {{"Content-Type", "text/plain"}},
+		body    = noise,
+	}
+
+	content_coding_prepare(&request, &random)
+	_, encoded := coding_field(random.headers, "Content-Encoding")
+	testing.expect(t, !encoded && raw_data(random.body) == raw_data(noise))
+}
+
+@(test)
+content_coding_streams_brotli_with_bounded_memory :: proc(t: ^testing.T) {
+	runtime := Server_Runtime {
+		timeouts = resolve_timeouts({}),
+	}
+
+	assert(async.init(&runtime.executor, {workers = 1, task_capacity = 1, io_capacity = 1}).kind == .None)
+	defer async.destroy(&runtime.executor)
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
+	defer mem.dynamic_arena_destroy(&arena)
+	allocator := mem.dynamic_arena_allocator(&arena)
+	plain := coding_repeat(70000, allocator)
+	headers := [2]Header{{"Content-Type", "text/plain"}, {"Cache-Control", "no-cache"}}
+
+	task := Connection_Task {
+		runtime = &runtime,
+		phase = .Dispatch,
+		request = Request{allocator = allocator, method = "GET", headers = {{"Accept-Encoding", "br, gzip"}}},
+	}
+
+	init_connection_arena(&task)
+	defer mem.dynamic_arena_destroy(&task.arena)
+	probe := Coding_Probe {
+		chunk   = 3000,
+		payload = plain,
+	}
+
+	stream := Response {
+		headers = headers[:],
+		stream = {
+			data = &probe,
+			next = coding_probe_next,
+			drop = coding_probe_drop,
+			content_length = i64(len(plain)),
+			max_chunk_bytes = 4096,
+		},
+	}
+
+	testing.expect(t, queue_response(&task, stream))
+	defer drop_response_stream(&task)
+	header, body, ok := coding_drive(&task)
+	testing.expect(t, ok)
+	testing.expect(t, strings.contains(header, "Content-Encoding: br\r\n"))
+	testing.expect(t, strings.contains(header, "Vary: Accept-Encoding\r\n"))
+	testing.expect(t, strings.contains(header, "Transfer-Encoding: chunked\r\n"))
+	testing.expect(t, !strings.contains(header, "Content-Length:"))
+	testing.expect(t, len(body) < len(plain) / 4)
+	coding_decode_brotli(t, body, plain)
+	delete(body)
+	testing.expect_value(t, probe.drops, 1)
+
+	head_task := Connection_Task {
+		runtime = &runtime,
+		phase = .Dispatch,
+		request = Request{allocator = allocator, method = "HEAD", headers = {{"Accept-Encoding", "br"}}},
+	}
+
+	init_connection_arena(&head_task)
+	defer mem.dynamic_arena_destroy(&head_task.arena)
+	head_probe := Coding_Probe {
+		chunk   = 3000,
+		payload = plain,
+	}
+
+	head := stream
+	head.stream.data = &head_probe
+	testing.expect(t, queue_response(&head_task, head))
+	head_text := string(head_task.output[0])
+	testing.expect(t, strings.contains(head_text, "Content-Encoding: br\r\n"))
+	testing.expect(t, !strings.contains(head_text, "Content-Length:"))
+	producing, done := stream_write_complete(&head_task)
+	testing.expect(t, done && !producing)
+	testing.expect_value(t, head_probe.calls, 0)
+}
+
+Loopback_Coding :: struct {
+	config:  Server,
+	control: Server_Control,
+	ok:      bool,
+}
+
+loopback_coding_handler :: proc(data: rawptr, _: ^Connection, request: ^Request) -> Response {
+	text := (cast(^[]u8)data)^
+
+	return make_response(
+		request,
+		.OK,
+		{{"Content-Type", "text/html; charset=utf-8"}, {"ETag", "\"page-1\""}, {"Cache-Control", "no-cache"}},
+		text,
+	)
+}
+
+// Sends one request on a fresh connection and returns the whole response.
+loopback_coding_exchange :: proc(endpoint: net.Endpoint, accept: string) -> []u8 {
+	client, dial_error := net.dial_tcp(endpoint)
+	assert(dial_error == nil)
+	defer net.close(client)
+	_ = net.set_option(client, .Receive_Timeout, 5 * time.Second)
+	request := fmt.tprintf("GET /page HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nAccept-Encoding: %s\r\n\r\n", accept)
+	_, send_error := net.send_tcp(client, transmute([]u8)request)
+	assert(send_error == nil)
+	received: [dynamic]u8
+	chunk: [4096]u8
+
+	for {
+		count, receive_error := net.recv_tcp(client, chunk[:])
+
+		if count > 0 {
+			append(&received, ..chunk[:count])
+		}
+
+		if count == 0 || receive_error != nil {
+			break
+		}
+	}
+
+	return received[:]
+}
+
+@(test)
+loopback_request_with_accept_encoding_br_gets_a_brotli_body :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 20 * time.Second)
+	plain := coding_repeat(6000, context.allocator)
+	defer delete(plain)
+	handled := plain
+	fixture: Loopback_Coding
+	fixture.config = {
+		address      = "127.0.0.1",
+		handler      = loopback_coding_handler,
+		handler_data = &handled,
+		control      = &fixture.control,
+		workers      = 2,
+	}
+
+	worker := thread.create_and_start_with_poly_data(&fixture, proc(f: ^Loopback_Coding) {f.ok = serve(f.config)})
+	assert(worker != nil)
+	defer thread.destroy(worker)
+	joined := false
+
+	defer if !joined {
+		stop_server(&fixture.control)
+		thread.join(worker)
+	}
+
+	until := time.tick_add(time.tick_now(), 5 * time.Second)
+
+	for !server_ready(&fixture.control) && time.tick_diff(time.tick_now(), until) > 0 {
+		thread.yield()
+	}
+
+	endpoint, ready := server_endpoint(&fixture.control)
+
+	if !testing.expect(t, ready && endpoint.port > 0) {
+		return
+	}
+
+	for item in ([]struct {
+			accept: string,
+			coding: string,
+		}{{"br", "br"}, {"gzip, br", "br"}, {"gzip", "gzip"}, {"identity", ""}}) {
+		wire := loopback_coding_exchange(endpoint, item.accept)
+		defer delete(wire)
+		split := strings.index(string(wire), "\r\n\r\n")
+
+		if !testing.expect(t, split > 0) {
+			continue
+		}
+
+		head := string(wire[:split])
+		body := wire[split + 4:]
+		testing.expect(t, strings.has_prefix(head, "HTTP/1.1 200"))
+		testing.expect(t, strings.contains(head, "Vary: Accept-Encoding\r\n"))
+
+		if item.coding == "" {
+			testing.expect(t, !strings.contains(head, "Content-Encoding:"))
+			testing.expect(t, strings.contains(head, "ETag: \"page-1\"\r\n"))
+			testing.expect(t, string(body) == string(plain))
+			continue
+		}
+
+		testing.expect(t, strings.contains(head, fmt.tprintf("Content-Encoding: %s\r\n", item.coding)))
+		testing.expect(t, strings.contains(head, "ETag: W/\"page-1\"\r\n"))
+		testing.expect(t, strings.contains(head, fmt.tprintf("Content-Length: %d\r\n", len(body))))
+		testing.expect(t, len(body) < len(plain) / 4)
+
+		if item.coding == "br" {
+			coding_decode_brotli(t, body, plain)
+		} else {
+			coding_decode(t, body, plain)
+		}
+	}
+
+	stop_server(&fixture.control)
+	thread.join(worker)
+	joined = true
+	testing.expect(t, fixture.ok)
 }

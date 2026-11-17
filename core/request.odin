@@ -18,20 +18,23 @@ REQUEST_BODY_LIMIT :: 4096
 parse_request :: proc(raw: string, storage: []Header) -> (Request, HTTP_Status) {
 	end := strings.index(raw, HTTP_HEADERS_END)
 	if (end >= 0 && end + len(HTTP_HEADERS_END) > REQUEST_HEADER_LIMIT) ||
-				(end < 0 && len(raw) >= REQUEST_HEADER_LIMIT) {
+	   (end < 0 && len(raw) >= REQUEST_HEADER_LIMIT) {
 		return {}, .Request_Header_Fields_Too_Large
 	}
+
 	head, status := http1.request_head_decode_framed(raw, storage[:min(len(storage), REQUEST_HEADER_COUNT_LIMIT)])
-	return Request{
-		method = head.method,
-		path = head.path,
-		query = head.query,
-		version = head.version,
-		headers = head.headers,
-		content_length = head.content_length,
-		has_content_length = head.has_content_length,
-		chunked = head.chunked,
-	}, status
+
+	return Request {
+			method = head.method,
+			path = head.path,
+			query = head.query,
+			version = head.version,
+			headers = head.headers,
+			content_length = head.content_length,
+			has_content_length = head.has_content_length,
+			chunked = head.chunked,
+		},
+		status
 }
 
 // A zero body timeout means the connection was built without resolved timeouts.
@@ -45,15 +48,9 @@ connection_timeouts :: proc(conn: ^Connection) -> Resolved_Timeouts {
 }
 
 // A read failure may have no HTTP status when the connection itself failed.
-read_request_body :: proc(
-	conn: ^Connection,
-	request: ^Request,
-	buffer: []u8,
-) -> (
-	HTTP_Status,
-	bool,
-) {
-	if request.chunked do return read_chunked_body(conn,request,buffer)
+read_request_body :: proc(conn: ^Connection, request: ^Request, buffer: []u8) -> (HTTP_Status, bool) {
+	if request.chunked do return read_chunked_body(conn, request, buffer)
+
 	if request.content_length > len(buffer) {
 		return .Content_Too_Large, false
 	}
@@ -108,13 +105,13 @@ Path_Parameter :: struct {
 }
 
 Request :: struct {
- early_data:bool,
+	early_data:           bool,
 	// Borrowed during owner calls; retain scope/create Binding before escape.
-	resources: budget.Scope,
-	backing_allocator: mem.Allocator,
+	resources:            budget.Scope,
+	backing_allocator:    mem.Allocator,
 	allocator:            mem.Allocator,
 	// Borrowed until handler return; retain explicitly for independently owned work.
-	cancellation: Request_Context,
+	cancellation:         Request_Context,
 	// Generated ID is zero when observability is disabled. Route is a matched
 	// bounded template; never assign a raw user path or query here.
 	request_id:           u64,
@@ -125,14 +122,14 @@ Request :: struct {
 	query:                string,
 	version:              string,
 	// Negotiated Extended CONNECT protocol; empty for ordinary HTTP requests.
-	protocol: string,
+	protocol:             string,
 	headers:              []Header,
- trailers:[]Header,
+	trailers:             []Header,
 	body:                 []u8,
 	content_length:       int,
 	has_content_length:   bool,
 	// Transfer-Encoding was chunked; content_length is decoded length at dispatch.
-	chunked: bool,
+	chunked:              bool,
 	path_parameters:      [MAX_PATH_PARAMETERS]Path_Parameter,
 	path_parameter_count: int,
 }
@@ -193,14 +190,7 @@ chunk_error_status :: proc(error: http.Error) -> HTTP_Status {
 }
 
 @(private)
-read_chunked_body :: proc(
-	conn: ^Connection,
-	request: ^Request,
-	buffer: []u8,
-) -> (
-	HTTP_Status,
-	bool,
-) {
+read_chunked_body :: proc(conn: ^Connection, request: ^Request, buffer: []u8) -> (HTTP_Status, bool) {
 	decoder: http1.Chunk_Decoder
 	if http1.chunk_decoder_init(&decoder, u64(len(buffer))).kind != .None do return .Content_Too_Large, false
 	previous := conn.read_deadline
@@ -209,10 +199,12 @@ read_chunked_body :: proc(
 	defer conn.read_deadline = previous
 	scratch: [2048]u8
 	used := 0
+
 	for {
 		if deadline_expired(conn.read_deadline) do return .Request_Timeout, false
 		input := conn.read_buffer
 		buffered := len(input) > 0
+
 		if !buffered {
 			want := http1.chunk_decoder_read_limit(&decoder, len(scratch))
 			n, error := read_connection(conn, scratch[:want])
@@ -221,10 +213,12 @@ read_chunked_body :: proc(
 			if n == 0 do return .Bad_Request, false
 			input = scratch[:n]
 		}
+
 		consumed, written, done, error := http1.chunk_decoder_feed(&decoder, input, buffer[used:])
 		if buffered do conn.read_buffer = conn.read_buffer[consumed:]
 		used += written
 		if error.kind != .None do return chunk_error_status(error), false
+
 		if done {
 			if deadline_expired(conn.read_deadline) do return .Request_Timeout, false
 			request.body = buffer[:used]

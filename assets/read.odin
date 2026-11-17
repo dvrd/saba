@@ -31,11 +31,7 @@ read_limited :: proc(
 	[]u8,
 	Read_Error,
 ) {
-	if path == "" ||
-	   len(path) > 4096 ||
-	   strings.contains_rune(path, 0) ||
-	   size_max < 1 ||
-	   size_max > FILE_BYTES_MAX {
+	if path == "" || len(path) > 4096 || strings.contains_rune(path, 0) || size_max < 1 || size_max > FILE_BYTES_MAX {
 		return nil, {kind = .Invalid_Input}
 	}
 
@@ -74,15 +70,18 @@ read_limited :: proc(
 		if erase_on_failure {
 			crypto.zero_explicit(raw_data(data), len(data))
 		}
+
 		delete(data, allocator)
 	}
 	used := 0
 	for used < len(data) {
 		count, read_error := os.read(file, data[used:])
 		used += count
+
 		if read_error != nil && read_error != io.Error.EOF {
 			return nil, {kind = .Read_Failed, io = read_error}
 		}
+
 		if count == 0 || read_error == io.Error.EOF {
 			break
 		}
@@ -99,6 +98,7 @@ read_limited :: proc(
 		if used == size_max {
 			return nil, {kind = .Limit_Exceeded}
 		}
+
 		return nil, {kind = .Size_Changed}
 	}
 	success = true

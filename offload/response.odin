@@ -51,11 +51,7 @@ response_with_unmanaged_bytes :: proc(
 	server.Response,
 	bool,
 ) {
-	if lane == nil ||
-	   work == nil ||
-	   work.run == nil ||
-	   (work.data != nil && work.drop == nil) ||
-	   build == nil {
+	if lane == nil || work == nil || work.run == nil || (work.data != nil && work.drop == nil) || build == nil {
 		return {}, false
 	}
 	state, error := new(State, rt.heap_allocator())
@@ -67,7 +63,9 @@ response_with_unmanaged_bytes :: proc(
 }
 
 @(private)
-wake :: proc(data: rawptr) {_ = signal.wake((cast(^Notice)data).signal)}
+wake :: proc(data: rawptr) {
+	_ = signal.wake((cast(^Notice)data).signal)
+}
 @(private)
 drop_notice :: proc(data: rawptr) {
 	notice := cast(^Notice)data
@@ -80,10 +78,12 @@ start :: proc(state: ^State, io: ^server.Deferred_IO) -> pool.Error {
 	notice, error := new(Notice, rt.heap_allocator())
 	if error != nil || notice == nil do return .Allocation_Failed
 	retained, ok := signal.retain(io.wake)
+
 	if !ok {
 		free(notice, rt.heap_allocator())
 		return .Invalid_Config
 	}
+
 	notice.signal = retained
 	notification := pool.Notification{notice, wake, drop_notice}
 	handle, admission := pool.submit_scoped(
@@ -94,42 +94,45 @@ start :: proc(state: ^State, io: ^server.Deferred_IO) -> pool.Error {
 		io.resources,
 		state.unmanaged_bytes,
 	)
+
 	if admission != .None {
 		drop_notice(notice)
 		return admission
 	}
+
 	state.handle, state.started = handle, true
+
 	return .None
 }
 
 @(private)
-poll_result :: proc(
-	data: rawptr,
-	io: ^server.Deferred_IO,
-) -> (
-	server.Response,
-	server.Deferred_Step,
-) {
+poll_result :: proc(data: rawptr, io: ^server.Deferred_IO) -> (server.Response, server.Deferred_Step) {
 	state := cast(^State)data
+
 	if !state.started {
 		error := start(state, io)
+
 		if error != .None {
 			status: server.HTTP_Status = .Service_Unavailable
 			if error == .Expired do status = .Request_Timeout
 			return {status = status}, .Ready
 		}
 	}
+
 	view, error := pool.poll(state.handle)
 	if error != .None do return {}, .Failed
+
 	switch view.outcome {
 	case .Pending:
 		return {}, .Waiting
 	case .Succeeded:
 		response, ok := state.build(view.data, io.allocator)
+
 		if !ok {
 			server.discard_response(&response)
 			return {}, .Failed
 		}
+
 		return response, .Ready
 	case .Expired:
 		return {status = .Request_Timeout, close_connection = true}, .Ready
@@ -138,17 +141,20 @@ poll_result :: proc(
 	case .Failed:
 		return {status = .Internal_Server_Error}, .Ready
 	}
+
 	return {}, .Failed
 }
 
 @(private)
 drop :: proc(data: rawptr) {
 	state := cast(^State)data
+
 	if state.started {
 		_ = pool.cancel(state.handle)
 		_ = pool.release(&state.handle)
 	} else if state.work.drop != nil {
 		state.work.drop(state.work.data)
 	}
+
 	free(state, rt.heap_allocator())
 }

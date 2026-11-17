@@ -30,16 +30,14 @@ s3_put :: proc(
 	return {status = result.status, ok = result.ok}
 }
 
-s3_put_file :: proc(
-	config: S3_Config,
-	credentials: AWS_Credentials,
-	key, path, content_type: string,
-) -> S3_Result {
+s3_put_file :: proc(config: S3_Config, credentials: AWS_Credentials, key, path, content_type: string) -> S3_Result {
 	result := aws.s3_put_file(config, credentials, key, path, content_type)
+
 	return {status = result.status, ok = result.ok}
 }
 
 s3_delete :: proc(config: S3_Config, credentials: AWS_Credentials, key: string) -> S3_Result {
 	result := aws.s3_delete(config, credentials, key)
+
 	return {status = result.status, ok = result.ok}
 }

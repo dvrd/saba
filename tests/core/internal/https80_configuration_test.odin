@@ -61,10 +61,16 @@ KiRhi0U4QyOG4DSCNy8xI48=
 https80_make_store :: proc(t: ^testing.T) -> ^credential_store.Store {
 	store, error := credential_store.create({}, context.allocator)
 	assert(error.kind == .None)
-	owner, created := credentials.create(transmute([]u8)string(HTTPS80_TEST_CERT), transmute([]u8)string(HTTPS80_TEST_KEY), {}, context.allocator)
+	owner, created := credentials.create(
+		transmute([]u8)string(HTTPS80_TEST_CERT),
+		transmute([]u8)string(HTTPS80_TEST_KEY),
+		{},
+		context.allocator,
+	)
 	assert(created == .None)
 	assert(credential_store.replace(store, &owner).kind == .None)
 	testing.expect(t, owner == nil)
+
 	return store
 }
 
@@ -74,23 +80,27 @@ https80_configuration_defaults_and_invalid_bounds_are_checked_before_startup :: 
 	defer credential_store.destroy(&store)
 	context.logger = log.nil_logger()
 	testing.expect(t, tls_config_valid(nil))
-	valid := TLS_Config{store = store}
+	valid := TLS_Config {
+		store = store,
+	}
+
 	testing.expect(t, tls_config_valid(&valid))
-	samples := []TLS_Config{
-		{}, {store = store, handshake_timeout = -time.Nanosecond},
+	samples := []TLS_Config {
+		{},
+		{store = store, handshake_timeout = -time.Nanosecond},
 		{store = store, close_timeout = -time.Nanosecond},
 		{store = store, handshake_timeout = MAX_SERVER_TIMEOUT + time.Nanosecond},
 		{store = store, close_timeout = MAX_SERVER_TIMEOUT + time.Nanosecond},
 		{store = store, max_owned_bytes = 1023},
-		{store = store, max_owned_bytes = 256*1024 + 1},
+		{store = store, max_owned_bytes = 256 * 1024 + 1},
 		{store = store, max_handshake_records = -1},
 		{store = store, max_handshake_records = 65537},
 	}
+
 	for &config in samples {
 		testing.expect(t, !tls_config_valid(&config))
 		control: Server_Control
-		testing.expect(t, !serve({tls = &config, control = &control,
-			runtime_allocator = mem.panic_allocator()}))
+		testing.expect(t, !serve({tls = &config, control = &control, runtime_allocator = mem.panic_allocator()}))
 		testing.expect(t, !control._in_use && !control._ever_published)
 	}
 }
@@ -100,10 +110,17 @@ https80_empty_and_closed_credential_stores_are_invalid_without_consuming_them ::
 	empty, error := credential_store.create({}, context.allocator)
 	assert(error.kind == .None)
 	defer credential_store.destroy(&empty)
-	config := TLS_Config{store = empty}
+	config := TLS_Config {
+		store = empty,
+	}
+
 	testing.expect(t, !tls_config_valid(&config))
-	owner, created := credentials.create(transmute([]u8)string(HTTPS80_TEST_CERT),
-		transmute([]u8)string(HTTPS80_TEST_KEY), {}, context.allocator)
+	owner, created := credentials.create(
+		transmute([]u8)string(HTTPS80_TEST_CERT),
+		transmute([]u8)string(HTTPS80_TEST_KEY),
+		{},
+		context.allocator,
+	)
 	assert(created == .None)
 	assert(credential_store.replace(empty, &owner).kind == .None)
 	testing.expect(t, tls_config_valid(&config))

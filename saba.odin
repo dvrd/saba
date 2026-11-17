@@ -20,42 +20,49 @@ import "core:crypto/tls"
 // Compatibility view: valid only during a synchronous facade handler/helper.
 // Do not retain this pointer. Core handlers receive the real stable connection.
 Connection :: struct {
-	socket: net.TCP_Socket,
-	database: ^db.SQLite_DB,
-	read_buffer: []u8,
-	read_deadline,write_deadline:time.Tick,
-	reload:^Reload_State,
-	_transport:^core.Connection,
+	socket:                        net.TCP_Socket,
+	database:                      ^db.SQLite_DB,
+	read_buffer:                   []u8,
+	read_deadline, write_deadline: time.Tick,
+	reload:                        ^Reload_State,
+	_transport:                    ^core.Connection,
 }
 
 @(private)
-connection_view :: proc(transport:^core.Connection,database:^db.SQLite_DB)->Connection {
-	return {socket=transport.socket,database=database,read_buffer=transport.read_buffer,
-		read_deadline=transport.read_deadline,write_deadline=transport.write_deadline,_transport=transport}
+connection_view :: proc(transport: ^core.Connection, database: ^db.SQLite_DB) -> Connection {
+	return {
+		socket = transport.socket,
+		database = database,
+		read_buffer = transport.read_buffer,
+		read_deadline = transport.read_deadline,
+		write_deadline = transport.write_deadline,
+		_transport = transport,
+	}
 }
 
 @(private)
-connection_writeback :: proc(view:^Connection,transport:^core.Connection) {
-	transport.socket=view.socket
-	transport.read_buffer=view.read_buffer
-	transport.read_deadline=view.read_deadline
-	transport.write_deadline=view.write_deadline
+connection_writeback :: proc(view: ^Connection, transport: ^core.Connection) {
+	transport.socket = view.socket
+	transport.read_buffer = view.read_buffer
+	transport.read_deadline = view.read_deadline
+	transport.write_deadline = view.write_deadline
 }
 
 @(private)
-connection_transport :: proc(view:^Connection,local:^core.Connection)->^core.Connection {
-	transport:=view._transport
-	if transport==nil do transport=local
-	connection_writeback(view,transport)
+connection_transport :: proc(view: ^Connection, local: ^core.Connection) -> ^core.Connection {
+	transport := view._transport
+	if transport == nil do transport = local
+	connection_writeback(view, transport)
+
 	return transport
 }
 
 @(private)
-connection_refresh :: proc(view:^Connection,transport:^core.Connection) {
-	view.socket=transport.socket
-	view.read_buffer=transport.read_buffer
-	view.read_deadline=transport.read_deadline
-	view.write_deadline=transport.write_deadline
+connection_refresh :: proc(view: ^Connection, transport: ^core.Connection) {
+	view.socket = transport.socket
+	view.read_buffer = transport.read_buffer
+	view.read_deadline = transport.read_deadline
+	view.write_deadline = transport.write_deadline
 }
 
 read_connection :: proc(conn: ^Connection, buffer: []u8) -> (int, net.TCP_Recv_Error) {
@@ -74,23 +81,33 @@ write_connection :: proc(conn: ^Connection, buffer: []u8) -> (int, net.TCP_Send_
 	return core.write_connection(io, buffer)
 }
 
-send_response :: proc(conn:^Connection,response:Response,request_method:string="")->bool {
-	prepared:=response
-	injected:[]u8
-	if conn.reload!=nil && dev.reload_html_response(response) {
-		ok:bool
-		injected,ok=dev.inject_reload_client(response.body)
-		if !ok {send_empty_response(conn,.Internal_Server_Error);return false}
-		if injected!=nil do prepared.body=injected
+send_response :: proc(conn: ^Connection, response: Response, request_method: string = "") -> bool {
+	prepared := response
+	injected: []u8
+
+	if conn.reload != nil && dev.reload_html_response(response) {
+		ok: bool
+		injected, ok = dev.inject_reload_client(response.body)
+
+		if !ok {
+			send_empty_response(conn, .Internal_Server_Error)
+			return false
+		}
+
+		if injected != nil do prepared.body = injected
 	}
+
 	defer delete(injected)
-	local:core.Connection
-	io:=connection_transport(conn,&local)
-	result:=core.send_response(io,prepared,request_method)
-	connection_refresh(conn,io)
+	local: core.Connection
+	io := connection_transport(conn, &local)
+	result := core.send_response(io, prepared, request_method)
+	connection_refresh(conn, io)
+
 	return result
 }
-send_empty_response :: proc(conn:^Connection,status:HTTP_Status)->bool {return send_response(conn,{status=status})}
+send_empty_response :: proc(conn: ^Connection, status: HTTP_Status) -> bool {
+	return send_response(conn, {status = status})
+}
 read_request_body :: proc(conn: ^Connection, request: ^Request, buffer: []u8) -> (HTTP_Status, bool) {
 	local: core.Connection
 	io := connection_transport(conn, &local)
@@ -244,20 +261,34 @@ load_environment_file :: proc(path := ".env") -> bool {
 	allocator := mem.dynamic_arena_allocator(&arena)
 	data, error := os.read_entire_file(path, allocator)
 	if reason, general := error.(os.General_Error); general && reason == .Not_Exist do return true
-	if error != nil {log.errorf("Could not read environment file %s", path);return false}
-	if len(data) > 64 * 1024 {log.errorf("Environment file exceeds 64 KiB: %s", path);return false}
+
+	if error != nil {
+		log.errorf("Could not read environment file %s", path)
+		return false
+	}
+
+	if len(data) > 64 * 1024 {
+		log.errorf("Environment file exceeds 64 KiB: %s", path)
+		return false
+	}
+
 	values, invalid_line := environment_parse(string(data), allocator)
+
 	if invalid_line != 0 {
 		log.errorf("Invalid environment assignment at %s:%d", path, invalid_line)
 		return false
 	}
+
 	// Validate the complete file before changing the process environment.
 	for key, value in values {
 		_, exported := os.lookup_env(key, allocator)
 		if exported do continue
-		if os.set_env(key, value) !=
-		   nil {log.errorf("Could not apply environment file %s", path);return false}
+
+		if os.set_env(key, value) != nil {
+			log.errorf("Could not apply environment file %s", path); return false
+		}
 	}
+
 	return true
 }
 
@@ -298,16 +329,27 @@ environment_value :: proc(raw: string, allocator: mem.Allocator) -> (string, boo
 	line := strings.trim_left_space(raw)
 	quote: byte
 	kept := 0
+
 	for index := 0; index < len(line); index += 1 {
 		c := line[index]
 		if c == 0 do return "", false
 		if quote == 0 && c == '#' && (index == 0 || line[index - 1] == ' ' || line[index - 1] == '\t') do break
-		if quote == 0 && (c == '\'' || c == '"') {quote = c;continue}
-		if quote != 0 && c == quote {quote = 0;continue}
+
+		if quote == 0 && (c == '\'' || c == '"') {
+			quote = c
+			continue
+		}
+
+		if quote != 0 && c == quote {
+			quote = 0
+			continue
+		}
+
 		if c == '\\' && quote != '\'' {
 			index += 1
 			if index >= len(line) do return "", false
 			c = line[index]
+
 			if quote == '"' {
 				switch c {
 				case 'n':
@@ -322,10 +364,13 @@ environment_value :: proc(raw: string, allocator: mem.Allocator) -> (string, boo
 				}
 			}
 		}
+
 		strings.write_byte(&value, c)
 		if quote != 0 || (c != ' ' && c != '\t') do kept = len(value.buf)
 	}
+
 	if quote != 0 do return "", false
+
 	return strings.to_string(value)[:kept], true
 }
 
@@ -334,6 +379,7 @@ environment_parse :: proc(source: string, allocator: mem.Allocator) -> (map[stri
 	values := make(map[string]string, allocator)
 	rest := strings.trim_prefix(source, "\xef\xbb\xbf")
 	line_number := 0
+
 	for raw in strings.split_lines_iterator(&rest) {
 		line_number += 1
 		line := strings.trim_space(raw)
@@ -348,72 +394,95 @@ environment_parse :: proc(source: string, allocator: mem.Allocator) -> (map[stri
 		if !valid do return nil, line_number
 		values[key] = value
 	}
+
 	return values, 0
 }
 
-Handler :: #type proc(conn:^Connection,request:^Request)->Response
+Handler :: #type proc(conn: ^Connection, request: ^Request) -> Response
 
 TLS_Config :: core.TLS_Config
 TLS_Event :: core.TLS_Event
 TLS_Event_Kind :: core.TLS_Event_Kind
 
 Server :: struct {
-	tls: ^TLS_Config,
-	http3: Http3_Config,
- http2: Http2_Config,
-	resources: Resource_Config,
-	address: string,
-	port: int,
+	tls:                                  ^TLS_Config,
+	http3:                                Http3_Config,
+	http2:                                Http2_Config,
+	resources:                            Resource_Config,
+	address:                              string,
+	port:                                 int,
 	max_connections, initial_connections: int,
-	runtime_allocator: mem.Allocator,
-	database: ^db.SQLite_DB,
-	handler: Handler,
-	request_body_limit: proc(request:^Request)->int,
-	modules: []Module_Mount,
-	assets: []Asset_Mount,
-	asset_limits: Asset_Limits,
-	pages: Page_Mount,
-	development: bool,
-	hot_reload_directory: string,
-	workers: int,
-	control: ^Server_Control,
-	timeouts: Timeout_Config,
-	handler_timeout:time.Duration,
-	keep_alive: Keep_Alive_Config,
-	observability: Observability_Config,
-	drain_timeout: time.Duration,
+	runtime_allocator:                    mem.Allocator,
+	database:                             ^db.SQLite_DB,
+	handler:                              Handler,
+	request_body_limit:                   proc(request: ^Request) -> int,
+	modules:                              []Module_Mount,
+	assets:                               []Asset_Mount,
+	asset_limits:                         Asset_Limits,
+	pages:                                Page_Mount,
+	development:                          bool,
+	hot_reload_directory:                 string,
+	workers:                              int,
+	control:                              ^Server_Control,
+	timeouts:                             Timeout_Config,
+	handler_timeout:                      time.Duration,
+	keep_alive:                           Keep_Alive_Config,
+	observability:                        Observability_Config,
+	drain_timeout:                        time.Duration,
 }
-
 
 // The generic composition owns preparation, routing and development lifecycle.
 // This facade adds only the historical database-aware handler view.
-serve :: proc(config:Server)->bool {
- if config.handler==nil {log.error("Server handler is required");return false}
- snapshot:=config
- return application.serve({
-  server={
-   tls=config.tls,http3=config.http3,http2=config.http2,resources=config.resources,address=config.address,port=config.port,
-   max_connections=config.max_connections,initial_connections=config.initial_connections,
-   runtime_allocator=config.runtime_allocator,handler_data=&snapshot,
-   request_body_limit=config.request_body_limit,workers=config.workers,
-   control=config.control,timeouts=config.timeouts,handler_timeout=config.handler_timeout,
-   keep_alive=config.keep_alive,observability=config.observability,
-   drain_timeout=config.drain_timeout,
-  },
-  modules=config.modules,assets=config.assets,asset_limits=config.asset_limits,
-  pages=config.pages,development=config.development,
-  hot_reload_directory=config.hot_reload_directory,dispatch=legacy_dispatch,
- })
+serve :: proc(config: Server) -> bool {
+	if config.handler == nil {
+		log.error("Server handler is required")
+		return false
+	}
+
+	snapshot := config
+
+	return application.serve(
+		{
+			server = {
+				tls = config.tls,
+				http3 = config.http3,
+				http2 = config.http2,
+				resources = config.resources,
+				address = config.address,
+				port = config.port,
+				max_connections = config.max_connections,
+				initial_connections = config.initial_connections,
+				runtime_allocator = config.runtime_allocator,
+				handler_data = &snapshot,
+				request_body_limit = config.request_body_limit,
+				workers = config.workers,
+				control = config.control,
+				timeouts = config.timeouts,
+				handler_timeout = config.handler_timeout,
+				keep_alive = config.keep_alive,
+				observability = config.observability,
+				drain_timeout = config.drain_timeout,
+			},
+			modules = config.modules,
+			assets = config.assets,
+			asset_limits = config.asset_limits,
+			pages = config.pages,
+			development = config.development,
+			hot_reload_directory = config.hot_reload_directory,
+			dispatch = legacy_dispatch,
+		},
+	)
 }
 
 @(private)
-legacy_dispatch :: proc(data:rawptr,input:^application.Dispatch_Context)->core.Response {
- config:=cast(^Server)data
- view:=connection_view(input.connection,config.database)
- view.reload=input.reload
- response:=config.handler(&view,input.request)
- connection_writeback(&view,input.connection)
- return response
+legacy_dispatch :: proc(data: rawptr, input: ^application.Dispatch_Context) -> core.Response {
+	config := cast(^Server)data
+	view := connection_view(input.connection, config.database)
+	view.reload = input.reload
+	response := config.handler(&view, input.request)
+	connection_writeback(&view, input.connection)
+
+	return response
 }
 
 Asset_Mount :: assets.Asset_Mount
@@ -481,9 +550,12 @@ TLS_Peer_Identity :: tls.Peer_Identity
 
 // The facade borrows the normal authenticated connection during its handler.
 // Copying this value retains no handshake certificates or request storage.
-tls_peer_identity :: proc(connection:^Connection)->TLS_Peer_Identity {
- if connection==nil||connection._transport==nil {return {}}
- return core.tls_peer_identity(connection._transport)
+tls_peer_identity :: proc(connection: ^Connection) -> TLS_Peer_Identity {
+	if connection == nil || connection._transport == nil {
+		return {}
+	}
+
+	return core.tls_peer_identity(connection._transport)
 }
 
 TLS_Server_Ticket_Config :: tls.Server_Ticket_Config

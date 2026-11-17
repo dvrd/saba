@@ -9,69 +9,105 @@ import "core:strings"
 import "core:testing"
 
 @(test)
-application_preserves_core_handler_state_and_routes :: proc(t:^testing.T) {
-	calls:=0
-	state:=State{config={server={handler_data=&calls,
-		handler=proc(data:rawptr,_:^core.Connection,r:^core.Request)->core.Response {
-			(cast(^int)data)^+=1
-			assert(core.match_route(r,"POST","/items/:id"))
-			assert(core.path_value(r,"id")=="42")
-			return {status=.Accepted,body=r.body}
-		}}}}
-	request:=core.Request{method="POST",path="/items/42",body=[]u8{'o','k'}}
-	connection:core.Connection
-	response:=handle_request(&state,&connection,&request)
-	testing.expect_value(t,calls,1)
-	testing.expect_value(t,response.status,.Accepted)
-	testing.expect_value(t,string(response.body),"ok")
+application_preserves_core_handler_state_and_routes :: proc(t: ^testing.T) {
+	calls := 0
+	state := State {
+		config = {
+			server = {
+				handler_data = &calls,
+				handler = proc(data: rawptr, _: ^core.Connection, r: ^core.Request) -> core.Response {
+					(cast(^int)data)^ += 1
+					assert(core.match_route(r, "POST", "/items/:id"))
+					assert(core.path_value(r, "id") == "42")
+					return {status = .Accepted, body = r.body}
+				},
+			},
+		},
+	}
+
+	request := core.Request {
+		method = "POST",
+		path   = "/items/42",
+		body   = []u8{'o', 'k'},
+	}
+
+	connection: core.Connection
+	response := handle_request(&state, &connection, &request)
+	testing.expect_value(t, calls, 1)
+	testing.expect_value(t, response.status, .Accepted)
+	testing.expect_value(t, string(response.body), "ok")
 }
 
 @(test)
-application_builtin_priority_and_development_injection :: proc(t:^testing.T) {
-	arena:mem.Dynamic_Arena
+application_builtin_priority_and_development_injection :: proc(t: ^testing.T) {
+	arena: mem.Dynamic_Arena
 	mem.dynamic_arena_init(&arena)
 	defer mem.dynamic_arena_destroy(&arena)
-	allocator:=mem.dynamic_arena_allocator(&arena)
-	state:=State{config={development=true,server={
-		handler=proc(_:rawptr,_:^core.Connection,r:^core.Request)->core.Response {
-			return core.make_response(r,.OK,{{"Content-Type","text/html"}},
-				transmute([]u8)string("<head></head>"))
-		}}}}
-	request:=core.Request{method="GET",path="/plain",allocator=allocator}
-	connection:core.Connection
-	response:=handle_request(&state,&connection,&request)
-	testing.expect(t,strings.contains(string(response.body),development.RELOAD_CLIENT_TAG))
-	request.path=modules_api.JSX_RUNTIME_URL
-	runtime_response,matched:=builtin_response(&state,&request)
-	testing.expect(t,matched)
-	testing.expect_value(t,runtime_response.status,.OK)
-	testing.expect(t,len(runtime_response.body)>0)
+	allocator := mem.dynamic_arena_allocator(&arena)
+	state := State {
+		config = {
+			development = true,
+			server = {handler = proc(_: rawptr, _: ^core.Connection, r: ^core.Request) -> core.Response {
+					return core.make_response(
+						r,
+						.OK,
+						{{"Content-Type", "text/html"}},
+						transmute([]u8)string("<head></head>"),
+					)
+				}},
+		},
+	}
+
+	request := core.Request {
+		method    = "GET",
+		path      = "/plain",
+		allocator = allocator,
+	}
+
+	connection: core.Connection
+	response := handle_request(&state, &connection, &request)
+	testing.expect(t, strings.contains(string(response.body), development.RELOAD_CLIENT_TAG))
+	request.path = modules_api.JSX_RUNTIME_URL
+	runtime_response, matched := builtin_response(&state, &request)
+	testing.expect(t, matched)
+	testing.expect_value(t, runtime_response.status, .OK)
+	testing.expect(t, len(runtime_response.body) > 0)
 }
 
 @(test)
-application_context_adapter_borrows_live_development_state :: proc(t:^testing.T) {
-	calls:=0
-	state:=State{config={development=true,server={handler_data=&calls},
-		dispatch=proc(data:rawptr,view:^Dispatch_Context)->core.Response {
-			assert(view.connection!=nil && view.request!=nil && view.reload!=nil)
-			(cast(^int)data)^+=1
-			return {status=.No_Content}
-		}}}
-	request:=core.Request{method="GET",path="/plain"}
-	connection:core.Connection
-	response:=handle_request(&state,&connection,&request)
-	testing.expect_value(t,calls,1)
-	testing.expect_value(t,response.status,.No_Content)
+application_context_adapter_borrows_live_development_state :: proc(t: ^testing.T) {
+	calls := 0
+	state := State {
+		config = {
+			development = true,
+			server = {handler_data = &calls},
+			dispatch = proc(data: rawptr, view: ^Dispatch_Context) -> core.Response {
+				assert(view.connection != nil && view.request != nil && view.reload != nil)
+				(cast(^int)data)^ += 1
+				return {status = .No_Content}
+			},
+		},
+	}
+
+	request := core.Request {
+		method = "GET",
+		path   = "/plain",
+	}
+
+	connection: core.Connection
+	response := handle_request(&state, &connection, &request)
+	testing.expect_value(t, calls, 1)
+	testing.expect_value(t, response.status, .No_Content)
 }
 
 @(test)
-application_rejects_missing_or_ambiguous_handlers_before_listening :: proc(t:^testing.T) {
-	context.logger=log.nil_logger() // Rejection is the intended result.
-	testing.expect(t,!serve({}))
-	testing.expect(t,!serve({
-		server={handler=proc(_:rawptr,_:^core.Connection,_:^core.Request)->core.Response {
-			return {}
-		}},
-		dispatch=proc(_:rawptr,_:^Dispatch_Context)->core.Response{return {}},
-	}))
+application_rejects_missing_or_ambiguous_handlers_before_listening :: proc(t: ^testing.T) {
+	context.logger = log.nil_logger() // Rejection is the intended result.
+	testing.expect(t, !serve({}))
+	testing.expect(t, !serve({
+			server = {handler = proc(_: rawptr, _: ^core.Connection, _: ^core.Request) -> core.Response {
+					return {}
+				}},
+			dispatch = proc(_: rawptr, _: ^Dispatch_Context) -> core.Response {return {}},
+		}))
 }

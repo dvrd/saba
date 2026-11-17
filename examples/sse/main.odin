@@ -19,25 +19,24 @@ next_event :: proc(data: rawptr, io: ^server.Stream_IO) -> server.Stream_Step {
 	events := cast(^Events)data
 	if server.request_cancelled(io.cancellation) do return .Failed
 	if events.sequence == 8 do return .Done
+
 	if events.next_at.at != 0 {
 		error := server.stream_wait(io, events.next_at)
 		if error.kind == .Pending do return .Waiting
 		if error.kind != .None do return .Failed
 		events.next_at = {}
 	}
+
 	buffer: [256]u8
 	text := ": heartbeat\n\n"
 	if events.sequence % 2 == 0 do text = fmt.bprintf(buffer[:], "id: %d\nevent: tick\ndata: %d\n\n", events.sequence, events.sequence)
-	chunk, error := owned.copy_bounded(
-		transmute([]u8)text,
-		io.max_chunk_bytes,
-		rt.heap_allocator(),
-	)
+	chunk, error := owned.copy_bounded(transmute([]u8)text, io.max_chunk_bytes, rt.heap_allocator())
 	if error.kind != .None do return .Failed
 	events.pending = chunk
 	if server.stream_submit(io, &events.pending) != .Accepted do return .Failed
 	events.sequence += 1
 	events.next_at = async.deadline_after(io.runtime, 250 * time.Millisecond)
+
 	return .Chunk
 }
 
@@ -65,6 +64,7 @@ route :: proc(_: rawptr, _: ^server.Connection, request: ^server.Request) -> ser
 		max_body_bytes  = 65536,
 		timeout         = 15 * time.Second,
 	}
+
 	return response
 }
 
@@ -87,15 +87,19 @@ main :: proc() {
 			)
 		})
 	assert(worker != nil)
+
 	for _ in 0 ..< 5000 {
 		endpoint, ready := server.server_endpoint(&state.control)
+
 		if ready {
 			fmt.printf("ready %d\n", endpoint.port)
 			os.flush(os.stdout)
 			break
 		}
+
 		time.sleep(time.Millisecond)
 	}
+
 	_, ready := server.server_endpoint(&state.control)
 	assert(ready)
 	// GET /events with curl -N; press Enter to stop cooperatively.

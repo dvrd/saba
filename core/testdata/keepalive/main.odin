@@ -10,82 +10,106 @@ import "core:thread"
 import "core:time"
 
 State :: struct {
-	control: server.Server_Control,
-	mutex: sync.Mutex,
-	result: bool,
-	count: u64,
+	control:        server.Server_Control,
+	mutex:          sync.Mutex,
+	result:         bool,
+	count:          u64,
 	observer_drain: bool,
 }
 state: State
 
-routes :: proc(_:rawptr,conn: ^server.Connection, request: ^server.Request) -> server.Response {
+routes :: proc(_: rawptr, conn: ^server.Connection, request: ^server.Request) -> server.Response {
 	assert(conn.write_deadline == time.Tick{}, "previous response deadline survived into next handler")
 	arena := cast(^mem.Dynamic_Arena)request.allocator.data
 	if request.path == "/arena" do assert(len(arena.out_band_allocations) == 0, "old request allocations survived")
+
 	if request.path == "/echo" || request.path == "/limited" {
-		return server.make_response(request,.OK,nil,request.body)
+		return server.make_response(request, .OK, nil, request.body)
 	}
+
 	if request.path == "/allocate" {
-		body := make([]u8,1024*1024,request.allocator)
+		body := make([]u8, 1024 * 1024, request.allocator)
 		for &b in body do b = 42
-		return server.make_response(request,.OK,nil,body)
+		return server.make_response(request, .OK, nil, body)
 	}
-	if request.path == "/slow" do time.sleep(70*time.Millisecond)
-	if request.path == "/drain" do assert(server.drain_server(&state.control,250*time.Millisecond))
-	_ = server.match_route(request,request.method,"/:route")
-	body := fmt.aprintf("%d",request.request_id,allocator=request.allocator)
-	response := server.make_response(request,.OK,nil,transmute([]u8)body)
+
+	if request.path == "/slow" do time.sleep(70 * time.Millisecond)
+	if request.path == "/drain" do assert(server.drain_server(&state.control, 250 * time.Millisecond))
+	_ = server.match_route(request, request.method, "/:route")
+	body := fmt.aprintf("%d", request.request_id, allocator = request.allocator)
+	response := server.make_response(request, .OK, nil, transmute([]u8)body)
 	if request.path == "/close" do response.close_connection = true
+
 	return response
 }
 
 main :: proc() {
-	maximum, _ := strconv.parse_int(os.get_env("SABA_KEEP_MAX",context.temp_allocator))
-	idle, _ := strconv.parse_int(os.get_env("SABA_KEEP_IDLE_MS",context.temp_allocator))
-	capacity, _ := strconv.parse_int(os.get_env("SABA_KEEP_CAPACITY",context.temp_allocator))
-	enabled := os.get_env("SABA_KEEP_DISABLED",context.temp_allocator) != "1"
-	state.observer_drain = os.get_env("SABA_KEEP_OBSERVER_DRAIN",context.temp_allocator) == "1"
-	worker := thread.create_and_start_with_poly_data({maximum,idle,capacity,enabled},proc(config:struct{maximum,idle,capacity:int,enabled:bool}) {
+	maximum, _ := strconv.parse_int(os.get_env("SABA_KEEP_MAX", context.temp_allocator))
+	idle, _ := strconv.parse_int(os.get_env("SABA_KEEP_IDLE_MS", context.temp_allocator))
+	capacity, _ := strconv.parse_int(os.get_env("SABA_KEEP_CAPACITY", context.temp_allocator))
+	enabled := os.get_env("SABA_KEEP_DISABLED", context.temp_allocator) != "1"
+	state.observer_drain = os.get_env("SABA_KEEP_OBSERVER_DRAIN", context.temp_allocator) == "1"
+	worker := thread.create_and_start_with_poly_data({maximum, idle, capacity, enabled}, proc(config: struct {
+			maximum, idle, capacity: int,
+			enabled:                 bool,
+		}) {
 		state.result = server.serve({
-			port=0,handler=routes,workers=2,control=&state.control,
-			max_connections=config.capacity,
-			timeouts={header=200*time.Millisecond,body=300*time.Millisecond,response=300*time.Millisecond,idle=100*time.Millisecond},
-			keep_alive={enabled=config.enabled,max_requests=config.maximum,idle_timeout=time.Duration(config.idle)*time.Millisecond},
-			request_body_limit=proc(request:^server.Request)->int{return 4 if request.path == "/limited" else 4096},
-			observability={enabled=true,data=&state,on_complete=proc(data:rawptr,event:^server.Request_Event) {
-				state := cast(^State)data
-				_, valid := server.server_metrics(&state.control)
-				assert(valid)
-				sync.lock(&state.mutex)
-				state.count += 1
-				start_drain := state.observer_drain && state.count == 1
-				fmt.printf("event %d %s %s %d %d %d %v\n",event.request_id,event.method,
-					event.route if event.route != "" else "-",int(event.status),event.bytes_received,event.bytes_sent,event.outcome)
-				os.flush(os.stdout)
-				sync.unlock(&state.mutex)
-				if start_drain do assert(server.drain_server(&state.control,250*time.Millisecond))
-			}},
+			port = 0,
+			handler = routes,
+			workers = 2,
+			control = &state.control,
+			max_connections = config.capacity,
+			timeouts = {header = 200 * time.Millisecond, body = 300 * time.Millisecond, response = 300 * time.Millisecond, idle = 100 * time.Millisecond},
+			keep_alive = {enabled = config.enabled, max_requests = config.maximum, idle_timeout = time.Duration(config.idle) * time.Millisecond},
+			request_body_limit = proc(request: ^server.Request) -> int {return 4 if request.path == "/limited" else 4096},
+			observability = {enabled = true, data = &state, on_complete = proc(data: rawptr, event: ^server.Request_Event) {
+					state := cast(^State)data
+					_, valid := server.server_metrics(&state.control)
+					assert(valid)
+					sync.lock(&state.mutex)
+					state.count += 1
+					start_drain := state.observer_drain && state.count == 1
+					fmt.printf("event %d %s %s %d %d %d %v\n", event.request_id, event.method, event.route if event.route != "" else "-", int(event.status), event.bytes_received, event.bytes_sent, event.outcome)
+					os.flush(os.stdout)
+					sync.unlock(&state.mutex)
+					if start_drain do assert(server.drain_server(&state.control, 250 * time.Millisecond))
+				}},
 		})
 	})
 	assert(worker != nil)
-	until := time.tick_add(time.tick_now(),5*time.Second)
-	for time.tick_diff(time.tick_now(),until)>0 {
+	until := time.tick_add(time.tick_now(), 5 * time.Second)
+
+	for time.tick_diff(time.tick_now(), until) > 0 {
 		endpoint, ready := server.server_endpoint(&state.control)
-		if ready {fmt.printf("ready %d\n",endpoint.port);os.flush(os.stdout);break}
+
+		if ready {
+			fmt.printf("ready %d\n", endpoint.port)
+			os.flush(os.stdout)
+			break
+		}
+
 		time.sleep(time.Millisecond)
 	}
-	_, ready := server.server_endpoint(&state.control);assert(ready)
+
+	_, ready := server.server_endpoint(&state.control)
+	assert(ready)
 	command: [1]u8
-	os.read(os.stdin,command[:])
+	os.read(os.stdin, command[:])
+
 	if command[0] == 'd' {
-		assert(server.drain_server(&state.control,250*time.Millisecond))
+		assert(server.drain_server(&state.control, 250 * time.Millisecond))
 		assert(!server.server_ready(&state.control))
-		fmt.println("draining");os.flush(os.stdout)
+		fmt.println("draining")
+		os.flush(os.stdout)
 	} else if command[0] != 'j' {
 		server.stop_server(&state.control)
 	}
-	thread.join(worker);thread.destroy(worker)
+
+	thread.join(worker)
+	thread.destroy(worker)
 	assert(state.result)
-	_, alive := server.server_metrics(&state.control);assert(!alive)
-	fmt.printf("stopped %d\n",state.count);os.flush(os.stdout)
+	_, alive := server.server_metrics(&state.control)
+	assert(!alive)
+	fmt.printf("stopped %d\n", state.count)
+	os.flush(os.stdout)
 }

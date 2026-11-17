@@ -18,50 +18,49 @@ import "core:time"
 
 // Configured mounts own their URL prefix. Development reads current files so
 // edits and additions work with hot reload; production serves only preloaded data.
-serve_assets :: proc(
-	request: ^Request,
-	caches: []Asset_Cache,
-	development := false,
-) -> (
-	Response,
-	bool,
-) {
+serve_assets :: proc(request: ^Request, caches: []Asset_Cache, development := false) -> (Response, bool) {
 	if request.method != "GET" && request.method != "HEAD" do return {}, false
+
 	for cache in caches {
 		if !strings.has_prefix(request.path, cache.mount.prefix) do continue
-		relative, decoded := net.percent_decode(
-			request.path[len(cache.mount.prefix):],
-			request.allocator,
-		)
+		relative, decoded := net.percent_decode(request.path[len(cache.mount.prefix):], request.allocator)
 		if !decoded || !module_relative_ok(relative) || strings.has_suffix(relative, ".jsx") do return not_found(request), true
+
 		if development {
 			path, found, allowed := module_file(cache.mount.directory, relative, request.allocator)
 			if !found || !allowed do return not_found(request), true
 			limit := cache.max_file_bytes
+
 			if limit == 0 {
 				limit = DEFAULT_ASSET_LIMITS.max_file_bytes
 			}
+
 			body, read_error := read_limited(path, limit, request.allocator)
+
 			if read_error.kind != .None {
 				log.errorf("Could not read asset: %s", path)
 				return Response{status = .Internal_Server_Error}, true
 			}
+
 			return representation_response(request, body, asset_content_type(relative), true), true
 		}
 
 		cached, found := cache.files[relative]
+
 		if !found {
 			return not_found(request), true
 		}
 
 		return prepared_representation_response(request, &cached), true
 	}
+
 	return {}, false
 }
 
 @(private)
 asset_content_type :: proc(path: string) -> string {
 	extension := filepath.ext(path)
+
 	for item in ([][2]string {
 			{".html", "text/html; charset=utf-8"},
 			{".htm", "text/html; charset=utf-8"},
@@ -98,6 +97,7 @@ asset_content_type :: proc(path: string) -> string {
 		}) {
 		if strings.equal_fold(extension, item[0]) do return item[1]
 	}
+
 	return "application/octet-stream"
 }
 
@@ -111,8 +111,7 @@ representation_response :: proc(
 	development := false,
 ) -> Response {
 	if development {
-		return make_response(request, .OK,
-			{{"Content-Type", content_type}, {"Cache-Control", "no-store"}}, body)
+		return make_response(request, .OK, {{"Content-Type", content_type}, {"Cache-Control", "no-store"}}, body)
 	}
 	prepared := prepare_representation(body, content_type)
 	return prepared_representation_response(request, &prepared)
@@ -122,13 +121,17 @@ representation_response :: proc(
 // must stay immutable through every response send. Prepare once after loading a
 // production representation; development must use representation_response(..., true).
 Prepared_Representation :: struct {
-	body: []u8,
+	body:         []u8,
 	content_type: string,
-	tag: [66]u8,
+	tag:          [66]u8,
 }
 
 prepare_representation :: proc(body: []u8, content_type: string) -> Prepared_Representation {
-	prepared := Prepared_Representation{body = body, content_type = content_type}
+	prepared := Prepared_Representation {
+		body         = body,
+		content_type = content_type,
+	}
+
 	digest: [32]u8
 	hasher: sha2.Context_256
 	sha2.init_256(&hasher)
@@ -137,40 +140,43 @@ prepare_representation :: proc(body: []u8, content_type: string) -> Prepared_Rep
 	prepared.tag[0] = '"'
 	prepared.tag[65] = '"'
 	alphabet := "0123456789abcdef"
+
 	for byte, index in digest {
-		prepared.tag[1+index*2] = alphabet[byte>>4]
-		prepared.tag[2+index*2] = alphabet[byte&15]
+		prepared.tag[1 + index * 2] = alphabet[byte >> 4]
+		prepared.tag[2 + index * 2] = alphabet[byte & 15]
 	}
+
 	return prepared
 }
 
-prepared_representation_response :: proc(
-	request: ^Request,
-	representation: ^Prepared_Representation,
-) -> Response {
+prepared_representation_response :: proc(request: ^Request, representation: ^Prepared_Representation) -> Response {
 	assert(representation != nil)
 	tag, allocation_error := strings.clone(string(representation.tag[:]), request.allocator)
 	if allocation_error != nil do return Response{status = .Internal_Server_Error}
+
 	if (request.method == "GET" || request.method == "HEAD") && not_modified(request, tag) {
-		return make_response(request, .Not_Modified,
-			{{"Cache-Control", "no-cache"}, {"ETag", tag}})
+		return make_response(request, .Not_Modified, {{"Cache-Control", "no-cache"}, {"ETag", tag}})
 	}
-	return make_response(request, .OK,
-		{{"Content-Type", representation.content_type}, {"Cache-Control", "no-cache"},
-		 {"ETag", tag}}, representation.body)
+
+	return make_response(
+		request,
+		.OK,
+		{{"Content-Type", representation.content_type}, {"Cache-Control", "no-cache"}, {"ETag", tag}},
+		representation.body,
+	)
 }
 
 File_Stream_Config :: struct {
 	// Zero selects 1 GiB per file and 64 KiB retained payload per response.
 	max_file_bytes: i64,
-	chunk_bytes: int,
-	timeout: time.Duration,
-	content_type: string,
+	chunk_bytes:    int,
+	timeout:        time.Duration,
+	content_type:   string,
 	// Optional strong tag for this immutable file generation, supplied by host.
 	// The host must keep file contents stable through final stream disposal.
-	etag: string,
+	etag:           string,
 	// Must support individual frees and outlive the stream. Zero selects heap.
-	allocator: mem.Allocator,
+	allocator:      mem.Allocator,
 }
 
 // Opt-in rooted regular-file response, independent of startup-preloaded mounts.
@@ -180,14 +186,21 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 	if request.method != "GET" && request.method != "HEAD" {
 		return make_response(request, .Method_Not_Allowed, {{"Allow", "GET, HEAD"}})
 	}
+
 	limit, chunk_bytes := config.max_file_bytes, config.chunk_bytes
-	if limit == 0 do limit = 1024*1024*1024
-	if chunk_bytes == 0 do chunk_bytes = 64*mem.Kilobyte
-	if limit < 0 || chunk_bytes < 1 || chunk_bytes > mem.Megabyte || config.timeout < 0 ||
-	   len(config.etag) > 1024 || len(config.content_type) > 1024 ||
-	   config.timeout > core.MAX_SERVER_TIMEOUT || (config.etag != "" && !file_strong_tag(config.etag)) {
-		return {status=.Internal_Server_Error}
+	if limit == 0 do limit = 1024 * 1024 * 1024
+	if chunk_bytes == 0 do chunk_bytes = 64 * mem.Kilobyte
+	if limit < 0 ||
+	   chunk_bytes < 1 ||
+	   chunk_bytes > mem.Megabyte ||
+	   config.timeout < 0 ||
+	   len(config.etag) > 1024 ||
+	   len(config.content_type) > 1024 ||
+	   config.timeout > core.MAX_SERVER_TIMEOUT ||
+	   (config.etag != "" && !file_strong_tag(config.etag)) {
+		return {status = .Internal_Server_Error}
 	}
+
 	// Resolve through the same containment policy used by asset mounts.
 	decoded, valid := file_relative_decode(relative, request.allocator)
 	if !valid do return not_found(request)
@@ -198,81 +211,120 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 	file, open_error := os.open(path)
 	if open_error != nil do return not_found(request)
 	transferred := false
-	defer if !transferred {os.close(file)}
-	info, stat_error := os.fstat(file, request.allocator)
-	if stat_error != nil || info.type != .Regular || info.size < 0 || info.size > limit {
-		return {status=.Internal_Server_Error}
+
+	defer if !transferred {
+		os.close(file)
 	}
+
+	info, stat_error := os.fstat(file, request.allocator)
+
+	if stat_error != nil || info.type != .Regular || info.size < 0 || info.size > limit {
+		return {status = .Internal_Server_Error}
+	}
+
 	tag := config.etag
+
 	if tag != "" {
 		allocation_error: mem.Allocator_Error
 		tag, allocation_error = strings.clone(tag, request.allocator)
-		if allocation_error != nil do return {status=.Internal_Server_Error}
+		if allocation_error != nil do return {status = .Internal_Server_Error}
 	}
+
 	cache_policy := "no-store"
 	if tag != "" do cache_policy = "no-cache"
+
 	if not_modified(request, tag) {
 		if tag == "" do return make_response(request, .Not_Modified, {{"Cache-Control", cache_policy}})
 		return make_response(request, .Not_Modified, {{"ETag", tag}, {"Cache-Control", cache_policy}})
 	}
+
 	selection := file_request_range(request, info.size, tag)
+
 	if selection.kind == .Unsatisfiable {
-		value := fmt.aprintf("bytes */%d", info.size, allocator=request.allocator)
-		if value == "" do return {status=.Internal_Server_Error}
-		return make_response(request, .Range_Not_Satisfiable,
-			{{"Content-Range", value}, {"Accept-Ranges", "bytes"}, {"Cache-Control", cache_policy}})
+		value := fmt.aprintf("bytes */%d", info.size, allocator = request.allocator)
+		if value == "" do return {status = .Internal_Server_Error}
+		return make_response(
+			request,
+			.Range_Not_Satisfiable,
+			{{"Content-Range", value}, {"Accept-Ranges", "bytes"}, {"Cache-Control", cache_policy}},
+		)
 	}
+
 	start, length := i64(0), info.size
 	status: core.HTTP_Status = .OK
+
 	if selection.kind == .Partial {
 		start, length = selection.start, selection.length
 		status = .Partial_Content
 	}
+
 	content_type := config.content_type
 	if content_type == "" do content_type = asset_content_type(decoded)
 	type_error: mem.Allocator_Error
 	content_type, type_error = strings.clone(content_type, request.allocator)
-	if type_error != nil do return {status=.Internal_Server_Error}
+	if type_error != nil do return {status = .Internal_Server_Error}
 	headers: [6]Header
 	headers[0] = {"Content-Type", content_type}
 	headers[1] = {"Accept-Ranges", "bytes"}
 	headers[2] = {"Cache-Control", cache_policy}
 	count := 3
-	if tag != "" {headers[count] = {"ETag", tag}; count += 1}
+
+	if tag != "" {
+		headers[count] = {"ETag", tag}
+		count += 1
+	}
+
 	if status == .Partial_Content {
-		value := fmt.aprintf("bytes %d-%d/%d", start, start+length-1, info.size, allocator=request.allocator)
-		if value == "" do return {status=.Internal_Server_Error}
+		value := fmt.aprintf("bytes %d-%d/%d", start, start + length - 1, info.size, allocator = request.allocator)
+		if value == "" do return {status = .Internal_Server_Error}
 		headers[count] = {"Content-Range", value}
 		count += 1
 	}
+
 	response := make_response(request, status, headers[:count])
 	if response.status == .Internal_Server_Error do return response
 	allocator, binding, prepared := file_storage_allocator(request, config.allocator)
-	if !prepared do return {status=.Internal_Server_Error}
+	if !prepared do return {status = .Internal_Server_Error}
 	producer, error := new(File_Producer, allocator)
+
 	if error != nil || producer == nil {
 		charged.release(&binding)
-		return {status=.Internal_Server_Error}
+		return {status = .Internal_Server_Error}
 	}
-	producer^ = {file=file, offset=start, remaining=length, chunk_bytes=chunk_bytes,
-		allocator=allocator, binding=binding}
+
+	producer^ = {
+		file        = file,
+		offset      = start,
+		remaining   = length,
+		chunk_bytes = chunk_bytes,
+		allocator   = allocator,
+		binding     = binding,
+	}
+
 	response.stream = {
-		data=producer, next=file_next, drop=file_drop, content_length=length,
-		max_chunk_bytes=chunk_bytes, max_body_bytes=max(i64(1), length), timeout=config.timeout,
+		data            = producer,
+		next            = file_next,
+		drop            = file_drop,
+		content_length  = length,
+		max_chunk_bytes = chunk_bytes,
+		max_body_bytes  = max(i64(1), length),
+		timeout         = config.timeout,
 	}
+
 	transferred = true
+
 	return response
 }
 
 @(private)
 File_Producer :: struct {
-	binding: charged.Binding,
-	file: ^os.File,
+	binding:           charged.Binding,
+	file:              ^os.File,
 	offset, remaining: i64,
-	chunk_bytes: int,
-	storage: []u8,
-	borrowed: bool,
-	allocator: mem.Allocator,
+	chunk_bytes:       int,
+	storage:           []u8,
+	borrowed:          bool,
+	allocator:         mem.Allocator,
 }
 
 @(private)
@@ -288,23 +340,38 @@ file_next :: proc(data: rawptr, io: ^core.Stream_IO) -> core.Stream_Step {
 	assert(!producer.borrowed)
 	if core.request_cancelled(io.cancellation) do return .Failed
 	if producer.remaining == 0 do return .Done
+
 	if len(producer.storage) == 0 {
 		error: mem.Allocator_Error
-		producer.storage, error = make([]u8, int(min(i64(producer.chunk_bytes), producer.remaining)), producer.allocator)
+		producer.storage, error = make(
+			[]u8,
+			int(min(i64(producer.chunk_bytes), producer.remaining)),
+			producer.allocator,
+		)
 		if error != nil || len(producer.storage) == 0 do return .Failed
 	}
+
 	count := int(min(i64(len(producer.storage)), producer.remaining))
 	n, error := os.read_at(producer.file, producer.storage[:count], producer.offset)
 	// A shortened file aborts the fixed-length response; it cannot authorize reuse.
 	if error != nil || n != count do return .Failed
-	chunk := owned.Chunk{data=producer.storage[:n], storage=producer.storage, release=file_release, user_data=producer}
+	chunk := owned.Chunk {
+		data      = producer.storage[:n],
+		storage   = producer.storage,
+		release   = file_release,
+		user_data = producer,
+	}
+
 	producer.borrowed = true
-	if core.stream_submit_backing(io, &chunk, {allocator=producer.allocator}) != .Accepted {
+
+	if core.stream_submit_backing(io, &chunk, {allocator = producer.allocator}) != .Accepted {
 		owned.destroy(&chunk)
 		return .Failed
 	}
+
 	producer.offset += i64(n)
 	producer.remaining -= i64(n)
+
 	return .Chunk
 }
 
@@ -321,10 +388,12 @@ file_drop :: proc(data: rawptr) {
 
 @(private)
 file_strong_tag :: proc(tag: string) -> bool {
-	if len(tag) < 2 || tag[0] != '"' || tag[len(tag)-1] != '"' do return false
-	for c in tag[1:len(tag)-1] {
+	if len(tag) < 2 || tag[0] != '"' || tag[len(tag) - 1] != '"' do return false
+
+	for c in tag[1:len(tag) - 1] {
 		if !(c == 0x21 || (c >= 0x23 && c <= 0x7e) || c >= 0x80) do return false
 	}
+
 	return true
 }
 
@@ -332,6 +401,7 @@ file_strong_tag :: proc(tag: string) -> bool {
 file_relative_decode :: proc(relative: string, allocator: mem.Allocator) -> (string, bool) {
 	decoded, valid := net.percent_decode(relative, allocator)
 	if !valid || !module_relative_ok(decoded) || strings.has_suffix(decoded, ".jsx") do return "", false
+
 	return decoded, true
 }
 
@@ -340,6 +410,7 @@ file_relative_decode :: proc(relative: string, allocator: mem.Allocator) -> (str
 not_modified :: proc(request: ^Request, tag: string) -> bool {
 	fields, stars := 0, 0
 	matched, valid := false, true
+
 	for field in request.headers {
 		if !strings.equal_fold(field.name, "If-None-Match") do continue
 		fields += 1
@@ -348,6 +419,7 @@ not_modified :: proc(request: ^Request, tag: string) -> bool {
 		matched = matched || found
 		valid = valid && ok
 	}
+
 	return matched && valid && (stars == 0 || fields == 1)
 }
 
@@ -356,13 +428,23 @@ file_request_range :: proc(request: ^Request, size: i64, tag: string) -> http.By
 	if request.method != "GET" do return {}
 	ranges, conditions := 0, 0
 	value, condition: string
+
 	for field in request.headers {
-		if strings.equal_fold(field.name, "Range") {ranges += 1; value = field.value}
-		if strings.equal_fold(field.name, "If-Range") {conditions += 1; condition = strings.trim(field.value, " \t")}
+		if strings.equal_fold(field.name, "Range") {
+			ranges += 1
+			value = field.value
+		}
+
+		if strings.equal_fold(field.name, "If-Range") {
+			conditions += 1
+			condition = strings.trim(field.value, " \t")
+		}
 	}
+
 	if ranges != 1 || conditions > 1 do return {}
 	// Dates/weak/malformed/unknown validators always fall back to a full 200.
 	if conditions == 1 && (tag == "" || condition != tag) do return {}
+
 	return http.byte_range(value, size)
 }
 
@@ -370,8 +452,13 @@ file_request_range :: proc(request: ^Request, size: i64, tag: string) -> http.By
 // its retained backing Binding, or wrap an explicit host backing allocator.
 @(private)
 file_storage_allocator :: proc(
-	request: ^Request, configured: mem.Allocator,
-) -> (mem.Allocator, charged.Binding, bool) {
+	request: ^Request,
+	configured: mem.Allocator,
+) -> (
+	mem.Allocator,
+	charged.Binding,
+	bool,
+) {
 	managed := budget.same_scope(request.resources, request.resources)
 	if configured.procedure == nil {
 		allocator := request.backing_allocator
@@ -383,16 +470,12 @@ file_storage_allocator :: proc(
 		scope, valid := charged.allocator_scope(configured)
 		return configured, {}, valid && budget.covers(scope, request.resources)
 	}
-	binding, error := charged.create(request.resources, {backing=configured})
+	binding, error := charged.create(request.resources, {backing = configured})
 	if error.kind != .None do return {}, {}, false
 	return charged.allocator(binding), binding, true
 }
 
-serve_file :: proc(
-	request: ^Request,
-	path: string,
-	content_type := "text/html; charset=utf-8",
-) -> Response {
+serve_file :: proc(request: ^Request, path: string, content_type := "text/html; charset=utf-8") -> Response {
 	body, file_err := os.read_entire_file(path, request.allocator)
 
 	if file_err != nil {
@@ -443,6 +526,7 @@ Asset_Error :: struct {
 // Preserve the existing callable type; bounded defaults apply to old callers.
 prepare_assets :: proc(mounts: []Asset_Mount, allocator: mem.Allocator) -> ([]Asset_Cache, bool) {
 	caches, error := prepare_assets_bounded(mounts, {}, allocator)
+
 	if error.kind != .None {
 		log.errorf(
 			"Asset preload failed: %v mount=%d limit=%d observed=%d",
@@ -452,27 +536,34 @@ prepare_assets :: proc(mounts: []Asset_Mount, allocator: mem.Allocator) -> ([]As
 			error.observed,
 		)
 	}
+
 	return caches, error.kind == .None
 }
 
 @(private)
 normalize_limits :: proc(l: Asset_Limits) -> (Asset_Limits, bool) {
 	out := l
+
 	if out.max_mounts == 0 {
 		out.max_mounts = DEFAULT_ASSET_LIMITS.max_mounts
 	}
+
 	if out.max_files == 0 {
 		out.max_files = DEFAULT_ASSET_LIMITS.max_files
 	}
+
 	if out.max_entries == 0 {
 		out.max_entries = DEFAULT_ASSET_LIMITS.max_entries
 	}
+
 	if out.max_file_bytes == 0 {
 		out.max_file_bytes = DEFAULT_ASSET_LIMITS.max_file_bytes
 	}
+
 	if out.max_total_bytes == 0 {
 		out.max_total_bytes = DEFAULT_ASSET_LIMITS.max_total_bytes
 	}
+
 	return out,
 		out.max_mounts > 0 &&
 		out.max_files > 0 &&
@@ -512,6 +603,7 @@ prepare_assets_bounded :: proc(
 	counts: Asset_Counts
 	for mount, index in mounts {
 		error := preload_mount(&caches[index], mount, l, &counts, allocator)
+
 		if error.kind != .None {
 			error.mount_index = index
 			return nil, error
@@ -527,14 +619,21 @@ destroy_assets :: proc(caches: ^[]Asset_Cache, allocator: mem.Allocator) {
 	if caches == nil {
 		return
 	}
+
 	old := caches^
 	caches^ = nil
+
 	for cache in old {
-		for key, value in cache.files {delete(key, allocator); delete(value.body, allocator)}
+		for key, value in cache.files {
+			delete(key, allocator)
+			delete(value.body, allocator)
+		}
+
 		delete(cache.files)
 		delete(cache.mount.directory, allocator)
 		delete(cache.mount.prefix, allocator)
 	}
+
 	delete(old, allocator)
 }
 
@@ -593,7 +692,10 @@ preload_mount :: proc(
 	pending: [dynamic]string
 	pending.allocator = context.allocator
 	defer {
-		for path in pending {delete(path, pending.allocator)}
+		for path in pending {
+			delete(path, pending.allocator)
+		}
+
 		delete(pending)
 	}
 	first, qe := strings.clone(cache.mount.directory, pending.allocator)
@@ -608,6 +710,7 @@ preload_mount :: proc(
 		error := preload_directory(cache, pending[head], &pending, l, counts, allocator, &scratch)
 		delete(pending[head], pending.allocator)
 		pending[head] = ""
+
 		if error.kind != .None {
 			return error
 		}
@@ -636,48 +739,65 @@ preload_directory :: proc(
 	temporary := mem.dynamic_arena_allocator(scratch)
 	for file in os.read_directory_iterator(&iterator) {
 		_, ie := os.read_directory_iterator_error(&iterator)
+
 		if ie != nil {
 			return {kind = .Unavailable, io = ie}
 		}
+
 		counts.entries += 1
+
 		if counts.entries > l.max_entries {
 			return {kind = .Entry_Limit, limit = l.max_entries, observed = counts.entries}
 		}
+
 		if file.type == .Directory {
 			path, ce := strings.clone(file.fullpath, pending.allocator)
+
 			if ce != nil {
 				return {kind = .Allocation_Failed, allocation = ce}
 			}
+
 			if _, ae := append(pending, path); ae != nil {
 				delete(path, pending.allocator)
 				return {kind = .Allocation_Failed, allocation = ae}
 			}
+
 			continue
 		}
+
 		if file.type != .Regular {
 			continue
 		}
+
 		relative := file.fullpath[len(cache.mount.directory) + 1:]
+
 		if !module_relative_ok(relative) || strings.has_suffix(relative, ".jsx") {
 			continue
 		}
+
 		if counts.files == l.max_files {
 			return {kind = .File_Limit, limit = l.max_files, observed = counts.files + 1}
 		}
+
 		mem.dynamic_arena_free_all(scratch)
 		path, found, allowed := module_file(cache.mount.directory, relative, temporary)
+
 		if !allowed {
 			return {kind = .Outside_Mount}
 		}
+
 		if !found {
 			return {kind = .Unavailable}
 		}
+
 		// Directory mutation must not replace an existing owner and leak its body.
 		if _, duplicate := cache.files[relative]; duplicate {
 			return {kind = .Unavailable}
 		}
+
 		remaining := l.max_total_bytes - counts.bytes
 		body, read := read_limited(path, max(1, min(l.max_file_bytes, remaining)), allocator)
+
 		if read.kind != .None {
 			if read.kind == .Limit_Exceeded {
 				if remaining < l.max_file_bytes {
@@ -688,18 +808,17 @@ preload_directory :: proc(
 						read = read,
 					}
 				}
-				return {
-					kind = .File_Bytes,
-					limit = l.max_file_bytes,
-					observed = l.max_file_bytes + 1,
-					read = read,
-				}
+
+				return {kind = .File_Bytes, limit = l.max_file_bytes, observed = l.max_file_bytes + 1, read = read}
 			}
+
 			if read.kind == .Allocation_Failed {
 				return {kind = .Allocation_Failed, read = read}
 			}
+
 			return {kind = .Read_Failed, read = read}
 		}
+
 		if len(body) > remaining {
 			delete(body, allocator)
 			return {
@@ -708,31 +827,34 @@ preload_directory :: proc(
 				observed = counts.bytes + min(len(body), max(int) - counts.bytes),
 			}
 		}
+
 		key, ke := strings.clone(relative, allocator)
+
 		if ke != nil || raw_data(key) == nil {
 			delete(body, allocator)
 			return {kind = .Allocation_Failed, allocation = ke}
 		}
+
 		if len(cache.files) > max(int) / 2 - 1 {
 			delete(key, allocator)
 			delete(body, allocator)
 			return {kind = .File_Limit, limit = l.max_files, observed = len(cache.files)}
 		}
+
 		if me := reserve(&cache.files, 2 * (len(cache.files) + 1)); me != nil {
 			delete(key, allocator)
 			delete(body, allocator)
 			return {kind = .Allocation_Failed, allocation = me}
 		}
-		inserted, me := map_insert(
-			&cache.files,
-			key,
-			prepare_representation(body, asset_content_type(relative)),
-		)
+
+		inserted, me := map_insert(&cache.files, key, prepare_representation(body, asset_content_type(relative)))
+
 		if me != nil || inserted == nil {
 			delete(key, allocator)
 			delete(body, allocator)
 			return {kind = .Allocation_Failed, allocation = me}
 		}
+
 		counts.files += 1
 		counts.bytes += len(body)
 	}

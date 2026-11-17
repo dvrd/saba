@@ -12,12 +12,12 @@ import "core:time"
 import server "shared:saba"
 
 State :: struct {
-	assets: [1]server.Asset_Mount,
+	assets:  [1]server.Asset_Mount,
 	modules: [1]server.Module_Mount,
 	control: server.Server_Control,
 	config:  server.Server,
 	result:  bool,
-	logger: log.Logger,
+	logger:  log.Logger,
 }
 
 fixture_control: ^server.Server_Control
@@ -48,9 +48,11 @@ growth_allocator :: proc(
 routes :: proc(conn: ^server.Connection, request: ^server.Request) -> server.Response {
 	context.allocator = request.allocator
 	context.temp_allocator = request.allocator
+
 	if request.path == "/allow-growth" {
 		intrinsics.atomic_store(&growth_fail_enabled, false)
 	}
+
 	if request.path == "/capacity" {
 		state, valid := server.server_capacity(fixture_control)
 		assert(valid)
@@ -69,11 +71,13 @@ routes :: proc(conn: ^server.Connection, request: ^server.Request) -> server.Res
 	if request.path == "/echo" {
 		return server.make_response(request, .OK, nil, request.body)
 	}
+
 	if request.path == "/large" {
 		body := make([]u8, 2 * 1024 * 1024, request.allocator)
 		for &value, i in body do value = u8(i % 251)
 		return server.make_response(request, .OK, nil, body)
 	}
+
 	if request.path == "/html" {
 		return server.make_response(
 			request,
@@ -82,6 +86,7 @@ routes :: proc(conn: ^server.Connection, request: ^server.Request) -> server.Res
 			transmute([]u8)string("<html><head></head><body>hello</body></html>"),
 		)
 	}
+
 	return server.make_response(request, .OK, nil, transmute([]u8)string("ok"))
 }
 
@@ -91,23 +96,24 @@ main :: proc() {
 	state: State
 	state.logger = context.logger
 	fixture_configure(&state)
+
 	if os.get_env("SABA_TEST_PRESTOP", context.temp_allocator) == "1" {
 		server.stop_server(&state.control)
 		assert(server.serve(state.config))
 		fmt.println("stopped before startup")
 		return
 	}
-	worker := thread.create_and_start_with_poly_data(
-		&state,
-		proc(state: ^State) {
-			context.logger = state.logger
-			state.result = server.serve(state.config)
-		},
-	)
+
+	worker := thread.create_and_start_with_poly_data(&state, proc(state: ^State) {
+		context.logger = state.logger
+		state.result = server.serve(state.config)
+	})
 	assert(worker != nil)
 	deadline := time.tick_add(time.tick_now(), 5 * time.Second)
+
 	for time.tick_diff(time.tick_now(), deadline) > 0 {
 		endpoint, ready := server.server_endpoint(&state.control)
+
 		if ready {
 			intrinsics.atomic_store(
 				&growth_fail_enabled,
@@ -117,8 +123,10 @@ main :: proc() {
 			os.flush(os.stdout)
 			break
 		}
+
 		time.sleep(time.Millisecond)
 	}
+
 	_, ready := server.server_endpoint(&state.control)
 	assert(ready, "server did not start")
 	stop: [1]u8
@@ -146,8 +154,14 @@ fixture_configure :: proc(state: ^State) {
 	growth_fail_size = (initial * 2 + workers + 1) * size_of(rawptr)
 	web := os.get_env("SABA_TEST_WEB", context.temp_allocator)
 	development := os.get_env("SABA_TEST_DEVELOPMENT", context.temp_allocator) == "1"
-	state.assets[0] = {directory = fmt.tprintf("%s/assets", web)}
-	state.modules[0] = {directory = web}
+	state.assets[0] = {
+		directory = fmt.tprintf("%s/assets", web),
+	}
+
+	state.modules[0] = {
+		directory = web,
+	}
+
 	state.config = {
 		port = 0,
 		handler = routes,

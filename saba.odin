@@ -51,7 +51,9 @@ connection_writeback :: proc(view: ^Connection, transport: ^core.Connection) {
 @(private)
 connection_transport :: proc(view: ^Connection, local: ^core.Connection) -> ^core.Connection {
 	transport := view._transport
-	if transport == nil do transport = local
+	if transport == nil {
+		transport = local
+	}
 	connection_writeback(view, transport)
 
 	return transport
@@ -94,7 +96,9 @@ send_response :: proc(conn: ^Connection, response: Response, request_method: str
 			return false
 		}
 
-		if injected != nil do prepared.body = injected
+		if injected != nil {
+			prepared.body = injected
+		}
 	}
 
 	defer delete(injected)
@@ -260,7 +264,9 @@ load_environment_file :: proc(path := ".env") -> bool {
 	defer mem.dynamic_arena_destroy(&arena)
 	allocator := mem.dynamic_arena_allocator(&arena)
 	data, error := os.read_entire_file(path, allocator)
-	if reason, general := error.(os.General_Error); general && reason == .Not_Exist do return true
+	if reason, general := error.(os.General_Error); general && reason == .Not_Exist {
+		return true
+	}
 
 	if error != nil {
 		log.errorf("Could not read environment file %s", path)
@@ -282,7 +288,9 @@ load_environment_file :: proc(path := ".env") -> bool {
 	// Validate the complete file before changing the process environment.
 	for key, value in values {
 		_, exported := os.lookup_env(key, allocator)
-		if exported do continue
+		if exported {
+			continue
+		}
 
 		if os.set_env(key, value) != nil {
 			log.errorf("Could not apply environment file %s", path); return false
@@ -332,8 +340,12 @@ environment_value :: proc(raw: string, allocator: mem.Allocator) -> (string, boo
 
 	for index := 0; index < len(line); index += 1 {
 		c := line[index]
-		if c == 0 do return "", false
-		if quote == 0 && c == '#' && (index == 0 || line[index - 1] == ' ' || line[index - 1] == '\t') do break
+		if c == 0 {
+			return "", false
+		}
+		if quote == 0 && c == '#' && (index == 0 || line[index - 1] == ' ' || line[index - 1] == '\t') {
+			break
+		}
 
 		if quote == 0 && (c == '\'' || c == '"') {
 			quote = c
@@ -347,7 +359,9 @@ environment_value :: proc(raw: string, allocator: mem.Allocator) -> (string, boo
 
 		if c == '\\' && quote != '\'' {
 			index += 1
-			if index >= len(line) do return "", false
+			if index >= len(line) {
+				return "", false
+			}
 			c = line[index]
 
 			if quote == '"' {
@@ -366,10 +380,14 @@ environment_value :: proc(raw: string, allocator: mem.Allocator) -> (string, boo
 		}
 
 		strings.write_byte(&value, c)
-		if quote != 0 || (c != ' ' && c != '\t') do kept = len(value.buf)
+		if quote != 0 || (c != ' ' && c != '\t') {
+			kept = len(value.buf)
+		}
 	}
 
-	if quote != 0 do return "", false
+	if quote != 0 {
+		return "", false
+	}
 
 	return strings.to_string(value)[:kept], true
 }
@@ -383,15 +401,25 @@ environment_parse :: proc(source: string, allocator: mem.Allocator) -> (map[stri
 	for raw in strings.split_lines_iterator(&rest) {
 		line_number += 1
 		line := strings.trim_space(raw)
-		if line == "" || line[0] == '#' do continue
-		if len(line) > 6 && line[:6] == "export" && (line[6] == ' ' || line[6] == '\t') do line = strings.trim_left_space(line[6:])
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		if len(line) > 6 && line[:6] == "export" && (line[6] == ' ' || line[6] == '\t') {
+			line = strings.trim_left_space(line[6:])
+		}
 		equal := strings.index_byte(line, '=')
 		key := ""
-		if equal > 0 do key = strings.trim_space(line[:equal])
+		if equal > 0 {
+			key = strings.trim_space(line[:equal])
+		}
 		value: string
 		valid := environment_key_ok(key)
-		if valid do value, valid = environment_value(line[equal + 1:], allocator)
-		if !valid do return nil, line_number
+		if valid {
+			value, valid = environment_value(line[equal + 1:], allocator)
+		}
+		if !valid {
+			return nil, line_number
+		}
 		values[key] = value
 	}
 

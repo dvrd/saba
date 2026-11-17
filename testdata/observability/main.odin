@@ -20,7 +20,9 @@ routes :: proc(_: ^server.Connection, request: ^server.Request) -> server.Respon
 
 	if server.match_route(request, "GET", "/large") {
 		body := make([]u8, 64 * 1024 * 1024, request.allocator)
-		for &value in body do value = 42
+		for &value in body {
+			value = 42
+		}
 		return server.make_response(request, .OK, nil, body)
 	}
 

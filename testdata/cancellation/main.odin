@@ -80,7 +80,9 @@ route :: proc(data: rawptr, _: ^server.Connection, request: ^server.Request) -> 
 	if request.path == "/peer" {
 		retain(state, request)
 		body := make([]u8, 4 * 1024 * 1024, request.allocator)
-		for &byte in body do byte = 42
+		for &byte in body {
+			byte = 42
+		}
 		return server.make_response(request, .OK, nil, body)
 	}
 

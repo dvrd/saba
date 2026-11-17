@@ -72,7 +72,9 @@ Http3_Request :: struct {
 }
 
 http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
-	if state == nil || !state.config.enabled || state.runtime == nil || state.config.credentials == nil do return 0, false
+	if state == nil || !state.config.enabled || state.runtime == nil || state.config.credentials == nil {
+		return 0, false
+	}
 
 	if !http3_phases_valid(state.config.request_phases) || !timeout_in_range(state.config.request_timeout) {
 		return 0, false
@@ -93,7 +95,9 @@ http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
 		state.config.handler_data = state.runtime.config.handler_data
 	}
 
-	if state.config.handler == nil do return 0, false
+	if state.config.handler == nil {
+		return 0, false
+	}
 	early_policy: http3.Early_Request_Policy
 
 	if state.config.early_request_policy != nil {
@@ -124,30 +128,42 @@ http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
 	}
 
 	port, ok = http3.listener_listen(&state.live)
-	if ok do state.config.endpoint.port = port
+	if ok {
+		state.config.endpoint.port = port
+	}
 
 	return
 }
 
 http3_step :: proc(state: ^Http3) -> bool {
-	if state == nil do return false
+	if state == nil {
+		return false
+	}
 
 	return http3.listener_step(&state.live)
 }
 http3_drain :: proc(state: ^Http3) {
-	if state != nil do http3.listener_drain(&state.live)
+	if state != nil {
+		http3.listener_drain(&state.live)
+	}
 }
 // Owner-only. Runtime integration calls this from the listener's retirement
 // callback, after all running application callbacks have returned.
 http3_close :: proc(state: ^Http3) {
-	if state != nil do http3.listener_close(&state.live)
+	if state != nil {
+		http3.listener_close(&state.live)
+	}
 }
 
 @(private)
 http3_resume :: proc(data: rawptr) -> async.Resume_Result {
 	state := cast(^Http3)data
-	if async.cancelled(&state.task) do return .Done
-	if server_is_draining(state.runtime) do http3_drain(state)
+	if async.cancelled(&state.task) {
+		return .Done
+	}
+	if server_is_draining(state.runtime) {
+		http3_drain(state)
+	}
 	// Protect admitted transport work while step may create/release a request.
 	// Drain reads only this atomic snapshot, never mutable QUIC state.
 	sync.atomic_store(&state._pending, true)
@@ -159,7 +175,9 @@ http3_resume :: proc(data: rawptr) -> async.Resume_Result {
 	}
 
 	sync.atomic_store(&state._pending, http3.listener_pending(&state.live))
-	if server_is_draining(state.runtime) && !sync.atomic_load(&state._pending) do async.wake(&state.runtime.executor, &state.runtime.accept_task)
+	if server_is_draining(state.runtime) && !sync.atomic_load(&state._pending) {
+		async.wake(&state.runtime.executor, &state.runtime.accept_task)
+	}
 	// UDP is nonblocking. A bounded poll also observes deferred wakes and applies
 	// producer backpressure; never replace an earlier stream/deferred watchdog.
 	error := async.sleep_until_earlier(
@@ -179,7 +197,9 @@ http3_retire :: proc(data: rawptr) {
 @(private)
 http3_create_request :: proc(owner: ^Http3, wire: ^http3.Server_Request) -> ^Http3_Request {
 	state, error := new(Http3_Request, rt.heap_allocator())
-	if error != nil do return nil
+	if error != nil {
+		return nil
+	}
 	state.owner = owner
 	task := &state.connection
 	task.runtime = owner.runtime
@@ -248,7 +268,9 @@ http3_create_request :: proc(owner: ^Http3, wire: ^http3.Server_Request) -> ^Htt
 		for field, i in wire.trailers {trailers[i] = {field.name, field.value}}; task.request.trailers = trailers
 	}
 
-	if task.request.backing_allocator.procedure == nil do task.request.backing_allocator = rt.heap_allocator()
+	if task.request.backing_allocator.procedure == nil {
+		task.request.backing_allocator = rt.heap_allocator()
+	}
 
 	if at := strings.index_byte(wire.target, '?'); at >= 0 {
 		task.request.path, task.request.query = wire.target[:at], wire.target[at + 1:]
@@ -280,7 +302,9 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 
 	if state == nil {
 		state = http3_create_request(owner, wire)
-		if state == nil do return .Failed
+		if state == nil {
+			return .Failed
+		}
 		wire.user_data = state
 	}
 
@@ -288,13 +312,17 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 	task.request.early_data = wire.early
 	context.logger = owner.runtime.logger
 	context.temp_allocator = mem.dynamic_arena_allocator(&task.arena)
-	if request_cancelled(task.request.cancellation) || state.failed do return .Failed
+	if request_cancelled(task.request.cancellation) || state.failed {
+		return .Failed
+	}
 
 	if !state.initialized {
 		state.initialized = true
 		response: Response
 		limit := REQUEST_BODY_LIMIT
-		if owner.runtime.config.request_body_limit != nil do limit = owner.runtime.config.request_body_limit(&task.request)
+		if owner.runtime.config.request_body_limit != nil {
+			limit = owner.runtime.config.request_body_limit(&task.request)
+		}
 
 		if task.request.protocol != "" && task.request.protocol != "websocket" {
 			response = {
@@ -344,7 +372,9 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 
 		if step != .Ready {
 			discard_response(&response)
-			if step == .Failed do return .Failed
+			if step == .Failed {
+				return .Failed
+			}
 			_ = async.sleep_until_earlier(&owner.runtime.executor, task.deferred_deadline)
 			return .Pending
 		}
@@ -373,7 +403,9 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 		}
 	}
 
-	if response.status == .None do response.status = .OK
+	if response.status == .None {
+		response.status = .OK
+	}
 
 	if owner.config.max_body > 0 && len(response.body) > owner.config.max_body {
 		owner.rejected = true
@@ -381,10 +413,14 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 	}
 
 	if stream_present(response.stream) && owner.config.max_body > 0 {
-		if response.stream.max_body_bytes == 0 || response.stream.max_body_bytes > i64(owner.config.max_body) do response.stream.max_body_bytes = i64(owner.config.max_body)
+		if response.stream.max_body_bytes == 0 || response.stream.max_body_bytes > i64(owner.config.max_body) {
+			response.stream.max_body_bytes = i64(owner.config.max_body)
+		}
 	}
 
-	if !resource_copy_response(task, response) do return .Failed
+	if !resource_copy_response(task, response) {
+		return .Failed
+	}
 	out.status = int(response.status)
 	extra := 0
 
@@ -400,11 +436,15 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 	}
 
 	headers, he := make([]http3.Field, len(response.headers) + extra, task.request.allocator)
-	if he != nil do return .Failed
+	if he != nil {
+		return .Failed
+	}
 
 	for field, i in response.headers {
 		name, error := strings.to_lower(field.name, task.request.allocator)
-		if error != nil do return .Failed
+		if error != nil {
+			return .Failed
+		}
 		headers[i] = {
 			name          = name,
 			value         = field.value,
@@ -414,11 +454,15 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 
 	if extra != 0 {
 		length := i64(len(response.body))
-		if stream_present(response.stream) do length = response.stream.content_length
+		if stream_present(response.stream) {
+			length = response.stream.content_length
+		}
 
 		if length >= 0 {
 			storage, error := make([]u8, 32, task.request.allocator)
-			if error != nil do return .Failed
+			if error != nil {
+				return .Failed
+			}
 			headers[len(response.headers)] = {
 				name  = "content-length",
 				value = strconv.write_int(storage, length, 10),
@@ -455,7 +499,9 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 		response.stream = {}
 		prepared := response^
 		prepared.stream = stream
-		if !queue_stream_response(task, prepared) do return .Failed
+		if !queue_stream_response(task, prepared) {
+			return .Failed
+		}
 		out.stream = {
 			data = state,
 			next = http3_stream_next,
@@ -475,12 +521,16 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 @(private)
 http3_stream_next :: proc(data: rawptr, dst: []u8) -> (int, http3.Stream_Status) {
 	state := cast(^Http3_Request)data
-	if len(dst) == 0 do return 0, .Pending
+	if len(dst) == 0 {
+		return 0, .Pending
+	}
 	task := &state.connection
 	context.logger = task.runtime.logger
 	context.temp_allocator = mem.dynamic_arena_allocator(&task.arena)
 	stream := task.streaming
-	if stream == nil || state.failed do return 0, .Failed
+	if stream == nil || state.failed {
+		return 0, .Failed
+	}
 
 	if !stream.pending && !stream.terminal {
 		result := produce_stream(task)
@@ -490,7 +540,9 @@ http3_stream_next :: proc(data: rawptr, dst: []u8) -> (int, http3.Stream_Status)
 			return 0, .Failed
 		}
 
-		if !stream.pending && !stream.terminal do return 0, .Pending
+		if !stream.pending && !stream.terminal {
+			return 0, .Pending
+		}
 	}
 
 	if stream.terminal {
@@ -499,7 +551,9 @@ http3_stream_next :: proc(data: rawptr, dst: []u8) -> (int, http3.Stream_Status)
 	}
 
 	body, ok := exchange.body(&stream.exchange)
-	if !ok do return 0, .Failed
+	if !ok {
+		return 0, .Failed
+	}
 	n := copy(dst, body[state.offset:])
 	state.offset += n
 
@@ -508,7 +562,9 @@ http3_stream_next :: proc(data: rawptr, dst: []u8) -> (int, http3.Stream_Status)
 		// Destroy the accepted chunk before the next producer callback. The wire
 		// owns its bounded copy and never borrows producer storage across calls.
 		stream.pending = false
-		if !exchange.release_body(&stream.exchange) do return 0, .Failed
+		if !exchange.release_body(&stream.exchange) {
+			return 0, .Failed
+		}
 	}
 
 	return n, .Chunk
@@ -522,7 +578,9 @@ http3_stream_drop :: proc(data: rawptr) {
 http3_release :: proc(user: rawptr, wire: ^http3.Server_Request) {
 	state := cast(^Http3_Request)wire.user_data
 	wire.user_data = nil
-	if state == nil do return
+	if state == nil {
+		return
+	}
 	task := &state.connection
 	task.response_finished = wire.completed
 	discard_response(&state.response)

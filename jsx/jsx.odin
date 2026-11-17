@@ -35,8 +35,12 @@ transform_jsx :: proc(source, file: string, allocator := context.allocator) -> (
 
 	// A hashbang must remain the first line, before any generated import.
 	if strings.has_prefix(source, "#!") {
-		for p.position < len(source) && source[p.position] != '\n' do p.position += 1
-		if p.position < len(source) do p.position += 1
+		for p.position < len(source) && source[p.position] != '\n' {
+			p.position += 1
+		}
+		if p.position < len(source) {
+			p.position += 1
+		}
 		jsx_emit(&p, source[:p.position])
 	}
 
@@ -48,7 +52,9 @@ transform_jsx :: proc(source, file: string, allocator := context.allocator) -> (
 		return "", p.error
 	}
 
-	if !p.uses_jsx do return strings.to_string(p.output), {}
+	if !p.uses_jsx {
+		return strings.to_string(p.output), {}
+	}
 	defer strings.builder_destroy(&p.output)
 	result := strings.builder_make()
 	strings.write_string(&result, source[:header_length])
@@ -81,20 +87,32 @@ jsx_helper_name :: proc(source, base: string) -> string {
 		if source[i] == '\\' && i + 2 < len(source) && source[i + 1] == 'u' {
 			start := i + 2
 			braced := source[start] == '{'
-			if braced do start += 1
+			if braced {
+				start += 1
+			}
 			end := start
 			value := 0
 
 			for end < len(source) && end - start < 6 {
 				c := source[end]
 				digit := -1
-				if jsx_digit(c) do digit = int(c - '0')
-				if c >= 'a' && c <= 'f' do digit = int(c - 'a') + 10
-				if c >= 'A' && c <= 'F' do digit = int(c - 'A') + 10
-				if digit < 0 do break
+				if jsx_digit(c) {
+					digit = int(c - '0')
+				}
+				if c >= 'a' && c <= 'f' {
+					digit = int(c - 'a') + 10
+				}
+				if c >= 'A' && c <= 'F' {
+					digit = int(c - 'A') + 10
+				}
+				if digit < 0 {
+					break
+				}
 				value = value * 16 + digit
 				end += 1
-				if !braced && end - start == 4 do break
+				if !braced && end - start == 4 {
+					break
+				}
 			}
 
 			valid := end - start == 4
@@ -125,7 +143,9 @@ jsx_helper_name :: proc(source, base: string) -> string {
 
 @(private)
 jsx_fail :: proc(p: ^JSX_Parser, message: string) {
-	if p.error.message != "" do return
+	if p.error.message != "" {
+		return
+	}
 	line, column := 1, 1
 
 	for r in p.source[:min(p.position, len(p.source))] {
@@ -167,7 +187,9 @@ jsx_peek :: proc(p: ^JSX_Parser, offset := 0) -> u8 {
 
 @(private)
 jsx_take :: proc(p: ^JSX_Parser, text: string) -> bool {
-	if !strings.has_prefix(p.source[p.position:], text) do return false
+	if !strings.has_prefix(p.source[p.position:], text) {
+		return false
+	}
 	p.position += len(text)
 
 	return true
@@ -192,7 +214,9 @@ jsx_identifier_part :: proc(c: u8) -> bool {
 
 @(private)
 jsx_whitespace :: proc(p: ^JSX_Parser) {
-	for jsx_space(jsx_peek(p)) do p.position += 1
+	for jsx_space(jsx_peek(p)) {
+		p.position += 1
+	}
 }
 
 @(private)
@@ -205,7 +229,9 @@ jsx_name :: proc(p: ^JSX_Parser) -> string {
 	}
 
 	p.position += 1
-	for jsx_identifier_part(jsx_peek(p)) || jsx_peek(p) == '-' || jsx_peek(p) == '.' || jsx_peek(p) == ':' do p.position += 1
+	for jsx_identifier_part(jsx_peek(p)) || jsx_peek(p) == '-' || jsx_peek(p) == '.' || jsx_peek(p) == ':' {
+		p.position += 1
+	}
 
 	return p.source[start:p.position]
 }
@@ -221,20 +247,28 @@ jsx_text_child :: proc(p: ^JSX_Parser, text: string) {
 	last := -1
 
 	for line, i in lines {
-		if strings.trim_space(line) != "" do last = i
+		if strings.trim_space(line) != "" {
+			last = i
+		}
 	}
 
 	for raw_line, i in lines {
 		line := raw_line
 		line = strings.trim_right(line, "\r")
-		if i > 0 do line = strings.trim_left(line, " \t")
-		if i < len(lines) - 1 do line = strings.trim_right(line, " \t")
+		if i > 0 {
+			line = strings.trim_left(line, " \t")
+		}
+		if i < len(lines) - 1 {
+			line = strings.trim_right(line, " \t")
+		}
 
 		for c in line {
 			strings.write_rune(&b, ' ' if c == '\t' else c)
 		}
 
-		if len(line) > 0 && i < last do strings.write_byte(&b, ' ')
+		if len(line) > 0 && i < last {
+			strings.write_byte(&b, ' ')
+		}
 	}
 
 	if len(b.buf) > 0 {
@@ -258,10 +292,14 @@ jsx_expression :: proc(p: ^JSX_Parser, allow_empty := false) {
 		return
 	}
 
-	if !has_tokens do resize(&p.output.buf, start)
+	if !has_tokens {
+		resize(&p.output.buf, start)
+	}
 	// A comment-only child is empty. An attribute expression must have a value.
 	value := strings.trim_space(string(p.output.buf[start:]))
-	if value == "" && !allow_empty do jsx_fail(p, "JSX attribute expressions cannot be empty")
+	if value == "" && !allow_empty {
+		jsx_fail(p, "JSX attribute expressions cannot be empty")
+	}
 }
 
 @(private)
@@ -291,7 +329,9 @@ jsx_element :: proc(p: ^JSX_Parser) {
 		jsx_emit(p, ", null")
 	} else {
 		tag = jsx_name(p)
-		if p.error.message != "" do return
+		if p.error.message != "" {
+			return
+		}
 
 		if strings.contains(tag, ":") {
 			jsx_fail(p, "Namespaced JSX tags are not supported")
@@ -341,7 +381,9 @@ jsx_element :: proc(p: ^JSX_Parser) {
 				return
 			}
 
-			if jsx_take(p, ">") do break
+			if jsx_take(p, ">") {
+				break
+			}
 
 			if jsx_peek(p) == 0 {
 				jsx_fail(p, "Unclosed JSX opening tag")
@@ -378,7 +420,9 @@ jsx_element :: proc(p: ^JSX_Parser) {
 			}
 
 			attribute := jsx_name(p)
-			if p.error.message != "" do return
+			if p.error.message != "" {
+				return
+			}
 
 			if strings.contains(attribute, ".") {
 				jsx_fail(p, "JSX attribute names cannot contain a dot"); return
@@ -398,7 +442,9 @@ jsx_element :: proc(p: ^JSX_Parser) {
 					quote := jsx_peek(p)
 					p.position += 1
 					start := p.position
-					for jsx_peek(p) != quote && jsx_peek(p) != 0 do p.position += 1
+					for jsx_peek(p) != quote && jsx_peek(p) != 0 {
+						p.position += 1
+					}
 
 					if jsx_peek(p) == 0 {
 						jsx_fail(p, "Unclosed JSX attribute string")
@@ -593,7 +639,9 @@ jsx_javascript_scan :: proc(
 	arrow_body := false
 	for p.position < len(p.source) && p.error.message == "" {
 		c := jsx_peek(p)
-		if c == stop do return
+		if c == stop {
+			return
+		}
 		start := p.position
 		comment := c == '/' && (jsx_peek(p, 1) == '/' || jsx_peek(p, 1) == '*')
 
@@ -602,7 +650,9 @@ jsx_javascript_scan :: proc(
 			return
 		}
 
-		if !jsx_space(c) && !comment do has_tokens = true
+		if !jsx_space(c) && !comment {
+			has_tokens = true
+		}
 
 		switch {
 		case jsx_space(c):
@@ -612,14 +662,18 @@ jsx_javascript_scan :: proc(
 			p.position += 2
 
 			if block {
-				for jsx_peek(p) != 0 && !(jsx_peek(p) == '*' && jsx_peek(p, 1) == '/') do p.position += 1
+				for jsx_peek(p) != 0 && !(jsx_peek(p) == '*' && jsx_peek(p, 1) == '/') {
+					p.position += 1
+				}
 
 				if !jsx_take(p, "*/") {
 					jsx_fail(p, "Unclosed JavaScript comment")
 					return
 				}
 			} else {
-				for jsx_peek(p) != 0 && jsx_peek(p) != '\n' do p.position += 1
+				for jsx_peek(p) != 0 && jsx_peek(p) != '\n' {
+					p.position += 1
+				}
 			}
 		case c == '\'' || c == '"':
 			p.position += 1
@@ -631,7 +685,9 @@ jsx_javascript_scan :: proc(
 
 				if jsx_peek(p) == '\\' && jsx_peek(p, 1) != 0 {
 					p.position += 1
-					if jsx_peek(p) == '\r' && jsx_peek(p, 1) == '\n' do p.position += 1
+					if jsx_peek(p) == '\r' && jsx_peek(p, 1) == '\n' {
+						p.position += 1
+					}
 				}
 
 				p.position += 1
@@ -660,7 +716,9 @@ jsx_javascript_scan :: proc(
 					jsx_emit(p, "}")
 				} else {
 					start = p.position
-					if jsx_peek(p) == '\\' && jsx_peek(p, 1) != 0 do p.position += 1
+					if jsx_peek(p) == '\\' && jsx_peek(p, 1) != 0 {
+						p.position += 1
+					}
 					p.position += 1
 					jsx_emit(p, p.source[start:p.position])
 				}
@@ -688,21 +746,33 @@ jsx_javascript_scan :: proc(
 				p.position += 1
 
 				if v == '\\' {
-					if jsx_peek(p) != 0 do p.position += 1
+					if jsx_peek(p) != 0 {
+						p.position += 1
+					}
 					continue
 				}
 
-				if v == '[' do in_class = true
-				if v == ']' do in_class = false
-				if v == '/' && !in_class do break
+				if v == '[' {
+					in_class = true
+				}
+				if v == ']' {
+					in_class = false
+				}
+				if v == '/' && !in_class {
+					break
+				}
 			}
 
-			for jsx_identifier_part(jsx_peek(p)) do p.position += 1
+			for jsx_identifier_part(jsx_peek(p)) {
+				p.position += 1
+			}
 			expect_value = false
 			statement_start = false
 		case jsx_identifier_start(c):
 			p.position += 1
-			for jsx_identifier_part(jsx_peek(p)) do p.position += 1
+			for jsx_identifier_part(jsx_peek(p)) {
+				p.position += 1
+			}
 			word := p.source[start:p.position]
 
 			if member_name {
@@ -716,7 +786,9 @@ jsx_javascript_scan :: proc(
 				iterable := in_for_header && word == "of" && !expect_value && !binding_keyword
 				for_paren = word == "for" || for_paren && word == "await"
 				binding_keyword = word == "const" || word == "let" || word == "var"
-				if (word == "function" || word == "class") && statement_start do declaration_header = true
+				if (word == "function" || word == "class") && statement_start {
+					declaration_header = true
+				}
 				control_paren =
 					word == "if" ||
 					word == "while" ||
@@ -751,7 +823,9 @@ jsx_javascript_scan :: proc(
 			}
 		case jsx_digit(c):
 			p.position += 1
-			for jsx_identifier_part(jsx_peek(p)) || jsx_peek(p) == '.' do p.position += 1
+			for jsx_identifier_part(jsx_peek(p)) || jsx_peek(p) == '.' {
+				p.position += 1
+			}
 			expect_value = false
 			statement_start = false
 		case c == '<' && expect_value && (jsx_identifier_start(jsx_peek(p, 1)) || jsx_peek(p, 1) == '>'):
@@ -761,13 +835,19 @@ jsx_javascript_scan :: proc(
 			continue
 		case c == '(' || c == '[' || c == '{':
 			closing: u8 = ')'
-			if c == '[' do closing = ']'
-			if c == '{' do closing = '}'
+			if c == '[' {
+				closing = ']'
+			}
+			if c == '{' {
+				closing = '}'
+			}
 			control := control_paren
 			iterable_header := c == '(' && for_paren
 			brace_statement := c == '{' && (statement_start || declaration_header)
 			brace_block := c == '{' && (brace_statement || !expect_value || arrow_body)
-			if c == '{' do declaration_header = false
+			if c == '{' {
+				declaration_header = false
+			}
 			control_paren = false
 			for_paren = false
 			binding_keyword = false
@@ -794,10 +874,14 @@ jsx_javascript_scan :: proc(
 			control_paren = false
 			for_paren = false
 			binding_keyword = false
-			if c == ';' do in_for_header = false
+			if c == ';' {
+				in_for_header = false
+			}
 			statement_start = c == ';'
 			arrow_body = c == '=' && jsx_peek(p) == '>'
-			if arrow_body do p.position += 1
+			if arrow_body {
+				p.position += 1
+			}
 			member_name = c == '.' && jsx_peek(p) != '.'
 
 			if (c == '+' || c == '-') && jsx_peek(p) == c {

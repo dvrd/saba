@@ -39,7 +39,9 @@ development_signal :: proc "c" (signal: posix.Signal) {
 // executable as a child; that child returns handled=false and starts normally.
 // Only successful, current builds replace the running child.
 develop :: proc(config: Development) -> (handled, success: bool) {
-	if os.get_env(DEVELOPMENT_CHILD, context.temp_allocator) != "" do return false, true
+	if os.get_env(DEVELOPMENT_CHILD, context.temp_allocator) != "" {
+		return false, true
+	}
 	handled = true
 
 	if !os.is_dir(config.package_directory) {
@@ -96,7 +98,9 @@ develop :: proc(config: Development) -> (handled, success: bool) {
 	}
 
 	active := true
-	defer if active do development_stop(child)
+	defer if active {
+		development_stop(child)
+	}
 	sync.atomic_store(&development_stopping, false)
 	old_int := posix.signal(.SIGINT, development_signal)
 	old_term := posix.signal(.SIGTERM, development_signal)
@@ -118,14 +122,18 @@ develop :: proc(config: Development) -> (handled, success: bool) {
 		&active,
 		observed,
 	)
-	if command[0] != executable do delete(command[0])
+	if command[0] != executable {
+		delete(command[0])
+	}
 
 	return true, true
 }
 
 @(private)
 development_compiler :: proc(config: Development) -> string {
-	if config.compiler != "" do return config.compiler
+	if config.compiler != "" {
+		return config.compiler
+	}
 	compiler := os.get_env("ODIN", context.temp_allocator)
 
 	return "odin" if compiler == "" else compiler
@@ -135,7 +143,9 @@ development_compiler :: proc(config: Development) -> string {
 development_paths :: proc(config: Development, compiler: string) -> ([]string, bool) {
 	paths := make([dynamic]string, context.temp_allocator)
 	append(&paths, config.package_directory)
-	if len(config.watch_directories) > 128 do return nil, false
+	if len(config.watch_directories) > 128 {
+		return nil, false
+	}
 
 	for directory in config.watch_directories {
 		if directory == "" || !os.is_dir(directory) {
@@ -219,7 +229,9 @@ development_supervise :: proc(
 			continue
 		}
 
-		if current == published do continue
+		if current == published {
+			continue
+		}
 		published = current
 		generation += 1
 		// Scratch output never overwrites the executable that is still serving.
@@ -246,7 +258,9 @@ development_supervise :: proc(
 			"Backend rebuilt in %.2f seconds; restarting",
 			f64(time.tick_since(build_started)) / f64(time.Second),
 		)
-		if active^ do development_stop(child^)
+		if active^ {
+			development_stop(child^)
+		}
 		active^ = false
 		previous := command[0]
 		command[0] = next
@@ -274,10 +288,14 @@ development_build :: proc(config: Development, compiler, next: string) -> (bool,
 	optimized := false
 
 	for argument in config.build_arguments {
-		if strings.has_prefix(argument, "-o:") do optimized = true
+		if strings.has_prefix(argument, "-o:") {
+			optimized = true
+		}
 	}
 
-	if !optimized do append(&args, "-o:none")
+	if !optimized {
+		append(&args, "-o:none")
+	}
 	append(&args, ..config.build_arguments)
 	flag := fmt.aprintf("-out:%s", next)
 	append(&args, flag)
@@ -305,7 +323,9 @@ development_build :: proc(config: Development, compiler, next: string) -> (bool,
 			}
 		}
 
-		if builder_running do development_stop(builder)
+		if builder_running {
+			development_stop(builder)
+		}
 	}
 
 	delete(args)
@@ -341,7 +361,9 @@ development_signature :: proc(paths: []string) -> (signature: u64, ok: bool) {
 				}
 			}
 
-			if info.type != .Regular do continue
+			if info.type != .Regular {
+				continue
+			}
 			extension := filepath.ext(info.fullpath)
 			if extension != ".odin" &&
 			   extension != ".js" &&
@@ -354,7 +376,9 @@ development_signature :: proc(paths: []string) -> (signature: u64, ok: bool) {
 				continue
 			}
 
-			if strings.contains(info.fullpath, "/.git/") do continue
+			if strings.contains(info.fullpath, "/.git/") {
+				continue
+			}
 			bytes, err := os.read_entire_file(info.fullpath, context.allocator)
 
 			if err != nil {
@@ -368,8 +392,12 @@ development_signature :: proc(paths: []string) -> (signature: u64, ok: bool) {
 
 		_, err := os.walker_error(&walker)
 		os.walker_destroy(&walker)
-		if err != nil do ok = false
-		if !ok do return
+		if err != nil {
+			ok = false
+		}
+		if !ok {
+			return
+		}
 	}
 
 	return
@@ -398,10 +426,14 @@ reload_client_response :: proc(request: ^Request) -> Response {
 }
 
 reload_html_response :: proc(response: Response) -> bool {
-	if response.status != .None && response.status != .OK do return false
+	if response.status != .None && response.status != .OK {
+		return false
+	}
 
 	for header in response.headers {
-		if !strings.equal_fold(header.name, "Content-Type") do continue
+		if !strings.equal_fold(header.name, "Content-Type") {
+			continue
+		}
 
 		media_type := header.value
 
@@ -416,7 +448,9 @@ reload_html_response :: proc(response: Response) -> bool {
 }
 
 inject_reload_client :: proc(html: []u8, allocator := context.allocator) -> (injected: []u8, ok: bool) {
-	if strings.contains(string(html), RELOAD_CLIENT_TAG) do return nil, true
+	if strings.contains(string(html), RELOAD_CLIENT_TAG) {
+		return nil, true
+	}
 
 	position := strings.index(string(html), "</head>")
 
@@ -449,7 +483,9 @@ web_signature :: proc(directory: string) -> (signature: u64, ok: bool) {
 	ok = true
 
 	for info in os.walker_walk(&walker) {
-		if info.type != .Regular do continue
+		if info.type != .Regular {
+			continue
+		}
 
 		data, err := os.read_entire_file(info.fullpath, context.allocator)
 
@@ -488,7 +524,9 @@ watch_web :: proc(state: ^Reload_State) {
 		time.sleep(RELOAD_INTERVAL)
 
 		current, ok := web_signature(state.directory)
-		if !ok do continue
+		if !ok {
+			continue
+		}
 
 		// Wait for two matching scans before publishing a change.
 		if current != observed {
@@ -528,20 +566,32 @@ Reload_Session :: struct {
 // This adapter owns WebSocket framing/session storage; core drives only the
 // optional continuation on its existing task and destroys it exactly once.
 handle :: proc(state: ^Reload_State, request: ^Request) -> (Response, bool) {
-	if core.match_route(request, "GET", "/__reload/client.js") do return reload_client_response(request), true
-	if !core.match_route(request, "GET", "/__reload") do return {}, false
+	if core.match_route(request, "GET", "/__reload/client.js") {
+		return reload_client_response(request), true
+	}
+	if !core.match_route(request, "GET", "/__reload") {
+		return {}, false
+	}
 	accept_storage, allocation_error := make([]u8, 28, request.allocator)
-	if allocation_error != nil do return {status = .Internal_Server_Error}, true
+	if allocation_error != nil {
+		return {status = .Internal_Server_Error}, true
+	}
 	accept, status := websocket_accept(request, accept_storage)
-	if status != .None do return {status = status}, true
+	if status != .None {
+		return {status = status}, true
+	}
 	response := make_response(
 		request,
 		.Switching_Protocols,
 		{{"Upgrade", "websocket"}, {"Sec-WebSocket-Accept", accept}},
 	)
-	if response.status != .Switching_Protocols do return response, true
+	if response.status != .Switching_Protocols {
+		return response, true
+	}
 	session, error := new(Reload_Session, rt.heap_allocator())
-	if error != nil do return {status = .Internal_Server_Error}, true
+	if error != nil {
+		return {status = .Internal_Server_Error}, true
+	}
 	session.state = state
 	session.version = sync.atomic_load(&state.version)
 	response.upgrade = {
@@ -605,14 +655,20 @@ resume_session :: proc(data: rawptr, io: ^core.Upgrade_IO) -> async.Resume_Resul
 
 	if session.phase == .Write {
 		if session.output_offset == session.output_used {
-			if session.close_after do return .Done
+			if session.close_after {
+				return .Done
+			}
 			reset_session_read(session, io)
 			return .Yield
 		}
 
 		n, error := core.upgrade_write(io, session.output[session.output_offset:session.output_used], session.deadline)
-		if error.kind == .Pending do return .Waiting
-		if error.kind != .None do return .Done
+		if error.kind == .Pending {
+			return .Waiting
+		}
+		if error.kind != .None {
+			return .Done
+		}
 		session.output_offset += n
 		return .Yield
 	}
@@ -620,7 +676,9 @@ resume_session :: proc(data: rawptr, io: ^core.Upgrade_IO) -> async.Resume_Resul
 	used := session.used
 
 	if session.phase == .Header && used == 0 {
-		if sync.atomic_load(&session.state.stopped) do return .Done
+		if sync.atomic_load(&session.state.stopped) {
+			return .Done
+		}
 
 		if sync.atomic_load(&session.state.version) != session.version {
 			count := append_websocket_frame(session.output[:], .Text, transmute([]u8)string("reload"))
@@ -645,16 +703,22 @@ resume_session :: proc(data: rawptr, io: ^core.Upgrade_IO) -> async.Resume_Resul
 	}
 
 	target := session.expected
-	if session.phase == .Header && used == 0 do target = 1
+	if session.phase == .Header && used == 0 {
+		target = 1
+	}
 	n, error := core.upgrade_read(io, session.input[used:target], session.deadline)
-	if error.kind == .Pending do return .Waiting
+	if error.kind == .Pending {
+		return .Waiting
+	}
 
 	if error.kind == .Timeout && used == 0 && session.phase == .Header {
 		reset_session_read(session, io)
 		return .Yield
 	}
 
-	if error.kind != .None do return .Done
+	if error.kind != .None {
+		return .Done
+	}
 	session.used += n
 	used = session.used
 
@@ -664,7 +728,9 @@ resume_session :: proc(data: rawptr, io: ^core.Upgrade_IO) -> async.Resume_Resul
 		return .Yield
 	}
 
-	if used < session.expected do return .Yield
+	if used < session.expected {
+		return .Yield
+	}
 	header := session.input[:2]
 	opcode := Opcode(header[0] & 15)
 	length := int(header[1] & 127)
@@ -702,7 +768,9 @@ resume_session :: proc(data: rawptr, io: ^core.Upgrade_IO) -> async.Resume_Resul
 
 	mask := session.input[2:6]
 	payload := session.input[6:6 + length]
-	for &value, i in payload do value ~= mask[i % 4]
+	for &value, i in payload {
+		value ~= mask[i % 4]
+	}
 	#partial switch opcode {
 	case .Close:
 		if length >= 2 {

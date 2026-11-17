@@ -12,8 +12,12 @@ import async "shared:async"
 coding_repeat :: proc(count: int, allocator: mem.Allocator) -> []u8 {
 	text := "Saba keeps identity available and gzips textual responses. "
 	data, err := make([]u8, count, allocator)
-	if err != nil do return nil
-	for index in 0 ..< count do data[index] = text[index % len(text)]
+	if err != nil {
+		return nil
+	}
+	for index in 0 ..< count {
+		data[index] = text[index % len(text)]
+	}
 
 	return data
 }
@@ -21,7 +25,9 @@ coding_repeat :: proc(count: int, allocator: mem.Allocator) -> []u8 {
 @(private)
 coding_field :: proc(headers: []Header, name: string) -> (string, bool) {
 	for header in headers {
-		if strings.equal_fold(header.name, name) do return header.value, true
+		if strings.equal_fold(header.name, name) {
+			return header.value, true
+		}
 	}
 
 	return "", false
@@ -71,7 +77,9 @@ gzip_round_trip_and_short_writes_match_limits :: proc(t: ^testing.T) {
 		}
 
 		testing.expect(t, gzip.stream_finish(encoder) || encoder.overflow == false)
-		if encoder.overflow do break
+		if encoder.overflow {
+			break
+		}
 	}
 
 	for encoder.out_len != encoder.out_off {
@@ -179,7 +187,9 @@ content_coding_negotiates_encodings_thresholds_and_sensitive_bodies :: proc(t: ^
 		vary, varied := coding_field(response.headers, "Vary")
 		testing.expect_value(t, encoded && strings.equal_fold(coding, "gzip"), item.gzip)
 		testing.expect_value(t, varied, item.vary)
-		if item.vary do testing.expect(t, strings.equal_fold(vary, "Accept-Encoding"))
+		if item.vary {
+			testing.expect(t, strings.equal_fold(vary, "Accept-Encoding"))
+		}
 
 		if item.gzip {
 			coding_decode(t, response.body, plain[:item.size])
@@ -244,13 +254,19 @@ coding_probe_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 	probe := cast(^Coding_Probe)data
 	probe.calls += 1
 	assert(probe.releases == probe.calls - 1, "gzip layer polled before releasing the previous chunk")
-	if probe.offset >= len(probe.payload) do return .Done
+	if probe.offset >= len(probe.payload) {
+		return .Done
+	}
 	count := min(probe.chunk, len(probe.payload) - probe.offset)
 	storage, err := make([]u8, probe.chunk)
-	if err != nil do return .Failed
+	if err != nil {
+		return .Failed
+	}
 	copy(storage[:count], probe.payload[probe.offset:][:count])
 	chunk, take_error := owned.take_custom(&storage, count, coding_probe_release, probe)
-	if take_error.kind != .None do return .Failed
+	if take_error.kind != .None {
+		return .Failed
+	}
 	probe.pending = chunk
 
 	if stream_submit(io, &probe.pending) != .Accepted {
@@ -277,18 +293,28 @@ coding_drive :: proc(task: ^Connection_Task) -> (header: string, body: []u8, ok:
 	defer delete(parts)
 
 	for _ in 0 ..< 10000 {
-		if task.streaming == nil do return header, coding_clone(parts[:]), true
+		if task.streaming == nil {
+			return header, coding_clone(parts[:]), true
+		}
 
 		if task.phase == .Write {
-			if task.streaming.pending && len(task.output[1]) > 0 do append(&parts, ..task.output[1])
+			if task.streaming.pending && len(task.output[1]) > 0 {
+				append(&parts, ..task.output[1])
+			}
 			producing, done := stream_write_complete(task)
-			if !done do return header, nil, false
-			if !producing do return header, coding_clone(parts[:]), true
+			if !done {
+				return header, nil, false
+			}
+			if !producing {
+				return header, coding_clone(parts[:]), true
+			}
 			task.phase = .Produce
 			continue
 		}
 
-		if produce_stream(task) != .Yield do return header, nil, false
+		if produce_stream(task) != .Yield {
+			return header, nil, false
+		}
 		task.phase = .Write
 	}
 
@@ -298,7 +324,9 @@ coding_drive :: proc(task: ^Connection_Task) -> (header: string, body: []u8, ok:
 @(private)
 coding_clone :: proc(src: []u8) -> []u8 {
 	dst, err := make([]u8, len(src))
-	if err != nil do return nil
+	if err != nil {
+		return nil
+	}
 	copy(dst, src)
 
 	return dst

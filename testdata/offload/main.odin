@@ -54,7 +54,9 @@ drop :: proc(p: rawptr) {
 build :: proc(p: rawptr, allocator: mem.Allocator) -> (server.Response, bool) {
 	job := cast(^Job)p
 	bytes, error := make([]u8, len(job.bytes), allocator)
-	if error != nil do return {}, false
+	if error != nil {
+		return {}, false
+	}
 	copy(bytes, job.bytes)
 
 	return {status = .Created, body = bytes}, true
@@ -67,9 +69,15 @@ route :: proc(p: rawptr, conn: ^server.Connection, request: ^server.Request) -> 
 		assert(net.set_option(conn.socket, .Send_Buffer_Size, 4096) == .None)
 	}
 
-	if request.path == "/scopes" do return resource_views(state, request)
-	if request.path == "/stream" do return resource_stream(request)
-	if request.path == "/slow" || request.path == "/large" do return large_response(state, request)
+	if request.path == "/scopes" {
+		return resource_views(state, request)
+	}
+	if request.path == "/stream" {
+		return resource_stream(request)
+	}
+	if request.path == "/slow" || request.path == "/large" {
+		return large_response(state, request)
+	}
 
 	if request.path == "/file-status" && state.file_path != "" {
 		s := pool.stats(&state.file_pool)
@@ -77,10 +85,14 @@ route :: proc(p: rawptr, conn: ^server.Connection, request: ^server.Request) -> 
 		return {status = .OK, body = transmute([]u8)body}
 	}
 
-	if request.path == "/file" && state.file_path != "" do return file_response(state)
+	if request.path == "/file" && state.file_path != "" {
+		return file_response(state)
+	}
 
 	if request.path == "/release" {
-		for _ in 0 ..< 4 do sync.post(&state.proceed)
+		for _ in 0 ..< 4 {
+			sync.post(&state.proceed)
+		}
 		return {status = .OK}
 	}
 
@@ -111,7 +123,9 @@ route :: proc(p: rawptr, conn: ^server.Connection, request: ^server.Request) -> 
 	return work_response(state, request)
 }
 observe :: proc(p: rawptr, event: ^server.Request_Event) {
-	if event.route == "/work" do sync.atomic_add(&(cast(^State)p).finished, 1)
+	if event.route == "/work" {
+		sync.atomic_add(&(cast(^State)p).finished, 1)
+	}
 }
 serve :: proc(state: ^State) {
 	budget, _ := strconv.parse_int(os.get_env("SABA_OFFLOAD_BUDGET_MS", context.temp_allocator))
@@ -177,7 +191,9 @@ main :: proc() {
 	// The harness observes request retirement before blocked work can finish.
 	_ = resource_command(&state)
 	pool.shutdown(&state.pool)
-	for _ in 0 ..< 4 do sync.post(&state.proceed)
+	for _ in 0 ..< 4 {
+		sync.post(&state.proceed)
+	}
 	assert(pool.join(&state.pool) == .None)
 	assert(pool.destroy(&state.pool) == .None)
 
@@ -206,7 +222,9 @@ File_Job :: struct {
 file_run :: proc(p: rawptr, _: pool.Work_Context) -> bool {
 	job := cast(^File_Job)p
 	file, error := os.open(job.path)
-	if error != nil do return false
+	if error != nil {
+		return false
+	}
 	defer os.close(file)
 	n, read_error := os.read(file, job.bytes[:])
 	job.used = n
@@ -222,7 +240,9 @@ file_drop :: proc(p: rawptr) {
 file_build :: proc(p: rawptr, allocator: mem.Allocator) -> (server.Response, bool) {
 	job := cast(^File_Job)p
 	bytes, error := make([]u8, job.used, allocator)
-	if error != nil do return {}, false
+	if error != nil {
+		return {}, false
+	}
 	copy(bytes, job.bytes[:job.used])
 
 	return {status = .OK, body = bytes}, true
@@ -261,9 +281,15 @@ resource_body_limit :: proc(_: ^server.Request) -> int {
 initialize_resource_parent :: proc(state: ^State) {
 	state.resource_mode = os.get_env("SABA_RESOURCE_MODE", context.temp_allocator)
 	limits := budgets.Limits{256 * mem.Megabyte, 128, 128}
-	if state.resource_mode == "bytes" do limits.bytes = 3 * mem.Megabyte
-	if state.resource_mode == "streams" do limits.streams = 1
-	if state.resource_mode == "mixed" do limits = {20 * mem.Megabyte, 2, 2}
+	if state.resource_mode == "bytes" {
+		limits.bytes = 3 * mem.Megabyte
+	}
+	if state.resource_mode == "streams" {
+		limits.streams = 1
+	}
+	if state.resource_mode == "mixed" {
+		limits = {20 * mem.Megabyte, 2, 2}
+	}
 	owner, error := budgets.create_root(limits)
 	assert(error == .None)
 	state.resources = owner
@@ -273,7 +299,9 @@ resource_command :: proc(state: ^State) -> u8 {
 		command: [1]u8
 		_, error := os.read(os.stdin, command[:])
 		assert(error == nil)
-		if command[0] != 'p' do return command[0]
+		if command[0] != 'p' {
+			return command[0]
+		}
 		view, result := budgets.snapshot(state.resources)
 		assert(result == .None)
 		capacity, _ := server.server_capacity(&state.control)
@@ -299,19 +327,26 @@ large_response :: proc(state: ^State, request: ^server.Request) -> server.Respon
 	size := mem.Megabyte
 
 	if state.resource_mode == "mixed" {
-		if request.path == "/slow" do size *= 4
-		else do size *= 3
+		if request.path == "/slow" {
+			size *= 4
+		} else {
+			size *= 3
+		}
 	}
 
 	body, error := make([]u8, size, request.allocator)
-	if error != nil do return {status = .Internal_Server_Error}
+	if error != nil {
+		return {status = .Internal_Server_Error}
+	}
 
 	return {status = .OK, body = body}
 }
 work_response :: proc(state: ^State, request: ^server.Request) -> server.Response {
 	backing := mem.tracking_allocator(&state.tracker)
 	binding, error := charged.create(request.resources, {backing = backing, metadata_allocator = backing})
-	if error.kind != .None do return {status = .Internal_Server_Error}
+	if error.kind != .None {
+		return {status = .Internal_Server_Error}
+	}
 	allocator := charged.allocator(binding)
 	job, je := new(Job, allocator)
 
@@ -347,7 +382,9 @@ Resource_Producer :: struct {
 }
 resource_stream :: proc(request: ^server.Request) -> server.Response {
 	producer, error := new(Resource_Producer, request.backing_allocator)
-	if error != nil do return {status = .Service_Unavailable}
+	if error != nil {
+		return {status = .Service_Unavailable}
+	}
 	producer.allocator = request.backing_allocator
 
 	return {
@@ -362,9 +399,13 @@ resource_stream :: proc(request: ^server.Request) -> server.Response {
 }
 resource_next :: proc(p: rawptr, io: ^server.Stream_IO) -> server.Stream_Step {
 	producer := cast(^Resource_Producer)p
-	if producer.sequence == 256 do return .Done
+	if producer.sequence == 256 {
+		return .Done
+	}
 	chunk, error := owned.allocate(64 * mem.Kilobyte, io.backing_allocator)
-	if error.kind != .None do return .Failed
+	if error.kind != .None {
+		return .Failed
+	}
 
 	if server.stream_submit(io, &chunk) != .Accepted {
 		owned.destroy(&chunk)

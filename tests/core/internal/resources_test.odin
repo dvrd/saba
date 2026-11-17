@@ -290,7 +290,9 @@ review_keepalive_prefetch_growth_pressure_uses_fixed_503 :: proc(t: ^testing.T) 
 	next, allocated := make([]u8, 700, fixture.task.request.allocator)
 	assert(allocated == nil)
 	prefix := copy(next, "GET /next HTTP/1.1\r\nHost: x\r\nX-Pad: ")
-	for i in prefix ..< len(next) - 4 do next[i] = 'a'
+	for i in prefix ..< len(next) - 4 {
+		next[i] = 'a'
+	}
 	copy(next[len(next) - 4:], "\r\n\r\n")
 	fixture.task.connection.read_buffer = next
 	assert(queue_response(&fixture.task, {status = .OK}))
@@ -353,7 +355,9 @@ review_ka_fail_metadata :: proc(
 	mem.Allocator_Error,
 ) {
 	state := cast(^Review_KA_Metadata_Failure)data
-	if state.armed && (mode == .Alloc || mode == .Resize) do return nil, .Out_Of_Memory
+	if state.armed && (mode == .Alloc || mode == .Resize) {
+		return nil, .Out_Of_Memory
+	}
 	backing := rt.heap_allocator()
 	return backing.procedure(backing.data, mode, size, alignment, old_memory, old_size, location)
 }

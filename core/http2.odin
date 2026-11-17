@@ -89,7 +89,9 @@ h2_stream_allowance :: proc(task: ^Connection_Task) -> int {
 	}
 
 	view, error := budget.snapshot(task.resource_connection)
-	if error != .None || view.limits.streams == 0 do return 0
+	if error != .None || view.limits.streams == 0 {
+		return 0
+	}
 
 	if view.limits.streams > u64(configured) {
 		return configured
@@ -100,7 +102,9 @@ h2_stream_allowance :: proc(task: ^Connection_Task) -> int {
 
 @(private)
 h2_begin :: proc(task: ^Connection_Task) -> bool {
-	if task.http2 != nil do return true
+	if task.http2 != nil {
+		return true
+	}
 	allowance := h2_stream_allowance(task)
 
 	if allowance < 0 {
@@ -110,11 +114,17 @@ h2_begin :: proc(task: ^Connection_Task) -> bool {
 	limits := h2_make_limits(allowance)
 	limits.body_chunks = max(H2_BODY_CHUNKS, 2 * allowance)
 	limits.retained_body_bytes = max(H2_BODY_BUFFER, 2 * allowance * H2_FRAME_BYTES)
-	if h2.limits_validate(limits).kind != .None do return false
+	if h2.limits_validate(limits).kind != .None {
+		return false
+	}
 	allocator := connection_storage_allocator(task)
-	if allocator.procedure == nil do return false
+	if allocator.procedure == nil {
+		return false
+	}
 	session, alloc_error := new(HTTP2_Session, allocator)
-	if alloc_error != nil || session == nil do return false
+	if alloc_error != nil || session == nil {
+		return false
+	}
 	session.allocator = allocator
 	session.limits = limits
 	capacity := max(2, 2 * allowance)
@@ -164,7 +174,9 @@ h2_session_free :: proc(session: ^HTTP2_Session) {
 @(private)
 h2_destroy :: proc(task: ^Connection_Task) {
 	session := task.http2
-	if session == nil do return
+	if session == nil {
+		return
+	}
 
 	for stream in session.upgrades {
 		if stream != nil {
@@ -187,7 +199,9 @@ h2_destroy :: proc(task: ^Connection_Task) {
 
 		for _ in 0 ..< H2_EVENTS {
 			event, ok := h2.connection_poll(&session.engine)
-			if !ok do break
+			if !ok {
+				break
+			}
 			_ = h2.connection_event_release(&session.engine, event.token)
 		}
 
@@ -200,20 +214,30 @@ h2_destroy :: proc(task: ^Connection_Task) {
 @(private)
 h2_shutdown :: proc(task: ^Connection_Task) {
 	session := task.http2
-	if session == nil || !session.engine_ready || session.shutdown || session.failed do return
+	if session == nil || !session.engine_ready || session.shutdown || session.failed {
+		return
+	}
 	error := h2.connection_shutdown_begin(&session.engine)
-	if error.kind == .None || error.kind == .Closed do session.shutdown = true
+	if error.kind == .None || error.kind == .Closed {
+		session.shutdown = true
+	}
 }
 
 @(private)
 h2_remember :: proc(session: ^HTTP2_Session, handle: h2.Stream_Handle) {
-	if session == nil || handle.stream_id == 0 do return
-
-	for index in 0 ..< session.reap_count {
-		if session.reap[index] == handle do return
+	if session == nil || handle.stream_id == 0 {
+		return
 	}
 
-	if session.reap_count >= len(session.reap) do return
+	for index in 0 ..< session.reap_count {
+		if session.reap[index] == handle {
+			return
+		}
+	}
+
+	if session.reap_count >= len(session.reap) {
+		return
+	}
 	session.reap[session.reap_count] = handle
 	session.reap_count += 1
 }
@@ -223,12 +247,16 @@ h2_remember :: proc(session: ^HTTP2_Session, handle: h2.Stream_Handle) {
 @(private)
 h2_settle :: proc(task: ^Connection_Task) {
 	session := task.http2
-	if session == nil || !session.engine_ready || session.failed do return
+	if session == nil || !session.engine_ready || session.failed {
+		return
+	}
 
 	for _ in 0 ..< H2_STREAM_SLOTS {
 		h2_pump_events(task)
 		h2_pump_engine(task)
-		if session.failed do return
+		if session.failed {
+			return
+		}
 		kept := 0
 		released := false
 
@@ -246,7 +274,9 @@ h2_settle :: proc(task: ^Connection_Task) {
 		}
 
 		session.reap_count = kept
-		if !released do return
+		if !released {
+			return
+		}
 	}
 }
 
@@ -262,7 +292,9 @@ h2_skip_response_header :: proc(name: string) -> bool {
 
 @(private)
 h2_clone :: proc(value: string, allocator: mem.Allocator) -> (string, bool) {
-	if len(value) == 0 do return "", true
+	if len(value) == 0 {
+		return "", true
+	}
 	copy, error := strings.clone(value, allocator)
 
 	return copy, error == nil
@@ -275,7 +307,9 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 
 	for _ in 0 ..< H2_EVENTS {
 		event, ok := h2.connection_poll(&session.engine)
-		if !ok do break
+		if !ok {
+			break
+		}
 		progress = true
 		taken := false
 
@@ -392,8 +426,12 @@ h2_check_deadlines :: proc(task: ^Connection_Task) -> bool {
 @(private)
 h2_read :: proc(task: ^Connection_Task) -> (bool, bool) {
 	session := task.http2
-	if session.failed || session.peer_gone do return false, false
-	if session.ingress_len == len(session.ingress) do return false, false
+	if session.failed || session.peer_gone {
+		return false, false
+	}
+	if session.ingress_len == len(session.ingress) {
+		return false, false
+	}
 	expires := h2_next_deadline(task)
 
 	if session.read_expires != expires {
@@ -413,14 +451,20 @@ h2_read :: proc(task: ^Connection_Task) -> (bool, bool) {
 		session.idle_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.idle)
 	}
 
-	if error.kind == .Pending do return n > 0, true
+	if error.kind == .Pending {
+		return n > 0, true
+	}
 
 	if error.kind == .Timeout {
-		if task.tls_state != nil && task.tls_state.error.kind == .Timeout do task.tls_state.error = {}
+		if task.tls_state != nil && task.tls_state.error.kind == .Timeout {
+			task.tls_state.error = {}
+		}
 		return n > 0, false
 	}
 
-	if error.kind != .None || n == 0 do session.peer_gone = true
+	if error.kind != .None || n == 0 {
+		session.peer_gone = true
+	}
 
 	return n > 0, false
 }
@@ -428,7 +472,9 @@ h2_read :: proc(task: ^Connection_Task) -> (bool, bool) {
 @(private)
 h2_feed :: proc(task: ^Connection_Task) -> bool {
 	session := task.http2
-	if !session.engine_ready do return false
+	if !session.engine_ready {
+		return false
+	}
 	progress := false
 	source := session.ingress[:session.ingress_len] if !session.failed else nil
 	fed := h2.connection_feed(&session.engine, source, u32(session.limits.work_per_feed))
@@ -457,7 +503,9 @@ h2_feed :: proc(task: ^Connection_Task) -> bool {
 		}
 	}
 
-	if fed.work_used > 0 do progress = true
+	if fed.work_used > 0 {
+		progress = true
+	}
 
 	return progress
 }
@@ -473,7 +521,9 @@ h2_output_pending :: proc(session: ^HTTP2_Session) -> bool {
 h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 	session := task.http2
 	state := task.tls_state
-	if state == nil do return false, false
+	if state == nil {
+		return false, false
+	}
 	task.deadline = async.deadline_after(
 		&task.runtime.executor,
 		max(0, time.tick_diff(time.tick_now(), h2_next_deadline(task))),
@@ -481,14 +531,18 @@ h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 
 	if state.write_started {
 		n, error := transport_write(task, nil, task.deadline)
-		if error.kind == .Pending do return false, true
+		if error.kind == .Pending {
+			return false, true
+		}
 		view, borrowed := h2.connection_output_front(&session.engine)
 
 		if borrowed {
 			if error.kind == .None && n > 0 {
 				if h2.connection_output_advance(&session.engine, view.token, n).kind != .None {
 					session.failed = true
-				} else if task.observed do task.event.bytes_sent += u64(n)
+				} else if task.observed {
+					task.event.bytes_sent += u64(n)
+				}
 			} else {
 				_ = h2.connection_output_release(&session.engine, view.token)
 				session.peer_gone = true
@@ -498,11 +552,17 @@ h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 		return n > 0, false
 	}
 
-	if !h2_output_pending(session) do return false, false
+	if !h2_output_pending(session) {
+		return false, false
+	}
 	view, borrowed := h2.connection_output_front(&session.engine)
-	if !borrowed do return false, false
+	if !borrowed {
+		return false, false
+	}
 	n, error := transport_write(task, view.bytes, task.deadline)
-	if error.kind == .Pending do return false, true
+	if error.kind == .Pending {
+		return false, true
+	}
 
 	if error.kind != .None || n <= 0 {
 		_ = h2.connection_output_release(&session.engine, view.token)
@@ -512,7 +572,9 @@ h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 
 	if h2.connection_output_advance(&session.engine, view.token, n).kind != .None {
 		session.failed = true
-	} else if task.observed do task.event.bytes_sent += u64(n)
+	} else if task.observed {
+		task.event.bytes_sent += u64(n)
+	}
 	return true, false
 }
 
@@ -525,9 +587,15 @@ h2_pump_engine :: proc(task: ^Connection_Task) {
 		_ = h2.connection_feed(&session.engine, nil, work)
 		flushed := h2.connection_flush(&session.engine, work)
 		life := h2.connection_lifecycle(&session.engine, 32)
-		if h2_connection_fatal(flushed.error.kind) do session.failed = true
-		if h2_connection_fatal(life.error.kind) do session.failed = true
-		if session.failed do break
+		if h2_connection_fatal(flushed.error.kind) {
+			session.failed = true
+		}
+		if h2_connection_fatal(life.error.kind) {
+			session.failed = true
+		}
+		if session.failed {
+			break
+		}
 	}
 }
 
@@ -551,19 +619,29 @@ h2_connection_fatal :: proc(kind: h2.Error_Kind) -> bool {
 @(private)
 h2_finished :: proc(task: ^Connection_Task) -> bool {
 	session := task.http2
-	if session == nil || !session.engine_ready do return true
+	if session == nil || !session.engine_ready {
+		return true
+	}
 	pending := h2_output_pending(session)
 	writing := task.tls_state != nil && task.tls_state.write_started
-	if pending || writing do return false
-	if session.failed || session.peer_gone do return true
+	if pending || writing {
+		return false
+	}
+	if session.failed || session.peer_gone {
+		return true
+	}
 
 	if h2_has_streams(task) {
 		return false
 	}
 
-	if !session.shutdown do return false
+	if !session.shutdown {
+		return false
+	}
 	stats, ok := h2.connection_shutdown_status(&session.engine)
-	if !ok do return false
+	if !ok {
+		return false
+	}
 
 	return stats.phase == .Draining || stats.phase == .Complete || stats.phase == .Aborted
 }
@@ -571,10 +649,14 @@ h2_finished :: proc(task: ^Connection_Task) -> bool {
 @(private)
 h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	session := task.http2
-	if session == nil || !session.engine_ready do return .Done
+	if session == nil || !session.engine_ready {
+		return .Done
+	}
 
 	if async.cancelled(&task.task) {
-		if !session.failed do _ = h2.connection_abort(&session.engine, {kind = .Closed})
+		if !session.failed {
+			_ = h2.connection_abort(&session.engine, {kind = .Closed})
+		}
 		return .Done
 	}
 
@@ -583,25 +665,47 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	for _ in 0 ..< 8 {
 		progress := false
 		h2_settle(task)
-		if h2_check_deadlines(task) do progress = true
+		if h2_check_deadlines(task) {
+			progress = true
+		}
 		read_progress, read_wait := h2_read(task)
-		if read_progress do progress = true
-		if read_wait do waiting = true
-		if h2_feed(task) do progress = true
-		if h2_pump_events(task) do progress = true
+		if read_progress {
+			progress = true
+		}
+		if read_wait {
+			waiting = true
+		}
+		if h2_feed(task) {
+			progress = true
+		}
+		if h2_pump_events(task) {
+			progress = true
+		}
 
 		if h2_requests_pump(task) {
 			progress = true
 		}
 
-		if h2_upgrade_pump(task) do progress = true
+		if h2_upgrade_pump(task) {
+			progress = true
+		}
 		h2_pump_engine(task)
-		if h2_pump_events(task) do progress = true
+		if h2_pump_events(task) {
+			progress = true
+		}
 		write_progress, write_wait := h2_write(task)
-		if write_progress do progress = true
-		if write_wait do waiting = true
-		if h2_finished(task) do return .Done
-		if progress do continue
+		if write_progress {
+			progress = true
+		}
+		if write_wait {
+			waiting = true
+		}
+		if h2_finished(task) {
+			return .Done
+		}
+		if progress {
+			continue
+		}
 
 		if h2_has_streams(task) {
 			_ = async.sleep_until_earlier(
@@ -610,11 +714,15 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 			)
 		}
 
-		if waiting do return .Waiting
+		if waiting {
+			return .Waiting
+		}
 		break
 	}
 
-	if h2_finished(task) do return .Done
+	if h2_finished(task) {
+		return .Done
+	}
 	// The bounded turn may exhaust its work while the read is still armed. Ready
 	// response queues need another owner turn even when the peer sends no bytes.
 	if h2_has_streams(task) || h2_output_pending(session) {
@@ -624,7 +732,9 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		)
 	}
 
-	if waiting do return .Waiting
+	if waiting {
+		return .Waiting
+	}
 
 	return .Yield
 }
@@ -1839,12 +1949,18 @@ h2_request_decode :: proc(task: ^Connection_Task, summary: h2.Header_Summary, en
 	has_host := false
 
 	for field in summary.fields {
-		if len(field.name) == 0 || field.name[0] == ':' do continue
-		if strings.equal_fold(field.name, "host") do has_host = true
+		if len(field.name) == 0 || field.name[0] == ':' {
+			continue
+		}
+		if strings.equal_fold(field.name, "host") {
+			has_host = true
+		}
 		regular += 1
 	}
 
-	if !has_host && authority != "" do regular += 1
+	if !has_host && authority != "" {
+		regular += 1
+	}
 
 	if regular > REQUEST_HEADER_COUNT_LIMIT {
 		observe_failure(task, .Protocol_Error)
@@ -1861,7 +1977,9 @@ h2_request_decode :: proc(task: ^Connection_Task, summary: h2.Header_Summary, en
 	index := 0
 
 	for field in summary.fields {
-		if len(field.name) == 0 || field.name[0] == ':' do continue
+		if len(field.name) == 0 || field.name[0] == ':' {
+			continue
+		}
 		name, name_ok := h2_clone(field.name, allocator)
 		value, value_ok := h2_clone(field.value, allocator)
 
@@ -1940,8 +2058,12 @@ h2_request_decode :: proc(task: ^Connection_Task, summary: h2.Header_Summary, en
 	session.receiving = !end_stream
 	duration := body_timeout(task.runtime.timeouts, expected if have_length else 0)
 	session.body_deadline = time.tick_add(time.tick_now(), duration)
-	if task.observed do task.event.method = method
-	if end_stream do h2_request_complete(task)
+	if task.observed {
+		task.event.method = method
+	}
+	if end_stream {
+		h2_request_complete(task)
+	}
 
 	return true
 }

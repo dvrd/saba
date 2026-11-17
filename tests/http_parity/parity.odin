@@ -15,7 +15,9 @@ request_corpus_matches_shared_parser :: proc(t: ^testing.T) {
 		actual, status := server.parse_request(item.wire, headers[:])
 		expected, shared_status := http1.request_head_decode_framed(item.wire, protocol_headers[:])
 		expected_status := item.status
-		if item.name == "chunked unsupported" do expected_status = 0 // Explicit Saba/framed-parser opt-in.
+		if item.name == "chunked unsupported" {
+			expected_status = 0 // Explicit Saba/framed-parser opt-in.
+		}
 		testing.expectf(
 			t,
 			int(status) == expected_status,
@@ -47,7 +49,9 @@ local_header_limits_and_response_rules_are_preserved :: proc(t: ^testing.T) {
 	header_storage: [128]server.Header
 	large := make([]u8, 9000)
 	defer delete(large)
-	for &c in large do c = 'x'
+	for &c in large {
+		c = 'x'
+	}
 	copy(large, "GET / HTTP/1.1\r\nHost: example.com\r\nX: ")
 	copy(large[len(large) - 4:], "\r\n\r\n")
 	_, status := server.parse_request(string(large), header_storage[:])

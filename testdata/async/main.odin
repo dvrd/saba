@@ -74,7 +74,9 @@ routes :: proc(conn: ^server.Connection, request: ^server.Request) -> server.Res
 
 	if request.path == "/large" {
 		body := make([]u8, 2 * 1024 * 1024, request.allocator)
-		for &value, i in body do value = u8(i % 251)
+		for &value, i in body {
+			value = u8(i % 251)
+		}
 		return server.make_response(request, .OK, nil, body)
 	}
 

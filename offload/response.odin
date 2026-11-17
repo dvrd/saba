@@ -55,7 +55,9 @@ response_with_unmanaged_bytes :: proc(
 		return {}, false
 	}
 	state, error := new(State, rt.heap_allocator())
-	if error != nil || state == nil do return {}, false
+	if error != nil || state == nil {
+		return {}, false
+	}
 	state.lane, state.work, state.build = lane, work^, build
 	state.unmanaged_bytes = unmanaged_bytes
 	work^ = {}
@@ -76,7 +78,9 @@ drop_notice :: proc(data: rawptr) {
 @(private)
 start :: proc(state: ^State, io: ^server.Deferred_IO) -> pool.Error {
 	notice, error := new(Notice, rt.heap_allocator())
-	if error != nil || notice == nil do return .Allocation_Failed
+	if error != nil || notice == nil {
+		return .Allocation_Failed
+	}
 	retained, ok := signal.retain(io.wake)
 
 	if !ok {
@@ -114,13 +118,17 @@ poll_result :: proc(data: rawptr, io: ^server.Deferred_IO) -> (server.Response, 
 
 		if error != .None {
 			status: server.HTTP_Status = .Service_Unavailable
-			if error == .Expired do status = .Request_Timeout
+			if error == .Expired {
+				status = .Request_Timeout
+			}
 			return {status = status}, .Ready
 		}
 	}
 
 	view, error := pool.poll(state.handle)
-	if error != .None do return {}, .Failed
+	if error != .None {
+		return {}, .Failed
+	}
 
 	switch view.outcome {
 	case .Pending:

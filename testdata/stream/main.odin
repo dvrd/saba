@@ -48,30 +48,50 @@ next :: proc(data: rawptr, io: ^server.Stream_IO) -> server.Stream_Step {
 	producer := cast(^Producer)data
 	producer.calls += 1
 	assert(producer.releases == producer.allocations, "driver polled while a chunk was still borrowed")
-	if server.request_cancelled(io.cancellation) do return .Failed
-	if producer.mode == .Badwait do return .Waiting
+	if server.request_cancelled(io.cancellation) {
+		return .Failed
+	}
+	if producer.mode == .Badwait {
+		return .Waiting
+	}
 
 	if producer.mode == .Stall {
 		err := server.stream_wait(io, async.deadline_after(io.runtime, 10 * time.Second))
 		return .Waiting if err.kind == .Pending else .Failed
 	}
 
-	if producer.mode == .Error && producer.sequence == 1 do return .Failed
-	if producer.sequence == producer.count do return .Done
+	if producer.mode == .Error && producer.sequence == 1 {
+		return .Failed
+	}
+	if producer.sequence == producer.count {
+		return .Done
+	}
 
 	if producer.mode == .Wait {
-		if producer.next_at.at == 0 do producer.next_at = async.deadline_after(io.runtime, 50 * time.Millisecond)
+		if producer.next_at.at == 0 {
+			producer.next_at = async.deadline_after(io.runtime, 50 * time.Millisecond)
+		}
 		error := server.stream_wait(io, producer.next_at)
-		if error.kind == .Pending do return .Waiting
-		if error.kind != .None do return .Failed
+		if error.kind == .Pending {
+			return .Waiting
+		}
+		if error.kind != .None {
+			return .Failed
+		}
 		producer.next_at = {}
 	}
 
 	grant := producer.size
-	if producer.mode == .Backpressure do grant = 32768
+	if producer.mode == .Backpressure {
+		grant = 32768
+	}
 	storage, error := make([]u8, grant, rt.heap_allocator())
-	if error != nil do return .Failed
-	for &byte, i in storage do byte = u8((producer.offset + i) % 251)
+	if error != nil {
+		return .Failed
+	}
+	for &byte, i in storage {
+		byte = u8((producer.offset + i) % 251)
+	}
 	producer.allocations += 1
 	sync.atomic_add(&producer.state.allocated, 1)
 	sync.atomic_add(&producer.state.live, grant)
@@ -124,9 +144,13 @@ route :: proc(data: rawptr, _: ^server.Connection, request: ^server.Request) -> 
 		return server.make_response(request, .OK, nil, transmute([]u8)body)
 	}
 
-	if request.path == "/fast" do return server.make_response(request, .OK, nil, transmute([]u8)string("ok"))
+	if request.path == "/fast" {
+		return server.make_response(request, .OK, nil, transmute([]u8)string("ok"))
+	}
 	producer, error := new(Producer, rt.heap_allocator())
-	if error != nil do return {status = .Internal_Server_Error}
+	if error != nil {
+		return {status = .Internal_Server_Error}
+	}
 	producer^ = {
 		state = state,
 		id    = sync.atomic_add(&state.next_id, 1) + 1,
@@ -191,7 +215,9 @@ route :: proc(data: rawptr, _: ^server.Connection, request: ^server.Request) -> 
 		status,
 		{{"X-Stream-ID", fmt.aprintf("%d", producer.id, allocator = request.allocator)}},
 	)
-	if request.path == "/badhead" do response = server.make_response(request, status, {{"Content-Length", "1"}}) // rejected before wire output
+	if request.path == "/badhead" {
+		response = server.make_response(request, status, {{"Content-Length", "1"}}) // rejected before wire output
+	}
 
 	if request.path == "/mix" {
 		response.body = make([]u8, 1, request.allocator)
@@ -215,7 +241,9 @@ main :: proc() {
 	state: State
 	worker := thread.create_and_start_with_poly_data(&state, proc(state: ^State) {
 		workers, _ := strconv.parse_int(os.get_env("SABA_STREAM_WORKERS", context.temp_allocator))
-		if workers == 0 do workers = 1
+		if workers == 0 {
+			workers = 1
+		}
 		state.result = server.serve({port = 0, workers = workers, handler = route, handler_data = state, control = &state.control, keep_alive = {enabled = true}, timeouts = {response = 150 * time.Millisecond}})
 	}); assert(worker != nil)
 	for _ in 0 ..< 5000 {

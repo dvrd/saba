@@ -72,13 +72,19 @@ h3_probe_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 	probe.nexts += 1
 
 	if probe.wait_next && probe.nexts == 1 {
-		if stream_wait(io, async.deadline_after(io.runtime, time.Millisecond)).kind == .Pending do return .Waiting
+		if stream_wait(io, async.deadline_after(io.runtime, time.Millisecond)).kind == .Pending {
+			return .Waiting
+		}
 		return .Failed
 	}
 
-	if probe.nexts > (3 if probe.wait_next else 2) do return .Done
+	if probe.nexts > (3 if probe.wait_next else 2) {
+		return .Done
+	}
 	chunk, error := owned.copy_bounded(transmute([]u8)string("abc"), 3, io.backing_allocator)
-	if error.kind != .None do return .Failed
+	if error.kind != .None {
+		return .Failed
+	}
 
 	if stream_submit(io, &chunk) != .Accepted {
 		owned.destroy(&chunk)
@@ -90,7 +96,9 @@ h3_probe_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 h3_idle_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 	probe := cast(^H3_Probe)data
 	sync.atomic_add(&probe.idles, 1)
-	if stream_wait(io, async.deadline_after(io.runtime, 5 * time.Second)).kind == .Pending do return .Waiting
+	if stream_wait(io, async.deadline_after(io.runtime, 5 * time.Second)).kind == .Pending {
+		return .Waiting
+	}
 
 	return .Failed
 }
@@ -99,7 +107,9 @@ h3_probe_poll :: proc(data: rawptr, io: ^Deferred_IO) -> (Response, Deferred_Ste
 	count := sync.atomic_add(&probe.polls, 1)
 
 	if probe.pending || count == 0 {
-		if !probe.pending do _ = signal.wake(io.wake)
+		if !probe.pending {
+			_ = signal.wake(io.wake)
+		}
 		return {}, .Waiting
 	}
 
@@ -197,7 +207,9 @@ http3_stream_copies_bounded_chunks_and_drops_once :: proc(t: ^testing.T) {
 
 	for _ in 0 ..< 10 {
 		n, status := response.stream.next(response.stream.data, destination[:])
-		if status == .Done do break
+		if status == .Done {
+			break
+		}
 		testing.expect_value(t, status, .Chunk)
 		count += copy(received[count:], destination[:n])
 	}
@@ -257,9 +269,13 @@ http3_serve_independent_curl_status_cookies_and_concurrent_clients :: proc(t: ^t
 	}
 
 	deadline := time.tick_add(time.tick_now(), 5 * time.Second)
-	for !server_ready(&fixture.control) && time.tick_diff(time.tick_now(), deadline) > 0 do thread.yield()
+	for !server_ready(&fixture.control) && time.tick_diff(time.tick_now(), deadline) > 0 {
+		thread.yield()
+	}
 	endpoint, ready := server_http3_endpoint(&fixture.control)
-	if !testing.expect(t, ready && endpoint.port > 0) do return
+	if !testing.expect(t, ready && endpoint.port > 0) {
+		return
+	}
 	// Each process is an independent peer and both run before either is waited.
 	jobs: [2]os.Process
 	files: [2]^os.File
@@ -287,7 +303,9 @@ http3_serve_independent_curl_status_cookies_and_concurrent_clients :: proc(t: ^t
 				stderr = file,
 			},
 		)
-		if !testing.expect(t, pe == nil) do return
+		if !testing.expect(t, pe == nil) {
+			return
+		}
 		jobs[i] = job
 	}
 
@@ -348,7 +366,9 @@ http3_serve_independent_curl_status_cookies_and_concurrent_clients :: proc(t: ^t
 			url,
 		}
 
-		if strings.has_prefix(target, "/auth") do args = post
+		if strings.has_prefix(target, "/auth") {
+			args = post
+		}
 		job, pe := os.process_start({command = args, stdout = file, stderr = file})
 		assert(pe == nil)
 		result, re := os.process_wait(job)
@@ -391,7 +411,9 @@ http3_serve_independent_curl_status_cookies_and_concurrent_clients :: proc(t: ^t
 	)
 	assert(ie == nil)
 	idle_deadline := time.tick_add(time.tick_now(), time.Second)
-	for sync.atomic_load(&probe.idles) == 0 && time.tick_diff(time.tick_now(), idle_deadline) > 0 do thread.yield()
+	for sync.atomic_load(&probe.idles) == 0 && time.tick_diff(time.tick_now(), idle_deadline) > 0 {
+		thread.yield()
+	}
 	testing.expect(t, sync.atomic_load(&probe.idles) > 0)
 	other_url := fmt.tprintf("https://127.0.0.1:%d/missing", endpoint.port)
 	other, oe := os.process_start(
@@ -435,7 +457,9 @@ http3_serve_independent_curl_status_cookies_and_concurrent_clients :: proc(t: ^t
 	)
 	assert(pe == nil)
 	until := time.tick_add(time.tick_now(), time.Second)
-	for sync.atomic_load(&probe.polls) == prior && time.tick_diff(time.tick_now(), until) > 0 do thread.yield()
+	for sync.atomic_load(&probe.polls) == prior && time.tick_diff(time.tick_now(), until) > 0 {
+		thread.yield()
+	}
 	testing.expect(t, sync.atomic_load(&probe.polls) > prior)
 	stop_server(&fixture.control)
 	thread.join(worker)
@@ -514,7 +538,9 @@ http3_drain_keeps_runtime_alive_for_retained_transport_bytes :: proc(t: ^testing
 
 	for time.tick_diff(time.tick_now(), until) > 0 {
 		state, _ = async.task_state(&runtime.executor, &runtime.accept_task)
-		if state == .Done do break
+		if state == .Done {
+			break
+		}
 		thread.yield()
 	}
 

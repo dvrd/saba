@@ -27,7 +27,9 @@ when #config(SABA_OBSERVABILITY_BENCHMARK, false) {
 		for mode in 0 ..< 3 {
 			runtime: Server_Runtime
 			calls: u64
-			if mode > 0 do runtime.config.observability.enabled = true
+			if mode > 0 {
+				runtime.config.observability.enabled = true
+			}
 
 			if mode == 2 {
 				runtime.config.observability.data = &calls
@@ -53,9 +55,14 @@ when #config(SABA_OBSERVABILITY_BENCHMARK, false) {
 
 			ns := f64(time.tick_diff(start, time.tick_now())) / f64(iterations)
 			fmt.printf("observability benchmark mode=%d iterations=%d ns_per_attempt=%.2f\n", mode, iterations, ns)
-			if mode == 0 do testing.expect_value(t, runtime.metrics.completed, u64(0))
-			else do testing.expect_value(t, runtime.metrics.completed, u64(iterations))
-			if mode == 2 do testing.expect_value(t, calls, u64(iterations))
+			if mode == 0 {
+				testing.expect_value(t, runtime.metrics.completed, u64(0))
+			} else {
+				testing.expect_value(t, runtime.metrics.completed, u64(iterations))
+			}
+			if mode == 2 {
+				testing.expect_value(t, calls, u64(iterations))
+			}
 		}
 	}
 }

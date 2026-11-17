@@ -83,7 +83,9 @@ ws79_constructor_run :: proc(t: ^testing.T, fail_at: int) -> int {
 constructor_backing_is_charged_until_physical_drop_and_every_failure_cleans_up :: proc(t: ^testing.T) {
 	calls := ws79_constructor_run(t, 0)
 	testing.expect(t, calls > 0)
-	for failure in 1 ..= calls do ws79_constructor_run(t, failure)
+	for failure in 1 ..= calls {
+		ws79_constructor_run(t, failure)
+	}
 }
 
 @(test)
@@ -159,7 +161,9 @@ lazy_message_and_frame_allocation_failure_keep_existing_owners_until_drop :: pro
 		}
 
 		reset_read(session, &io)
-		if writing do assert(send(&io, .Text, []u8{'a'}) == .Accepted)
+		if writing {
+			assert(send(&io, .Text, []u8{'a'}) == .Accepted)
+		}
 		before, viewed := budget.snapshot(scope)
 		assert(viewed == .None)
 		state.fail_at = state.calls + 1

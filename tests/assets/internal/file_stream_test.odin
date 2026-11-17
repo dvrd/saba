@@ -131,7 +131,9 @@ file_producer_reuses_one_bounded_grant_and_cleans_failures :: proc(t: ^testing.T
 					break
 				}
 
-				if step == .Done do break
+				if step == .Done {
+					break
+				}
 				assert(step == .Chunk)
 				body, valid := exchange.body(&transfer)
 				assert(valid)
@@ -167,7 +169,9 @@ file_producer_reuses_one_bounded_grant_and_cleans_failures :: proc(t: ^testing.T
 			"ok.txt",
 			{chunk_bytes = 3, allocator = {asset_test_allocate, &state}},
 		)
-		if shrink do asset_test_write(directory, "ok.txt", "0")
+		if shrink {
+			asset_test_write(directory, "ok.txt", "0")
+		}
 		transfer: exchange.Exchange
 		assert(exchange.init(&transfer, .GET, {max_retained_bytes = 1}, context.allocator).kind == .None)
 		assert(exchange.respond(&transfer, {status = 206, content_length = 7}).kind == .None)

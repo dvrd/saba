@@ -36,17 +36,29 @@ resume :: proc(data: rawptr, io: ^core.Upgrade_IO) -> async.Resume_Result {
 
 	if !session.writing {
 		n, error := core.upgrade_read(io, session.buffer[session.used:], session.deadline)
-		if error.kind == .Pending do return .Waiting
-		if error.kind != .None do return .Done
+		if error.kind == .Pending {
+			return .Waiting
+		}
+		if error.kind != .None {
+			return .Done
+		}
 		session.used += n
-		if session.used < 5 do return .Yield
+		if session.used < 5 {
+			return .Yield
+		}
 		session.writing = true
 	}
 
-	if session.sent == 5 do return .Done
+	if session.sent == 5 {
+		return .Done
+	}
 	n, error := async.write(io.socket, session.buffer[session.sent:], session.deadline)
-	if error.kind == .Pending do return .Waiting
-	if error.kind != .None do return .Done
+	if error.kind == .Pending {
+		return .Waiting
+	}
+	if error.kind != .None {
+		return .Done
+	}
 	session.sent += n
 
 	return .Yield
@@ -81,12 +93,22 @@ handler :: proc(_: rawptr, _: ^core.Connection, request: ^core.Request) -> core.
 	fmt.printf("created %d\n", session.id)
 	os.flush(os.stdout)
 	sync.unlock(&state.mutex)
-	if request.path == "/writefail" do time.sleep(60 * time.Millisecond)
+	if request.path == "/writefail" {
+		time.sleep(60 * time.Millisecond)
+	}
 	response := core.make_response(request, .Switching_Protocols, {{"Upgrade", "raw-echo"}})
-	if request.path == "/reject" do response.status = .OK
-	if request.path == "/badheader" do response.headers[0].value = "bad\r\nfield"
-	if request.path == "/missingprotocol" do response.headers = nil
-	if request.path == "/emptyprotocol" do response.headers[0].value = " \t "
+	if request.path == "/reject" {
+		response.status = .OK
+	}
+	if request.path == "/badheader" {
+		response.headers[0].value = "bad\r\nfield"
+	}
+	if request.path == "/missingprotocol" {
+		response.headers = nil
+	}
+	if request.path == "/emptyprotocol" {
+		response.headers[0].value = " \t "
+	}
 	response.upgrade = {
 		data   = session,
 		resume = resume,

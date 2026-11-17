@@ -19,7 +19,9 @@ response_adapter_retains_defaults_body_policy_and_server_limit :: proc(t: ^testi
 	_, ok = response_headers({status = cast(HTTP_Status)999}, buffer[:])
 	testing.expect(t, !ok)
 	large: [RESPONSE_HEADER_LIMIT]u8
-	for &b in large do b = 'x'
+	for &b in large {
+		b = 'x'
+	}
 	_, ok = response_headers({headers = {{"X", string(large[:])}}}, buffer[:])
 	testing.expect(t, !ok)
 }

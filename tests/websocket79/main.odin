@@ -102,7 +102,9 @@ message :: proc(data: rawptr, io: ^wsapp.IO, opcode: codec.Opcode, payload: []u8
 		storage[6] = '3'
 		assert(wsapp.send(io, .Text, storage[:]) == .Backpressure)
 		// send must own copies before the callback's mutable storage changes.
-		for &value in storage do value = 0xff
+		for &value in storage {
+			value = 0xff
+		}
 		sync.atomic_add(&owner.state.queue_count, 1)
 		return
 	}
@@ -415,9 +417,15 @@ main :: proc() {
 	assert(error == .None)
 	state.resources = resources
 	defer budget.release_scope(&state.resources)
-	for &value, index in large do value = u8(index % 251)
-	for &value in queue_a do value = 'A'
-	for &value in queue_c do value = 'C'
+	for &value, index in large {
+		value = u8(index % 251)
+	}
+	for &value in queue_a {
+		value = 'A'
+	}
+	for &value in queue_c {
+		value = 'C'
+	}
 	cert, ce := os.read_entire_file(os.args[2], rt.heap_allocator())
 	assert(ce == nil)
 	defer delete(cert, rt.heap_allocator())

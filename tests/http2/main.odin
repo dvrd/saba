@@ -22,7 +22,9 @@ route :: proc(data: rawptr, conn: ^server.Connection, request: ^server.Request) 
 	state := cast(^State)data
 	sync.atomic_add(&state.handled, 1)
 	body := request.body
-	if len(body) == 0 do body = transmute([]u8)string("ok")
+	if len(body) == 0 {
+		body = transmute([]u8)string("ok")
+	}
 	fmt.printf("REQ %s %s %d\n", request.method, request.path, len(request.body))
 	os.flush(os.stdout)
 
@@ -30,9 +32,13 @@ route :: proc(data: rawptr, conn: ^server.Connection, request: ^server.Request) 
 }
 
 tls_event :: proc(data: rawptr, event: ^server.TLS_Event) {
-	if event.kind != .Handshake do return
+	if event.kind != .Handshake {
+		return
+	}
 	protocol := event.negotiated_protocol
-	if protocol == "" do protocol = "-"
+	if protocol == "" {
+		protocol = "-"
+	}
 	fmt.printf("ALPN %s %v\n", protocol, event.handshake_complete)
 	os.flush(os.stdout)
 }
@@ -103,8 +109,12 @@ main :: proc() {
 	for {
 		command: [1]u8
 		n, error := os.read(os.stdin, command[:])
-		if error != nil || n == 0 do break
-		if command[0] == 's' do server.stop_server(&state.control)
+		if error != nil || n == 0 {
+			break
+		}
+		if command[0] == 's' {
+			server.stop_server(&state.control)
+		}
 	}
 
 	server.stop_server(&state.control)

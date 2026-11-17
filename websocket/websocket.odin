@@ -20,16 +20,36 @@ MAX_SUBPROTOCOLS :: 32
 @(private)
 config_normalize :: proc(config: Config) -> (Config, Error) {
 	result := config
-	if result.max_frame_bytes == 0 do result.max_frame_bytes = DEFAULT_FRAME_BYTES
-	if result.max_message_bytes == 0 do result.max_message_bytes = DEFAULT_MESSAGE_BYTES
-	if result.max_output_bytes == 0 do result.max_output_bytes = DEFAULT_MESSAGE_BYTES
-	if result.output_capacity == 0 do result.output_capacity = 4
-	if result.max_fragments == 0 do result.max_fragments = 1024
-	if result.idle_timeout == 0 do result.idle_timeout = 60 * time.Second
-	if result.frame_timeout == 0 do result.frame_timeout = 5 * time.Second
-	if result.message_timeout == 0 do result.message_timeout = 30 * time.Second
-	if result.write_timeout == 0 do result.write_timeout = 5 * time.Second
-	if result.close_timeout == 0 do result.close_timeout = time.Second
+	if result.max_frame_bytes == 0 {
+		result.max_frame_bytes = DEFAULT_FRAME_BYTES
+	}
+	if result.max_message_bytes == 0 {
+		result.max_message_bytes = DEFAULT_MESSAGE_BYTES
+	}
+	if result.max_output_bytes == 0 {
+		result.max_output_bytes = DEFAULT_MESSAGE_BYTES
+	}
+	if result.output_capacity == 0 {
+		result.output_capacity = 4
+	}
+	if result.max_fragments == 0 {
+		result.max_fragments = 1024
+	}
+	if result.idle_timeout == 0 {
+		result.idle_timeout = 60 * time.Second
+	}
+	if result.frame_timeout == 0 {
+		result.frame_timeout = 5 * time.Second
+	}
+	if result.message_timeout == 0 {
+		result.message_timeout = 30 * time.Second
+	}
+	if result.write_timeout == 0 {
+		result.write_timeout = 5 * time.Second
+	}
+	if result.close_timeout == 0 {
+		result.close_timeout = time.Second
+	}
 	if result.max_frame_bytes < 1 ||
 	   result.max_frame_bytes > MAX_MESSAGE_BYTES ||
 	   result.max_message_bytes < 1 ||
@@ -50,7 +70,9 @@ config_normalize :: proc(config: Config) -> (Config, Error) {
 			result.write_timeout,
 			result.close_timeout,
 		}) {
-		if duration <= 0 || duration > 24 * time.Hour do return {}, {kind = .Invalid_Config}
+		if duration <= 0 || duration > 24 * time.Hour {
+			return {}, {kind = .Invalid_Config}
+		}
 	}
 
 	return result, {}
@@ -67,8 +89,12 @@ new_session :: proc(
 	Error,
 ) {
 	resolved, validation := config_normalize(config)
-	if validation.kind != .None do return nil, validation
-	if !budget.same_scope(scope, scope) do return nil, {kind = .Invalid_Context}
+	if validation.kind != .None {
+		return nil, validation
+	}
+	if !budget.same_scope(scope, scope) {
+		return nil, {kind = .Invalid_Context}
+	}
 	binding, binding_error := charged.create(scope, {backing = backing})
 	if binding_error.kind != .None {
 		return nil, {kind = .Budget_Rejected, budget = binding_error.budget, allocation = binding_error.allocation}
@@ -111,7 +137,9 @@ clear_outputs :: proc(session: ^Session) {
 @(private)
 drop_session :: proc(data: rawptr) {
 	session := cast(^Session)data
-	if session == nil do return
+	if session == nil {
+		return
+	}
 	app, owned := session.app, session.owns_app
 	session.owns_app, session.dropped = false, true
 	clear_outputs(session)
@@ -131,7 +159,9 @@ drop_session :: proc(data: rawptr) {
 		event.reason != .IO_Error
 	event.stats = session.metrics
 	event.stats.message_capacity = 0
-	if !session.opened do event.reason = .Not_Opened
+	if !session.opened {
+		event.reason = .Not_Opened
+	}
 	else if event.reason == .Owner_Stopped && core.request_server_stopping(session.request_context) {
 		event.reason = .Shutdown
 	}
@@ -143,8 +173,12 @@ drop_session :: proc(data: rawptr) {
 	charged.release(&binding)
 
 	if owned {
-		if app.on_close != nil do app.on_close(app.data, &event)
-		if app.drop != nil do app.drop(app.data)
+		if app.on_close != nil {
+			app.on_close(app.data, &event)
+		}
+		if app.drop != nil {
+			app.drop(app.data)
+		}
 	}
 }
 
@@ -210,8 +244,12 @@ accept_header :: proc(session: ^Session, io: ^IO) -> Step {
 		if allocation.kind != .None {
 			session.event.message = allocation
 			code := u16(1002)
-			if allocation.kind == .Message_Oversized do code = 1009
-			if allocation.kind == .Allocation_Failed do code = 1011
+			if allocation.kind == .Message_Oversized {
+				code = 1009
+			}
+			if allocation.kind == .Allocation_Failed {
+				code = 1011
+			}
 			protocol_close(session, code, .Protocol_Error)
 			return .Progress
 		}
@@ -240,7 +278,9 @@ finish_frame :: proc(session: ^Session, io: ^IO) -> Step {
 		}
 
 		session.peer_closed = true
-		if len(session.payload) >= 2 do session.event.peer_code = u16(session.payload[0]) << 8 | u16(session.payload[1])
+		if len(session.payload) >= 2 {
+			session.event.peer_code = u16(session.payload[0]) << 8 | u16(session.payload[1])
+		}
 		request_close(session, session.payload, .Peer_Close, false)
 	} else if opcode == .Ping {
 		if !session.close_requested {
@@ -283,7 +323,9 @@ finish_frame :: proc(session: ^Session, io: ^IO) -> Step {
 
 @(private)
 read_step :: proc(session: ^Session, io: ^IO) -> Step {
-	if session.reading_payload && session.payload_used == len(session.payload) do return finish_frame(session, io)
+	if session.reading_payload && session.payload_used == len(session.payload) {
+		return finish_frame(session, io)
+	}
 
 	if !session.reading_payload && session.header_used == session.header_expected {
 		if session.header_used == 2 {
@@ -299,16 +341,24 @@ read_step :: proc(session: ^Session, io: ^IO) -> Step {
 
 			length := session.input_header[1] & 127
 			session.header_expected = 6
-			if length == 126 do session.header_expected += 2
-			if length == 127 do session.header_expected += 8
+			if length == 126 {
+				session.header_expected += 2
+			}
+			if length == 127 {
+				session.header_expected += 8
+			}
 		} else {
 			return accept_header(session, io)
 		}
 	}
 
 	deadline := session.read_deadline
-	if session.message_deadline.epoch != 0 && session.message_deadline.at < deadline.at do deadline = session.message_deadline
-	if session.close_requested && session.close_deadline.at < deadline.at do deadline = session.close_deadline
+	if session.message_deadline.epoch != 0 && session.message_deadline.at < deadline.at {
+		deadline = session.message_deadline
+	}
+	if session.close_requested && session.close_deadline.at < deadline.at {
+		deadline = session.close_deadline
+	}
 	now := async.deadline_after(io._transport.runtime, 0)
 	io._transport.connection.read_deadline = time.tick_add(
 		time.tick_now(),
@@ -321,10 +371,14 @@ read_step :: proc(session: ^Session, io: ^IO) -> Step {
 	}
 
 	n, error := core.upgrade_read(io._transport, destination, deadline)
-	if error.kind == .Pending do return .Waiting
+	if error.kind == .Pending {
+		return .Waiting
+	}
 
 	if error.kind != .None || n == 0 {
-		if session.event.transport.kind == .None do session.event.transport = error
+		if session.event.transport.kind == .None {
+			session.event.transport = error
+		}
 
 		if error.kind == .Timeout {
 			protocol_close(session, 1001, .Timeout)
@@ -360,16 +414,24 @@ valid_io :: proc(io: ^IO) -> bool {
 // Copies the complete message before returning. Rejection never retains payload.
 // Frames are generated serially; a large message is fragmented at max_frame_bytes.
 send :: proc(io: ^IO, opcode: codec.Opcode, payload: []u8) -> Send_Result {
-	if !valid_io(io) do return .Closed
+	if !valid_io(io) {
+		return .Closed
+	}
 	session := io._session
-	if session.close_requested do return .Closed
-	if opcode != .Text && opcode != .Binary do return .Invalid
+	if session.close_requested {
+		return .Closed
+	}
+	if opcode != .Text && opcode != .Binary {
+		return .Invalid
+	}
 
 	if len(payload) > session.config.max_message_bytes || len(payload) > session.config.max_output_bytes {
 		return .Limit_Exceeded
 	}
 
-	if opcode == .Text && !utf8.valid_string(string(payload)) do return .Invalid
+	if opcode == .Text && !utf8.valid_string(string(payload)) {
+		return .Invalid
+	}
 	if session.output_count == len(session.outputs) ||
 	   len(payload) > session.config.max_output_bytes - session.metrics.queued_bytes {
 		session.writable_wanted = true
@@ -377,7 +439,9 @@ send :: proc(io: ^IO, opcode: codec.Opcode, payload: []u8) -> Send_Result {
 	}
 
 	storage, error := make([]u8, len(payload), session.allocator)
-	if error != nil do return .Allocation_Failed
+	if error != nil {
+		return .Allocation_Failed
+	}
 	copy(storage, payload)
 	index := (session.output_head + session.output_count) % len(session.outputs)
 	session.outputs[index] = {
@@ -396,26 +460,38 @@ send :: proc(io: ^IO, opcode: codec.Opcode, payload: []u8) -> Send_Result {
 }
 
 close :: proc(io: ^IO, code: u16, reason: string) -> Error {
-	if !valid_io(io) do return {kind = .Invalid_Context}
-	if len(reason) > 123 do return {kind = .Invalid_Close}
+	if !valid_io(io) {
+		return {kind = .Invalid_Context}
+	}
+	if len(reason) > 123 {
+		return {kind = .Invalid_Close}
+	}
 	payload: [125]u8
 	payload[0], payload[1] = u8(code >> 8), u8(code & 255)
 	copy(payload[2:], reason)
-	if codec.close_payload_validate(payload[:2 + len(reason)]) != .None do return {kind = .Invalid_Close}
+	if codec.close_payload_validate(payload[:2 + len(reason)]) != .None {
+		return {kind = .Invalid_Close}
+	}
 	session := io._session
-	if session.close_requested do return {}
+	if session.close_requested {
+		return {}
+	}
 	request_close(session, payload[:2 + len(reason)], .Application_Close, false)
 
 	return {}
 }
 
 subprotocol :: proc(io: ^IO) -> string {
-	if !valid_io(io) do return ""
+	if !valid_io(io) {
+		return ""
+	}
 
 	return io._session.protocol
 }
 stats :: proc(io: ^IO) -> Stats {
-	if !valid_io(io) do return {}
+	if !valid_io(io) {
+		return {}
+	}
 	result := io._session.metrics
 	result.message_capacity = cap(io._session.message.message)
 
@@ -426,14 +502,18 @@ stats :: proc(io: ^IO) -> Stats {
 request_close :: proc(session: ^Session, payload: []u8, reason: Close_Reason, abort: bool) {
 	if session.close_requested {
 		// Escalate termination without replacing close bytes already in flight.
-		if abort do session.abort_after_close = true
+		if abort {
+			session.abort_after_close = true
+		}
 		return
 	}
 
 	session.close_requested, session.abort_after_close = true, abort
 	session.close_size = copy(session.close_payload[:], payload)
 	session.event.reason = reason
-	if len(payload) >= 2 do session.event.code = u16(payload[0]) << 8 | u16(payload[1])
+	if len(payload) >= 2 {
+		session.event.code = u16(payload[0]) << 8 | u16(payload[1])
+	}
 }
 
 @(private)
@@ -448,12 +528,16 @@ semantic_deadline :: proc(session: ^Session) -> async.Deadline {
 			session.control_deadline if session.control_used > 0 else async.Deadline{},
 			session.close_deadline if session.close_requested else async.Deadline{},
 		}) {
-		if deadline.epoch != 0 && (result.epoch == 0 || deadline.at < result.at) do result = deadline
+		if deadline.epoch != 0 && (result.epoch == 0 || deadline.at < result.at) {
+			result = deadline
+		}
 	}
 
 	if session.output_count > 0 {
 		deadline := session.outputs[session.output_head].deadline
-		if deadline.epoch != 0 && (result.epoch == 0 || deadline.at < result.at) do result = deadline
+		if deadline.epoch != 0 && (result.epoch == 0 || deadline.at < result.at) {
+			result = deadline
+		}
 	}
 
 	return result
@@ -464,13 +548,19 @@ semantic_deadline :: proc(session: ^Session) -> async.Deadline {
 @(private)
 session_budget_expired :: proc(session: ^Session, runtime: ^async.Runtime) -> bool {
 	deadline := semantic_deadline(session)
-	if deadline.epoch == 0 || async.deadline_after(runtime, 0).at < deadline.at do return false
-
-	if session.event.transport.kind == .None do session.event.transport = {
-		kind = .Timeout,
+	if deadline.epoch == 0 || async.deadline_after(runtime, 0).at < deadline.at {
+		return false
 	}
 
-	if session.event.reason == .Owner_Stopped do session.event.reason = .Timeout
+	if session.event.transport.kind == .None {
+		session.event.transport = {
+			kind = .Timeout,
+		}
+	}
+
+	if session.event.reason == .Owner_Stopped {
+		session.event.reason = .Timeout
+	}
 
 	return true
 }
@@ -482,7 +572,9 @@ wait_session :: proc(session: ^Session, io: ^IO, read, write: bool) -> async.Res
 
 	if transport.stream_wait != nil {
 		error := transport.stream_wait(transport.stream_data, read, write, deadline)
-		if error.kind == .None || error.kind == .Timeout do return .Yield
+		if error.kind == .None || error.kind == .Timeout {
+			return .Yield
+		}
 
 		if error.kind != .Pending {
 			session.event.transport = error
@@ -497,7 +589,9 @@ wait_session :: proc(session: ^Session, io: ^IO, read, write: bool) -> async.Res
 		// Individual native read/write calls replace the socket interest. Restore
 		// both directions explicitly after attempting them, then recheck budgets.
 		error := async.wait_stream(transport.socket, read, write, deadline)
-		if error.kind == .None || error.kind == .Timeout do return .Yield
+		if error.kind == .None || error.kind == .Timeout {
+			return .Yield
+		}
 
 		if error.kind != .Pending {
 			record_io_failure(session, error)
@@ -507,8 +601,12 @@ wait_session :: proc(session: ^Session, io: ^IO, read, write: bool) -> async.Res
 
 	if deadline.epoch != 0 {
 		error := async.sleep_until_earlier(transport.runtime, deadline)
-		if error.kind == .None do return .Yield
-		if error.kind != .Pending do return .Done
+		if error.kind == .None {
+			return .Yield
+		}
+		if error.kind != .Pending {
+			return .Done
+		}
 	}
 
 	return .Waiting
@@ -530,7 +628,9 @@ resume_session :: proc(data: rawptr, transport: ^core.Upgrade_IO) -> async.Resum
 	if !session.opened {
 		session.opened = true
 		reset_read(session, &io)
-		if session.app.on_open != nil do session.app.on_open(session.app.data, &io)
+		if session.app.on_open != nil {
+			session.app.on_open(session.app.data, &io)
+		}
 	}
 
 	for _ in 0 ..< SESSION_WORK_LIMIT {
@@ -542,14 +642,20 @@ resume_session :: proc(data: rawptr, transport: ^core.Upgrade_IO) -> async.Resum
 			session.close_deadline = async.deadline_after(transport.runtime, session.config.close_timeout)
 		}
 
-		if session.close_sent && (session.peer_closed || session.abort_after_close) do return .Done
-		if session_budget_expired(session, transport.runtime) do return .Done
+		if session.close_sent && (session.peer_closed || session.abort_after_close) {
+			return .Done
+		}
+		if session_budget_expired(session, transport.runtime) {
+			return .Done
+		}
 		read := Step.Idle
 		// Service input while output is blocked. A pending control response owns
 		// its fixed slot, so pause input until it is written instead of overwriting.
 		if session.control_used == 0 && (!session.close_requested || session.close_sent) {
 			read = read_step(session, &io)
-			if read == .Done do return .Done
+			if read == .Done {
+				return .Done
+			}
 		}
 
 		// Input policy/callbacks may have requested close during this step.
@@ -558,8 +664,12 @@ resume_session :: proc(data: rawptr, transport: ^core.Upgrade_IO) -> async.Resum
 		}
 
 		write := write_step(session, &io)
-		if write == .Done do return .Done
-		if session.close_sent && (session.peer_closed || session.abort_after_close) do return .Done
+		if write == .Done {
+			return .Done
+		}
+		if session.close_sent && (session.peer_closed || session.abort_after_close) {
+			return .Done
+		}
 
 		if read != .Progress && write != .Progress {
 			return wait_session(session, &io, read == .Waiting, write == .Waiting)
@@ -736,13 +846,19 @@ request_fields :: proc(request: ^core.Request) -> (Upgrade_Fields, Error) {
 		value := codec.upgrade_trim_ows(header.value)
 
 		if strings.equal_fold(header.name, "Host") {
-			if host_seen || !codec.upgrade_host_valid(value) do return {}, {kind = .Invalid_Request, status = .Bad_Request}
+			if host_seen || !codec.upgrade_host_valid(value) {
+				return {}, {kind = .Invalid_Request, status = .Bad_Request}
+			}
 			host_seen = true
 		} else if strings.equal_fold(header.name, "Sec-WebSocket-Key") {
-			if key_seen do return {}, {kind = .Invalid_Request, status = .Bad_Request}
+			if key_seen {
+				return {}, {kind = .Invalid_Request, status = .Bad_Request}
+			}
 			fields.key, key_seen = value, true
 		} else if strings.equal_fold(header.name, "Sec-WebSocket-Version") {
-			if version_seen do return {}, {kind = .Invalid_Request, status = .Bad_Request}
+			if version_seen {
+				return {}, {kind = .Invalid_Request, status = .Bad_Request}
+			}
 			fields.version, version_seen = value, true
 		} else if strings.equal_fold(header.name, "Origin") {
 			if fields.origin_present || value == "" || !codec.upgrade_origin_valid(value) {
@@ -758,7 +874,9 @@ request_fields :: proc(request: ^core.Request) -> (Upgrade_Fields, Error) {
 			upgrade := strings.equal_fold(header.name, "Upgrade")
 			wanted := "websocket" if upgrade else "upgrade"
 			found, valid := codec.upgrade_list_contains(value, wanted, upgrade)
-			if !valid do return {}, {kind = .Invalid_Request, status = .Bad_Request}
+			if !valid {
+				return {}, {kind = .Invalid_Request, status = .Bad_Request}
+			}
 
 			if upgrade {
 				fields.upgrade_seen = fields.upgrade_seen || found
@@ -769,7 +887,9 @@ request_fields :: proc(request: ^core.Request) -> (Upgrade_Fields, Error) {
 			remaining := value
 
 			for token in strings.split_iterator(&remaining, ",") {
-				if fields.offered_count == MAX_SUBPROTOCOLS do return {}, {kind = .Invalid_Request, status = .Bad_Request}
+				if fields.offered_count == MAX_SUBPROTOCOLS {
+					return {}, {kind = .Invalid_Request, status = .Bad_Request}
+				}
 				fields.offered[fields.offered_count] = codec.upgrade_trim_ows(token)
 				fields.offered_count += 1
 			}
@@ -807,14 +927,18 @@ prepare_upgrade :: proc(request: ^core.Request, config: Config, app: Application
 	}
 
 	fields, error := request_fields(request)
-	if error.kind != .None do return {}, error
+	if error.kind != .None {
+		return {}, error
+	}
 	allowed := !fields.origin_present
 
 	if resolved.check_origin != nil {
 		allowed = resolved.check_origin(resolved.policy_data, request, fields.origin, fields.origin_present)
 	}
 
-	if !allowed do return {}, {kind = .Origin_Rejected, status = .Forbidden}
+	if !allowed {
+		return {}, {kind = .Origin_Rejected, status = .Forbidden}
+	}
 	protocol := ""
 
 	if resolved.select_subprotocol != nil {
@@ -823,14 +947,18 @@ prepare_upgrade :: proc(request: ^core.Request, config: Config, app: Application
 			request,
 			fields.offered[:fields.offered_count],
 		)
-		if !accepted do return {}, {kind = .Protocol_Rejected, status = .Bad_Request}
+		if !accepted {
+			return {}, {kind = .Protocol_Rejected, status = .Bad_Request}
+		}
 		protocol = selected
 
 		if selected != "" {
 			found := false
 
 			for offer in fields.offered[:fields.offered_count] {
-				if selected == offer do found = true
+				if selected == offer {
+					found = true
+				}
 			}
 
 			if !found || codec.upgrade_protocols_validate([]string{selected}) != .None {
@@ -852,14 +980,20 @@ prepare_upgrade :: proc(request: ^core.Request, config: Config, app: Application
 	}
 
 	committed := false
-	defer if !committed do drop_session(session)
+	defer if !committed {
+		drop_session(session)
+	}
 	retained, retained_ok := core.retain_request_context(request.cancellation)
-	if !retained_ok do return {}, {kind = .Invalid_Context, status = .Internal_Server_Error}
+	if !retained_ok {
+		return {}, {kind = .Invalid_Context, status = .Internal_Server_Error}
+	}
 	session.request_context = retained
 
 	if protocol != "" {
 		copy, copy_error := strings.clone(protocol, session.allocator)
-		if copy_error != nil do return {}, {kind = .Allocation_Failed, allocation = copy_error, status = .Internal_Server_Error}
+		if copy_error != nil {
+			return {}, {kind = .Allocation_Failed, allocation = copy_error, status = .Internal_Server_Error}
+		}
 		session.protocol = copy
 	}
 
@@ -872,22 +1006,32 @@ prepare_upgrade :: proc(request: ^core.Request, config: Config, app: Application
 
 		if protocol != "" {
 			allocated, header_error := make([]core.Header, 1, request.allocator)
-			if header_error != nil do return {}, {kind = .Allocation_Failed, allocation = header_error, status = .Internal_Server_Error}
+			if header_error != nil {
+				return {}, {kind = .Allocation_Failed, allocation = header_error, status = .Internal_Server_Error}
+			}
 			headers = allocated
 			headers[0] = {"sec-websocket-protocol", session.protocol}
 		}
 	} else {
 		accept, accept_error := make([]u8, 28, request.allocator)
-		if accept_error != nil do return {}, {kind = .Allocation_Failed, allocation = accept_error, status = .Internal_Server_Error}
+		if accept_error != nil {
+			return {}, {kind = .Allocation_Failed, allocation = accept_error, status = .Internal_Server_Error}
+		}
 		accepted := codec.upgrade_accept_encoded(fields.key)
 		copy(accept, accepted[:])
 		count := 2
-		if protocol != "" do count += 1
+		if protocol != "" {
+			count += 1
+		}
 		allocated_headers, headers_error := make([]core.Header, count, request.allocator)
 		headers = allocated_headers
-		if headers_error != nil do return {}, {kind = .Allocation_Failed, allocation = headers_error, status = .Internal_Server_Error}
+		if headers_error != nil {
+			return {}, {kind = .Allocation_Failed, allocation = headers_error, status = .Internal_Server_Error}
+		}
 		headers[0], headers[1] = {"Upgrade", "websocket"}, {"Sec-WebSocket-Accept", string(accept)}
-		if protocol != "" do headers[2] = {"Sec-WebSocket-Protocol", session.protocol}
+		if protocol != "" {
+			headers[2] = {"Sec-WebSocket-Protocol", session.protocol}
+		}
 	}
 
 	session.owns_app, committed = true, true
@@ -905,7 +1049,9 @@ upgrade :: proc(request: ^core.Request, config: Config, app: Application) -> (co
 	response, error := prepare_upgrade(request, config, app)
 
 	if error.kind != .None {
-		if error.status == .None do error.status = .Internal_Server_Error
+		if error.status == .None {
+			error.status = .Internal_Server_Error
+		}
 		return {status = error.status}, error
 	}
 
@@ -929,15 +1075,23 @@ set_write_deadline :: proc(io: ^core.Upgrade_IO, deadline: async.Deadline) {
 // The first transport error and the first close reason win.
 @(private)
 record_io_failure :: proc(session: ^Session, error: async.Error) {
-	if error.kind != .None && session.event.transport.kind == .None do session.event.transport = error
-	if session.event.reason == .Owner_Stopped do session.event.reason = .IO_Error
+	if error.kind != .None && session.event.transport.kind == .None {
+		session.event.transport = error
+	}
+	if session.event.reason == .Owner_Stopped {
+		session.event.reason = .IO_Error
+	}
 }
 
 @(private)
 notify_writable :: proc(session: ^Session, io: ^IO) {
-	if !session.writable_wanted || session.close_requested do return
+	if !session.writable_wanted || session.close_requested {
+		return
+	}
 	session.writable_wanted = false
-	if session.app.on_writable != nil do session.app.on_writable(session.app.data, io)
+	if session.app.on_writable != nil {
+		session.app.on_writable(session.app.data, io)
+	}
 }
 
 @(private)
@@ -961,10 +1115,14 @@ write_step :: proc(session: ^Session, io: ^IO) -> Step {
 	if session.frame_used > 0 {
 		output := &session.outputs[session.output_head]
 		deadline := output.deadline
-		if session.close_requested && session.close_deadline.at < deadline.at do deadline = session.close_deadline
+		if session.close_requested && session.close_deadline.at < deadline.at {
+			deadline = session.close_deadline
+		}
 		set_write_deadline(transport, deadline)
 		n, error := core.upgrade_write(transport, session.frame_wire[session.frame_sent:session.frame_used], deadline)
-		if error.kind == .Pending do return .Waiting
+		if error.kind == .Pending {
+			return .Waiting
+		}
 
 		if error.kind != .None || n <= 0 {
 			record_io_failure(session, error)
@@ -972,7 +1130,9 @@ write_step :: proc(session: ^Session, io: ^IO) -> Step {
 		}
 
 		session.frame_sent += n
-		if session.frame_sent != session.frame_used do return .Progress
+		if session.frame_sent != session.frame_used {
+			return .Progress
+		}
 		session.metrics.frames_out += 1
 		session.frame_used, session.frame_sent = 0, 0
 
@@ -1013,7 +1173,9 @@ write_step :: proc(session: ^Session, io: ^IO) -> Step {
 			session.control[session.control_sent:session.control_used],
 			session.control_deadline,
 		)
-		if error.kind == .Pending do return .Waiting
+		if error.kind == .Pending {
+			return .Waiting
+		}
 
 		if error.kind != .None || n <= 0 {
 			record_io_failure(session, error)
@@ -1021,16 +1183,24 @@ write_step :: proc(session: ^Session, io: ^IO) -> Step {
 		}
 
 		session.control_sent += n
-		if session.control_sent != session.control_used do return .Progress
+		if session.control_sent != session.control_used {
+			return .Progress
+		}
 		session.metrics.frames_out += 1
-		if session.control_close do session.close_sent = true
+		if session.control_close {
+			session.close_sent = true
+		}
 		session.control_used, session.control_sent = 0, 0
 		return .Progress
 	}
 
-	if session.close_sent || session.output_count == 0 do return .Idle
+	if session.close_sent || session.output_count == 0 {
+		return .Idle
+	}
 	output := &session.outputs[session.output_head]
-	if output.deadline.epoch == 0 do output.deadline = async.deadline_after(transport.runtime, session.config.write_timeout)
+	if output.deadline.epoch == 0 {
+		output.deadline = async.deadline_after(transport.runtime, session.config.write_timeout)
+	}
 
 	if session.frame_wire == nil {
 		buffer, allocation := make(

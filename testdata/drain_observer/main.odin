@@ -47,7 +47,9 @@ main :: proc() {
 	})
 	assert(worker != nil)
 	limit := time.tick_add(time.tick_now(), 5 * time.Second)
-	for !server.server_ready(&state.control) && time.tick_diff(time.tick_now(), limit) > 0 do time.sleep(time.Millisecond)
+	for !server.server_ready(&state.control) && time.tick_diff(time.tick_now(), limit) > 0 {
+		time.sleep(time.Millisecond)
+	}
 	endpoint, ready := server.server_endpoint(&state.control)
 	assert(ready)
 	fmt.printf("ready %d\n", endpoint.port)

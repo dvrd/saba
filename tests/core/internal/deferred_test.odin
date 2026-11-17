@@ -24,7 +24,9 @@ deferred_poll :: proc(p: rawptr, io: ^Deferred_IO) -> (Response, Deferred_Step) 
 		source.retained^ = retained
 	}
 
-	if source.late do time.sleep(2 * time.Millisecond)
+	if source.late {
+		time.sleep(2 * time.Millisecond)
+	}
 	body, error := make([]u8, 3, io.allocator)
 	assert(error == nil)
 	copy(body, source.bytes[:])

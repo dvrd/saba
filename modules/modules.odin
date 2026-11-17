@@ -25,33 +25,47 @@ serve_modules :: proc(
 	matched: bool,
 ) {
 	relative, response_error, module_matched := module_request(request, prefix)
-	if !module_matched do return {}, false
-	if response_error do return not_found(request), true
+	if !module_matched {
+		return {}, false
+	}
+	if response_error {
+		return not_found(request), true
+	}
 	root, root_error := filepath.abs(directory, request.allocator)
 	if root_error != nil {
 		log.errorf("Could not resolve module directory %s: %v", directory, root_error)
 		return Response{status = .Internal_Server_Error}, true
 	}
 	javascript, has_javascript, javascript_allowed := module_file(root, relative, request.allocator)
-	if !javascript_allowed do return not_found(request), true
+	if !javascript_allowed {
+		return not_found(request), true
+	}
 	if development {
 		source, has_source, source_allowed := module_file(
 			root,
 			fmt.tprintf("%s.jsx", relative[:len(relative) - len(".js")]),
 			request.allocator,
 		)
-		if !source_allowed do return not_found(request), true
+		if !source_allowed {
+			return not_found(request), true
+		}
 
 		if has_source && has_javascript {
 			log.errorf("JSX output collides with an existing JavaScript file: %s", relative)
 			return Response{status = .Internal_Server_Error}, true
 		}
 
-		if has_source do return serve_jsx(request, source), true
+		if has_source {
+			return serve_jsx(request, source), true
+		}
 	}
-	if !has_javascript do return not_found(request), true
+	if !has_javascript {
+		return not_found(request), true
+	}
 	body, read_error := os.read_entire_file(javascript, request.allocator)
-	if read_error != nil do return Response{status = .Internal_Server_Error}, true
+	if read_error != nil {
+		return Response{status = .Internal_Server_Error}, true
+	}
 	return assets.representation_response(request, body, "text/javascript; charset=utf-8", development), true
 }
 
@@ -94,15 +108,23 @@ Module_Cache :: struct {
 serve_prepared_modules :: proc(request: ^Request, mounts: []Module_Cache, development: bool) -> (Response, bool) {
 	for mount in mounts {
 		if development {
-			if response, matched := serve_modules(request, mount.mount.directory, mount.mount.prefix, true); matched do return response, true
+			if response, matched := serve_modules(request, mount.mount.directory, mount.mount.prefix, true); matched {
+				return response, true
+			}
 			continue
 		}
 
 		relative, invalid, matched := module_request(request, mount.mount.prefix)
-		if !matched do continue
-		if invalid do return not_found(request), true
+		if !matched {
+			continue
+		}
+		if invalid {
+			return not_found(request), true
+		}
 		prepared, found := mount.files[relative]
-		if !found do return not_found(request), true
+		if !found {
+			return not_found(request), true
+		}
 		return assets.prepared_representation_response(request, &prepared), true
 	}
 
@@ -119,9 +141,15 @@ module_request :: proc(request: ^Request, prefix: string) -> (path: string, inva
 	}
 
 	relative, decoded := net.percent_decode(request.path[len(prefix):], request.allocator)
-	if !decoded do return "", true, true
-	if !strings.has_suffix(relative, ".js") && !strings.has_suffix(relative, ".jsx") do return "", false, false
-	if strings.has_suffix(relative, ".jsx") || !module_relative_ok(relative) do return "", true, true
+	if !decoded {
+		return "", true, true
+	}
+	if !strings.has_suffix(relative, ".js") && !strings.has_suffix(relative, ".jsx") {
+		return "", false, false
+	}
+	if strings.has_suffix(relative, ".jsx") || !module_relative_ok(relative) {
+		return "", true, true
+	}
 
 	return relative, false, true
 }
@@ -157,7 +185,9 @@ prepare_module_mounts :: proc(
 	}
 	for mount, index in mounts {
 		prefix := mount.prefix
-		if prefix == "" do prefix = "/"
+		if prefix == "" {
+			prefix = "/"
+		}
 
 		if !strings.has_prefix(prefix, "/") || !strings.has_suffix(prefix, "/") {
 			log.errorf("Module prefix must start and end with /: %s", prefix)
@@ -186,7 +216,9 @@ prepare_module_mounts :: proc(
 		}
 
 		prepared[index].mount = {root, owned_prefix}
-		if !development && !compile_module_directory(&prepared[index], allocator) do return nil, false
+		if !development && !compile_module_directory(&prepared[index], allocator) {
+			return nil, false
+		}
 	}
 	return prepared, true
 }
@@ -199,10 +231,14 @@ compile_module_directory :: proc(cache: ^Module_Cache, allocator: mem.Allocator)
 	defer os.walker_destroy(&walker)
 
 	for file in os.walker_walk(&walker) {
-		if file.type != .Regular do continue
+		if file.type != .Regular {
+			continue
+		}
 		relative := file.fullpath[len(root) + 1:]
 		is_jsx := strings.has_suffix(relative, ".jsx")
-		if (!is_jsx && !strings.has_suffix(relative, ".js")) || !module_relative_ok(relative) do continue
+		if (!is_jsx && !strings.has_suffix(relative, ".js")) || !module_relative_ok(relative) {
+			continue
+		}
 		resolved, found, allowed := module_file(root, relative, allocator)
 
 		if !found || !allowed {
@@ -211,7 +247,9 @@ compile_module_directory :: proc(cache: ^Module_Cache, allocator: mem.Allocator)
 		}
 
 		url := relative
-		if is_jsx do url = fmt.aprintf("%s.js", relative[:len(relative) - 4], allocator = allocator)
+		if is_jsx {
+			url = fmt.aprintf("%s.js", relative[:len(relative) - 4], allocator = allocator)
+		}
 
 		if _, collision := cache.files[url]; collision {
 			log.errorf("JSX output collides with an existing JavaScript file: %s", url)

@@ -35,9 +35,13 @@ transforms_html_components_fragments_and_expressions :: proc(t: ^testing.T) {
 
 	for item in cases {
 		output, error := transform_jsx(item.source, "test.jsx", context.temp_allocator)
-		if !testing.expectf(t, error.message == "", "%s: %v", item.source, error) do continue
+		if !testing.expectf(t, error.message == "", "%s: %v", item.source, error) {
+			continue
+		}
 		header := `import { jsx as __saba_jsx } from "/__saba/dom.js";` + "\n"
-		if strings.contains(item.expected, "Fragment,") do header = `import { jsx as __saba_jsx, Fragment as __saba_Fragment } from "/__saba/dom.js";` + "\n"
+		if strings.contains(item.expected, "Fragment,") {
+			header = `import { jsx as __saba_jsx, Fragment as __saba_Fragment } from "/__saba/dom.js";` + "\n"
+		}
 		testing.expect_value(t, output, fmt.tprintf("%s%s", header, item.expected))
 	}
 }

@@ -21,7 +21,9 @@ state: State
 routes :: proc(conn: ^server.Connection, request: ^server.Request) -> server.Response {
 	assert(conn.write_deadline == time.Tick{}, "previous response deadline survived into next handler")
 	arena := cast(^mem.Dynamic_Arena)request.allocator.data
-	if request.path == "/arena" do assert(len(arena.out_band_allocations) == 0, "old request allocations survived")
+	if request.path == "/arena" {
+		assert(len(arena.out_band_allocations) == 0, "old request allocations survived")
+	}
 
 	if request.path == "/echo" || request.path == "/limited" {
 		return server.make_response(request, .OK, nil, request.body)
@@ -29,16 +31,24 @@ routes :: proc(conn: ^server.Connection, request: ^server.Request) -> server.Res
 
 	if request.path == "/allocate" {
 		body := make([]u8, 1024 * 1024, request.allocator)
-		for &b in body do b = 42
+		for &b in body {
+			b = 42
+		}
 		return server.make_response(request, .OK, nil, body)
 	}
 
-	if request.path == "/slow" do time.sleep(70 * time.Millisecond)
-	if request.path == "/drain" do assert(server.drain_server(&state.control, 250 * time.Millisecond))
+	if request.path == "/slow" {
+		time.sleep(70 * time.Millisecond)
+	}
+	if request.path == "/drain" {
+		assert(server.drain_server(&state.control, 250 * time.Millisecond))
+	}
 	_ = server.match_route(request, request.method, "/:route")
 	body := fmt.aprintf("%d", request.request_id, allocator = request.allocator)
 	response := server.make_response(request, .OK, nil, transmute([]u8)body)
-	if request.path == "/close" do response.close_connection = true
+	if request.path == "/close" {
+		response.close_connection = true
+	}
 
 	return response
 }
@@ -72,7 +82,9 @@ main :: proc() {
 					fmt.printf("event %d %s %s %d %d %d %v\n", event.request_id, event.method, event.route if event.route != "" else "-", int(event.status), event.bytes_received, event.bytes_sent, event.outcome)
 					os.flush(os.stdout)
 					sync.unlock(&state.mutex)
-					if start_drain do assert(server.drain_server(&state.control, 250 * time.Millisecond))
+					if start_drain {
+						assert(server.drain_server(&state.control, 250 * time.Millisecond))
+					}
 				}},
 		})
 	})

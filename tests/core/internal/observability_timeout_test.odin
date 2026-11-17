@@ -185,8 +185,12 @@ observability_concurrent_snapshots_are_consistent :: proc(t: ^testing.T) {
 		testing.expect(t, metrics.started >= metrics.completed)
 		testing.expect_value(t, metrics.active, metrics.started - metrics.completed)
 		all_done := true
-		for &worker in workers do all_done = all_done && sync.atomic_load(&worker.done)
-		if all_done do break
+		for &worker in workers {
+			all_done = all_done && sync.atomic_load(&worker.done)
+		}
+		if all_done {
+			break
+		}
 		thread.yield()
 	}
 

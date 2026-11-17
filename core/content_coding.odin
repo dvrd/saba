@@ -21,18 +21,28 @@ gzip_compress :: proc(src: []u8, allocator: mem.Allocator) -> []u8 {
 	// only charged the exact encoded body.
 	bound := gzip.stream_bound(len(src))
 	scratch := rt.heap_allocator()
-	if bound <= 0 || bound > GZIP_MAX_OUTPUT || allocator.procedure == nil do return nil
+	if bound <= 0 || bound > GZIP_MAX_OUTPUT || allocator.procedure == nil {
+		return nil
+	}
 	encoder, alloc_error := new(gzip.Stream_Encoder, scratch)
-	if alloc_error != nil || encoder == nil do return nil
+	if alloc_error != nil || encoder == nil {
+		return nil
+	}
 	defer free(encoder, scratch)
 	gzip.stream_reset(encoder, GZIP_MAX_OUTPUT)
 	staged, stage_error := make([]u8, bound, scratch)
-	if stage_error != nil do return nil
+	if stage_error != nil {
+		return nil
+	}
 	defer delete(staged, scratch)
 	written, ok := gzip.stream_encode_into(encoder, src, staged)
-	if !ok || written <= 0 || written >= len(src) do return nil
+	if !ok || written <= 0 || written >= len(src) {
+		return nil
+	}
 	exact, exact_error := make([]u8, written, allocator)
-	if exact_error != nil do return nil
+	if exact_error != nil {
+		return nil
+	}
 	copy(exact, staged[:written])
 
 	return exact
@@ -72,7 +82,9 @@ Coding_Choice :: struct {
 
 @(private)
 coding_token :: proc(value: u8) -> bool {
-	if is_digit(value) || is_alpha(value) do return true
+	if is_digit(value) || is_alpha(value) {
+		return true
+	}
 
 	switch value {
 	case '!', '#', '$', '%', '&', '\'', '+', '-', '.', '^', '_', '`', '|', '~':
@@ -84,7 +96,9 @@ coding_token :: proc(value: u8) -> bool {
 
 @(private)
 parse_qvalue :: proc(value: string) -> (q, next: int, ok: bool) {
-	if len(value) == 0 do return
+	if len(value) == 0 {
+		return
+	}
 	index := 0
 
 	if value[0] == '1' {
@@ -96,7 +110,9 @@ parse_qvalue :: proc(value: string) -> (q, next: int, ok: bool) {
 			digits := 0
 
 			for digits < 3 && index < len(value) && is_digit(value[index]) {
-				if value[index] != '0' do return
+				if value[index] != '0' {
+					return
+				}
 				index += 1
 				digits += 1
 			}
@@ -120,7 +136,9 @@ parse_qvalue :: proc(value: string) -> (q, next: int, ok: bool) {
 		return
 	}
 
-	if index < len(value) && is_digit(value[index]) do return
+	if index < len(value) && is_digit(value[index]) {
+		return
+	}
 
 	return q, index, true
 }
@@ -128,16 +146,22 @@ parse_qvalue :: proc(value: string) -> (q, next: int, ok: bool) {
 @(private)
 accept_coding :: proc(choice: ^Coding_Choice, name: string, q: int) {
 	if name == "*" {
-		if choice.star < 0 do choice.star = q
+		if choice.star < 0 {
+			choice.star = q
+		}
 		return
 	}
 
 	if strings.equal_fold(name, "gzip") || strings.equal_fold(name, "x-gzip") {
-		if choice.gzip < 0 do choice.gzip = q
+		if choice.gzip < 0 {
+			choice.gzip = q
+		}
 		return
 	}
 
-	if strings.equal_fold(name, "identity") && choice.identity < 0 do choice.identity = q
+	if strings.equal_fold(name, "identity") && choice.identity < 0 {
+		choice.identity = q
+	}
 }
 
 @(private)
@@ -146,31 +170,43 @@ parse_coding_list :: proc(value: string, choice: ^Coding_Choice) -> bool {
 
 	for index < len(value) {
 		index = skip_list_separators(value, index)
-		if index >= len(value) do return true
+		if index >= len(value) {
+			return true
+		}
 		start := index
 
 		if value[index] == '*' {
 			index += 1
 		} else {
-			for index < len(value) && coding_token(value[index]) do index += 1
-			if index == start do return false
+			for index < len(value) && coding_token(value[index]) {
+				index += 1
+			}
+			if index == start {
+				return false
+			}
 		}
 
 		name := value[start:index]
 		quality := 1000
 		cursor := index
-		for cursor < len(value) && is_blank(value[cursor]) do cursor += 1
+		for cursor < len(value) && is_blank(value[cursor]) {
+			cursor += 1
+		}
 
 		if cursor < len(value) && value[cursor] == ';' {
 			cursor += 1
-			for cursor < len(value) && is_blank(value[cursor]) do cursor += 1
+			for cursor < len(value) && is_blank(value[cursor]) {
+				cursor += 1
+			}
 
 			if cursor + 1 >= len(value) || (value[cursor] != 'q' && value[cursor] != 'Q') || value[cursor + 1] != '=' {
 				return false
 			}
 
 			parsed, consumed, ok := parse_qvalue(value[cursor + 2:])
-			if !ok do return false
+			if !ok {
+				return false
+			}
 			quality = parsed
 			cursor = cursor + 2 + consumed
 
@@ -197,7 +233,9 @@ parse_accept_encoding :: proc(headers: []Header) -> Coding_Choice {
 	}
 
 	for header in headers {
-		if !strings.equal_fold(header.name, "Accept-Encoding") do continue
+		if !strings.equal_fold(header.name, "Accept-Encoding") {
+			continue
+		}
 		choice.present = true
 
 		if !parse_coding_list(header.value, &choice) {
@@ -213,11 +251,16 @@ gzip_preferred :: proc(choice: Coding_Choice) -> bool {
 	quality := choice.gzip
 
 	if quality < 0 {
-		if choice.star >= 0 do quality = choice.star
-		else do quality = 0
+		if choice.star >= 0 {
+			quality = choice.star
+		} else {
+			quality = 0
+		}
 	}
 
-	if quality <= 0 do return false
+	if quality <= 0 {
+		return false
+	}
 
 	return choice.identity < 0 || choice.identity <= quality
 }
@@ -238,7 +281,9 @@ cache_forbids_coding :: proc(value: string) -> bool {
 			return true
 		}
 
-		for index < len(value) && value[index] != ',' do index += 1
+		for index < len(value) && value[index] != ',' {
+			index += 1
+		}
 	}
 
 	return false
@@ -247,18 +292,38 @@ cache_forbids_coding :: proc(value: string) -> bool {
 @(private)
 compressible_type :: proc(value: string) -> bool {
 	start := 0
-	for start < len(value) && is_blank(value[start]) do start += 1
+	for start < len(value) && is_blank(value[start]) {
+		start += 1
+	}
 	end := start
-	for end < len(value) && value[end] != ';' && !is_blank(value[end]) do end += 1
+	for end < len(value) && value[end] != ';' && !is_blank(value[end]) {
+		end += 1
+	}
 	media := value[start:end]
-	if len(media) >= 5 && strings.equal_fold(media[:5], "text/") do return true
-	if strings.equal_fold(media, "image/svg+xml") do return true
-	if strings.equal_fold(media, "application/javascript") do return true
-	if strings.equal_fold(media, "application/json") do return true
-	if strings.equal_fold(media, "application/xml") do return true
-	if strings.equal_fold(media, "application/xhtml+xml") do return true
-	if len(media) >= 5 && strings.equal_fold(media[len(media) - 5:], "+json") do return true
-	if len(media) >= 4 && strings.equal_fold(media[len(media) - 4:], "+xml") do return true
+	if len(media) >= 5 && strings.equal_fold(media[:5], "text/") {
+		return true
+	}
+	if strings.equal_fold(media, "image/svg+xml") {
+		return true
+	}
+	if strings.equal_fold(media, "application/javascript") {
+		return true
+	}
+	if strings.equal_fold(media, "application/json") {
+		return true
+	}
+	if strings.equal_fold(media, "application/xml") {
+		return true
+	}
+	if strings.equal_fold(media, "application/xhtml+xml") {
+		return true
+	}
+	if len(media) >= 5 && strings.equal_fold(media[len(media) - 5:], "+json") {
+		return true
+	}
+	if len(media) >= 4 && strings.equal_fold(media[len(media) - 4:], "+xml") {
+		return true
+	}
 
 	return false
 }
@@ -266,8 +331,12 @@ compressible_type :: proc(value: string) -> bool {
 @(private)
 coding_eligible :: proc(response: Response, plain: int) -> bool {
 	status := int(response.status)
-	if status == 0 do status = 200
-	if status < 200 || status == 204 || status == 206 || status == 304 do return false
+	if status == 0 {
+		status = 200
+	}
+	if status < 200 || status == 204 || status == 206 || status == 304 {
+		return false
+	}
 
 	if plain < GZIP_MIN_BYTES || plain > GZIP_MAX_INPUT || gzip.stream_bound(plain) > GZIP_MAX_OUTPUT {
 		return false
@@ -281,7 +350,9 @@ coding_eligible :: proc(response: Response, plain: int) -> bool {
 			return false
 		}
 
-		if strings.equal_fold(header.name, "Cache-Control") && cache_forbids_coding(header.value) do return false
+		if strings.equal_fold(header.name, "Cache-Control") && cache_forbids_coding(header.value) {
+			return false
+		}
 
 		if !typed && strings.equal_fold(header.name, "Content-Type") {
 			typed = true
@@ -298,7 +369,9 @@ header_room :: proc(headers: []Header) -> bool {
 
 	for header in headers {
 		used += len(header.name) + len(header.value) + 4
-		if used > 7000 do return false
+		if used > 7000 {
+			return false
+		}
 	}
 
 	return true
@@ -307,7 +380,9 @@ header_room :: proc(headers: []Header) -> bool {
 @(private)
 vary_lists_encoding :: proc(headers: []Header) -> bool {
 	for header in headers {
-		if !strings.equal_fold(header.name, "Vary") do continue
+		if !strings.equal_fold(header.name, "Vary") {
+			continue
+		}
 		index := 0
 		value := header.value
 
@@ -320,7 +395,9 @@ vary_lists_encoding :: proc(headers: []Header) -> bool {
 			}
 
 			token := value[start:index]
-			if token == "*" || strings.equal_fold(token, "Accept-Encoding") do return true
+			if token == "*" || strings.equal_fold(token, "Accept-Encoding") {
+				return true
+			}
 		}
 	}
 
@@ -329,9 +406,13 @@ vary_lists_encoding :: proc(headers: []Header) -> bool {
 
 @(private)
 append_response_headers :: proc(request: ^Request, response: ^Response, extra: []Header) -> bool {
-	if request.allocator.procedure == nil do return false
+	if request.allocator.procedure == nil {
+		return false
+	}
 	stored, err := make([]Header, len(response.headers) + len(extra), request.allocator)
-	if err != nil do return false
+	if err != nil {
+		return false
+	}
 	copy(stored, response.headers)
 	copy(stored[len(response.headers):], extra)
 	response.headers = stored
@@ -353,7 +434,9 @@ Gzip_Stream :: struct {
 
 @(private)
 gzip_stream_free :: proc(state: ^Gzip_Stream) {
-	if state == nil do return
+	if state == nil {
+		return
+	}
 	exchange.destroy(&state.side)
 	delete(state.wire, state.allocator)
 	free(state, state.allocator)
@@ -362,11 +445,15 @@ gzip_stream_free :: proc(state: ^Gzip_Stream) {
 @(private)
 gzip_drop :: proc(data: rawptr) {
 	state := cast(^Gzip_Stream)data
-	if state == nil do return
+	if state == nil {
+		return
+	}
 	inner := state.inner
 	state.inner = {}
 	gzip_stream_free(state)
-	if inner.drop != nil do inner.drop(inner.data)
+	if inner.drop != nil {
+		inner.drop(inner.data)
+	}
 }
 
 @(private)
@@ -379,10 +466,14 @@ gzip_fail :: proc(state: ^Gzip_Stream) -> Stream_Step {
 @(private)
 gzip_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 	state := cast(^Gzip_Stream)data
-	if state == nil || io == nil || state.failed || state.busy do return .Failed
+	if state == nil || io == nil || state.failed || state.busy {
+		return .Failed
+	}
 
 	for _ in 0 ..< 8 {
-		if state.wire_len == 0 do state.wire_len = gzip.stream_pull(&state.encoder, state.wire)
+		if state.wire_len == 0 {
+			state.wire_len = gzip.stream_pull(&state.encoder, state.wire)
+		}
 
 		if state.wire_len > 0 {
 			chunk := owned.Chunk {
@@ -403,7 +494,9 @@ gzip_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 			return .Chunk
 		}
 
-		if state.encoder.finished do return .Done
+		if state.encoder.finished {
+			return .Done
+		}
 
 		if state.have && state.held_off < len(state.held) {
 			count := gzip.stream_write(&state.encoder, state.held[state.held_off:])
@@ -421,7 +514,9 @@ gzip_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 		}
 
 		if state.have {
-			if !exchange.release_body(&state.side) do return gzip_fail(state)
+			if !exchange.release_body(&state.side) {
+				return gzip_fail(state)
+			}
 			state.have, state.held, state.held_off = false, nil, 0
 		}
 
@@ -440,25 +535,39 @@ gzip_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 		capture._submitted = false
 		capture._waiting = false
 		step := state.inner.next(state.inner.data, &capture)
-		if capture._waiting do io._waiting = true
+		if capture._waiting {
+			io._waiting = true
+		}
 
 		switch step {
 		case .Waiting:
-			if !io._waiting || capture._submitted do return gzip_fail(state)
+			if !io._waiting || capture._submitted {
+				return gzip_fail(state)
+			}
 			return .Waiting
 		case .Yield:
-			if io._waiting || capture._submitted do return gzip_fail(state)
+			if io._waiting || capture._submitted {
+				return gzip_fail(state)
+			}
 			return .Yield
 		case .Failed:
 			return gzip_fail(state)
 		case .Done:
-			if capture._submitted || capture._waiting do return gzip_fail(state)
+			if capture._submitted || capture._waiting {
+				return gzip_fail(state)
+			}
 			state.inner_done = true
-			if exchange.finish(&state.side).kind != .None do return gzip_fail(state)
+			if exchange.finish(&state.side).kind != .None {
+				return gzip_fail(state)
+			}
 		case .Chunk:
-			if !capture._submitted || capture._waiting do return gzip_fail(state)
+			if !capture._submitted || capture._waiting {
+				return gzip_fail(state)
+			}
 			payload, ok := exchange.body(&state.side)
-			if !ok || len(payload) == 0 do return gzip_fail(state)
+			if !ok || len(payload) == 0 {
+				return gzip_fail(state)
+			}
 			state.held, state.held_off, state.have = payload, 0, true
 		}
 	}
@@ -469,19 +578,29 @@ gzip_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 
 @(private)
 gzip_wire_release :: proc(_: []u8, data: rawptr) {
-	if data != nil do (cast(^Gzip_Stream)data).busy = false
+	if data != nil {
+		(cast(^Gzip_Stream)data).busy = false
+	}
 }
 
 @(private)
 gzip_stream_attach :: proc(request: ^Request, response: ^Response) -> bool {
 	allocator := request.backing_allocator
-	if allocator.procedure == nil do allocator = rt.heap_allocator()
+	if allocator.procedure == nil {
+		allocator = rt.heap_allocator()
+	}
 	chunk_cap := response.stream.max_chunk_bytes
-	if chunk_cap == 0 do chunk_cap = 64 * 1024
-	if chunk_cap < 1 || chunk_cap > mem.Megabyte do return false
+	if chunk_cap == 0 {
+		chunk_cap = 64 * 1024
+	}
+	if chunk_cap < 1 || chunk_cap > mem.Megabyte {
+		return false
+	}
 	plain := response.stream.content_length
 	state, alloc_error := new(Gzip_Stream, allocator)
-	if alloc_error != nil || state == nil do return false
+	if alloc_error != nil || state == nil {
+		return false
+	}
 	state.allocator = allocator
 	state.inner = response.stream
 	gzip.stream_reset(&state.encoder, GZIP_MAX_OUTPUT)
@@ -530,19 +649,29 @@ gzip_stream_detach :: proc(response: ^Response) {
 // HEAD advertises that framing and does not poll or allocate an encoder.
 @(private)
 content_coding_prepare :: proc(request: ^Request, response: ^Response) {
-	if request == nil || response == nil || request.allocator.procedure == nil do return
+	if request == nil || response == nil || request.allocator.procedure == nil {
+		return
+	}
 	streaming := stream_present(response.stream)
-	if streaming && len(response.body) != 0 do return
+	if streaming && len(response.body) != 0 {
+		return
+	}
 	plain := len(response.body)
 
 	if streaming {
-		if response.stream.content_length < 0 || response.stream.content_length > i64(GZIP_MAX_INPUT) do return
+		if response.stream.content_length < 0 || response.stream.content_length > i64(GZIP_MAX_INPUT) {
+			return
+		}
 		plain = int(response.stream.content_length)
 	}
 
-	if !coding_eligible(response^, plain) || !header_room(response.headers) do return
+	if !coding_eligible(response^, plain) || !header_room(response.headers) {
+		return
+	}
 	choice := parse_accept_encoding(request.headers)
-	if !choice.present || !choice.valid do return
+	if !choice.present || !choice.valid {
+		return
+	}
 	want := gzip_preferred(choice)
 	encoded: []u8
 	attached := false
@@ -550,12 +679,16 @@ content_coding_prepare :: proc(request: ^Request, response: ^Response) {
 
 	if want && streaming && !head {
 		attached = gzip_stream_attach(request, response)
-		if !attached do want = false
+		if !attached {
+			want = false
+		}
 	}
 
 	if want && !streaming {
 		encoded = gzip_compress(response.body, request.allocator)
-		if encoded == nil do want = false
+		if encoded == nil {
+			want = false
+		}
 	}
 
 	extra: [2]Header
@@ -572,16 +705,24 @@ content_coding_prepare :: proc(request: ^Request, response: ^Response) {
 	}
 
 	if count == 0 {
-		if encoded != nil do response.body = encoded
+		if encoded != nil {
+			response.body = encoded
+		}
 		return
 	}
 
 	if !append_response_headers(request, response, extra[:count]) {
 		delete(encoded, request.allocator)
-		if attached do gzip_stream_detach(response)
+		if attached {
+			gzip_stream_detach(response)
+		}
 		return
 	}
 
-	if encoded != nil do response.body = encoded
-	if want && head do response.stream.content_length = -1
+	if encoded != nil {
+		response.body = encoded
+	}
+	if want && head {
+		response.stream.content_length = -1
+	}
 }

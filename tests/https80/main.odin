@@ -81,7 +81,9 @@ Producer :: struct {
 
 stream_next :: proc(data: rawptr, io: ^server.Stream_IO) -> server.Stream_Step {
 	producer := cast(^Producer)data
-	if producer.sequence == 2 do return .Done
+	if producer.sequence == 2 {
+		return .Done
+	}
 	storage, error := make([]u8, 3, rt.heap_allocator())
 	assert(error == nil)
 	text := "one" if producer.sequence == 0 else "two"
@@ -243,7 +245,9 @@ main :: proc() {
 	}
 
 	fixture = &state
-	for &value, index in large do value = u8(index % 251)
+	for &value, index in large {
+		value = u8(index % 251)
+	}
 	load_credentials(&state)
 	defer store.destroy(&state.credentials)
 	state.tls_config = {

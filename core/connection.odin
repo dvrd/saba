@@ -54,7 +54,9 @@ wait_ready :: proc(client: net.TCP_Socket, events: posix.Poll_Event, deadline: t
 
 		if deadline != (time.Tick{}) {
 			remaining := time.tick_diff(time.tick_now(), deadline)
-			if remaining <= 0 do return false, true
+			if remaining <= 0 {
+				return false, true
+			}
 
 			// Round up to milliseconds; -1 means no deadline, and zero means no wait.
 			milliseconds := i64(remaining / time.Millisecond + 1)
@@ -66,12 +68,16 @@ wait_ready :: proc(client: net.TCP_Socket, events: posix.Poll_Event, deadline: t
 
 		if result < 0 {
 			err := posix.errno()
-			if err == .EINTR do continue
+			if err == .EINTR {
+				continue
+			}
 			log.error("Could not wait for socket readiness:", err, "| socket:", client)
 			return false, false
 		}
 
-		if result == 0 do continue
+		if result == 0 {
+			continue
+		}
 
 		if .NVAL in descriptor.revents {
 			log.error("Invalid socket while waiting for readiness | socket:", client)
@@ -89,10 +95,14 @@ wait_ready :: proc(client: net.TCP_Socket, events: posix.Poll_Event, deadline: t
 }
 
 read_connection :: proc(conn: ^Connection, buffer: []u8) -> (received: int, err: net.TCP_Recv_Error) {
-	if conn._secure && len(conn.read_buffer) == 0 do return 0, .Unknown
+	if conn._secure && len(conn.read_buffer) == 0 {
+		return 0, .Unknown
+	}
 
 	for {
-		if deadline_expired(conn.read_deadline) do return 0, .Timeout
+		if deadline_expired(conn.read_deadline) {
+			return 0, .Timeout
+		}
 
 		if len(conn.read_buffer) > 0 {
 			n := copy(buffer, conn.read_buffer)
@@ -102,45 +112,65 @@ read_connection :: proc(conn: ^Connection, buffer: []u8) -> (received: int, err:
 		}
 
 		n, read_err := net.recv_tcp(conn.socket, buffer)
-		if read_err == .Interrupted do continue
-		if read_err != .Would_Block do return n, read_err
+		if read_err == .Interrupted {
+			continue
+		}
+		if read_err != .Would_Block {
+			return n, read_err
+		}
 
 		ready, timed_out := wait_ready(conn.socket, {.IN}, conn.read_deadline)
 
 		if !ready {
-			if timed_out do return 0, .Timeout
+			if timed_out {
+				return 0, .Timeout
+			}
 			return 0, .Unknown
 		}
 	}
 }
 
 write_connection :: proc(conn: ^Connection, data: []u8) -> (sent: int, err: net.TCP_Send_Error) {
-	if conn._secure do return 0, .Unknown
+	if conn._secure {
+		return 0, .Unknown
+	}
 
 	for {
-		if deadline_expired(conn.write_deadline) do return sent, .Timeout
-		if sent == len(data) do return sent, nil
+		if deadline_expired(conn.write_deadline) {
+			return sent, .Timeout
+		}
+		if sent == len(data) {
+			return sent, nil
+		}
 
 		// Bound each call so sustained progress cannot bypass the deadline check.
 		chunk := data[sent:min(sent + 64 * mem.Kilobyte, len(data))]
 		n, send_err := net.send_tcp(conn.socket, chunk)
 		sent += n
 
-		if send_err == .Interrupted do continue
+		if send_err == .Interrupted {
+			continue
+		}
 
 		if send_err == .Would_Block {
 			ready, timed_out := wait_ready(conn.socket, {.OUT}, conn.write_deadline)
 
 			if !ready {
-				if timed_out do return sent, .Timeout
+				if timed_out {
+					return sent, .Timeout
+				}
 				return sent, .Unknown
 			}
 
 			continue
 		}
 
-		if send_err != nil do return sent, send_err
-		if n != len(chunk) do return sent, .Connection_Closed
+		if send_err != nil {
+			return sent, send_err
+		}
+		if n != len(chunk) {
+			return sent, .Connection_Closed
+		}
 	}
 }
 
@@ -239,7 +269,9 @@ serve :: proc(config: Server) -> bool {
 	}
 
 	initial, maximum, workers, valid := server_limits(config)
-	if !valid do return false
+	if !valid {
+		return false
+	}
 
 	if !keep_alive_valid(config.keep_alive) {
 		log.error("Invalid keep-alive request count or idle timeout")
@@ -267,7 +299,9 @@ serve :: proc(config: Server) -> bool {
 	}
 
 	address_text := config.address
-	if address_text == "" do address_text = "127.0.0.1"
+	if address_text == "" {
+		address_text = "127.0.0.1"
+	}
 
 	address, address_ok := net.parse_ip4_address(address_text)
 
@@ -286,7 +320,9 @@ serve :: proc(config: Server) -> bool {
 
 	defer free(runtime)
 	cancellation, ce := new(Server_Cancellation, rt.heap_allocator())
-	if ce != nil || cancellation == nil do return false
+	if ce != nil || cancellation == nil {
+		return false
+	}
 	cancellation.references = 1
 	defer release_server_cancellation(cancellation)
 	runtime^ = Server_Runtime {
@@ -297,7 +333,9 @@ serve :: proc(config: Server) -> bool {
 		capacity_state = {current = initial, maximum = maximum},
 	}
 
-	if !initialize_resources(runtime) do return false
+	if !initialize_resources(runtime) {
+		return false
+	}
 	defer budget.release_scope(&runtime.resources)
 	if err := async.init(
 		&runtime.executor,
@@ -380,21 +418,35 @@ serve :: proc(config: Server) -> bool {
 accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 	runtime := cast(^Server_Runtime)data
 	context.logger = runtime.logger
-	if server_is_draining(runtime) do return drain_connections(runtime)
+	if server_is_draining(runtime) {
+		return drain_connections(runtime)
+	}
 
 	if runtime.accept_retry.at != 0 {
 		err := async.sleep_until(&runtime.executor, runtime.accept_retry)
-		if err.kind == .Pending do return .Waiting
-		if err.kind != .None do return .Done
+		if err.kind == .Pending {
+			return .Waiting
+		}
+		if err.kind != .None {
+			return .Done
+		}
 		runtime.accept_retry = {}
 	}
 
 	for _ in 0 ..< ACCEPT_BATCH_LIMIT {
-		if async.cancelled(&runtime.accept_task) do return .Done
-		if server_is_draining(runtime) do return drain_connections(runtime)
+		if async.cancelled(&runtime.accept_task) {
+			return .Done
+		}
+		if server_is_draining(runtime) {
+			return drain_connections(runtime)
+		}
 		client, err := async.accept(runtime.listener)
-		if err.kind == .Pending do return .Waiting
-		if err.kind == .Cancelled || err.kind == .Closed do return .Done
+		if err.kind == .Pending {
+			return .Waiting
+		}
+		if err.kind == .Cancelled || err.kind == .Closed {
+			return .Done
+		}
 
 		if err.kind != .None {
 			log.error("Could not accept connection:", err)
@@ -426,12 +478,18 @@ accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 @(private)
 reject_connection :: proc(client: net.TCP_Socket, secure: bool) {
 	defer net.close(client)
-	if secure do return
-	if net.set_blocking(client, false) != nil do return
+	if secure {
+		return
+	}
+	if net.set_blocking(client, false) != nil {
+		return
+	}
 	buffer: [RESPONSE_HEADER_LIMIT]u8
 	headers, ready := response_headers(Response{status = .Service_Unavailable}, buffer[:])
 	// Best effort only: waiting for a rejected client would stall acceptance.
-	if ready do net.send_tcp(client, headers)
+	if ready {
+		net.send_tcp(client, headers)
+	}
 }
 
 @(private)
@@ -550,7 +608,9 @@ TLS_State :: struct {
 
 @(private)
 tls_config_valid :: proc(config: ^TLS_Config) -> bool {
-	if config == nil do return true
+	if config == nil {
+		return true
+	}
 	if !tls.server_ticket_config_valid(config.tickets) ||
 	   !tls.client_auth_config_valid(config.client_auth) ||
 	   config.store == nil ||
@@ -564,7 +624,9 @@ tls_config_valid :: proc(config: ^TLS_Config) -> bool {
 		return false
 	}
 
-	if config.max_handshake_records < 0 || config.max_handshake_records > 65536 do return false
+	if config.max_handshake_records < 0 || config.max_handshake_records > 65536 {
+		return false
+	}
 	stats, error := store.stats(config.store)
 
 	return error.kind == .None && !stats.closed && stats.current_generation != 0
@@ -574,12 +636,20 @@ tls_config_valid :: proc(config: ^TLS_Config) -> bool {
 tls_begin :: proc(task: ^Connection_Task) -> bool {
 	config := task.runtime.config.tls
 	allocator := connection_storage_allocator(task)
-	if allocator.procedure == nil do return false
+	if allocator.procedure == nil {
+		return false
+	}
 	state, error := new(TLS_State, allocator)
-	if error != nil do return false
+	if error != nil {
+		return false
+	}
 	task.tls_state = state
-	if bridge.init_executor(&state.executor, &task.runtime.executor, &task.task).kind != .None do return false
-	if bridge.init_transport(&state.transport, &state.executor, task.socket).kind != .None do return false
+	if bridge.init_executor(&state.executor, &task.runtime.executor, &task.task).kind != .None {
+		return false
+	}
+	if bridge.init_transport(&state.transport, &state.executor, task.socket).kind != .None {
+		return false
+	}
 	state.protocols = {"h2", "http/1.1"}
 	settings := tls.Server_Async_Config {
 		store = config.store,
@@ -624,9 +694,13 @@ tls_begin :: proc(task: ^Connection_Task) -> bool {
 	}
 
 	duration := config.handshake_timeout
-	if duration == 0 do duration = 10 * time.Second
+	if duration == 0 {
+		duration = 10 * time.Second
+	}
 	state.handshake_deadline = async.deadline_after(&task.runtime.executor, duration)
-	if bridge.set_request_budget(&state.executor, state.handshake_deadline).kind != .None do return false
+	if bridge.set_request_budget(&state.executor, state.handshake_deadline).kind != .None {
+		return false
+	}
 	state.error = tls.server_async_handshake(&state.owner, &state.handshake, bridge.wall_budget(&state.executor))
 
 	return state.error.kind == .None
@@ -636,8 +710,12 @@ tls_begin :: proc(task: ^Connection_Task) -> bool {
 tls_handshake_done :: proc(op: ^tls.Server_Async_Handshake_Operation) {
 	state := cast(^TLS_State)op.user_data
 	state.handshake_done = true
-	if state.error.kind == .None do state.error = op.err
-	if state.error.kind == .None do state.error = bridge.budget_error(&state.executor)
+	if state.error.kind == .None {
+		state.error = op.err
+	}
+	if state.error.kind == .None {
+		state.error = bridge.budget_error(&state.executor)
+	}
 }
 @(private)
 tls_read_done :: proc(op: ^net.Async_Operation) {
@@ -651,14 +729,20 @@ tls_write_done :: proc(op: ^net.Async_Operation) {
 tls_close_done :: proc(op: ^net.Async_Operation) {
 	state := cast(^TLS_State)op.user_data
 	state.close_done = true
-	if state.error.kind == .None && op.result.err.kind != .None do state.error = op.result.err
+	if state.error.kind == .None && op.result.err.kind != .None {
+		state.error = op.result.err
+	}
 }
 
 @(private)
 tls_event :: proc(task: ^Connection_Task, kind: TLS_Event_Kind) {
 	config := task.runtime.config.tls
-	if kind == .Handshake do task.tls_state.handshake_reported = true
-	if config.on_event == nil do return
+	if kind == .Handshake {
+		task.tls_state.handshake_reported = true
+	}
+	if config.on_event == nil {
+		return
+	}
 	state := task.tls_state
 	connection_state := tls.server_async_connection_state(&state.owner)
 	event := TLS_Event {
@@ -682,12 +766,16 @@ tls_event :: proc(task: ^Connection_Task, kind: TLS_Event_Kind) {
 @(private)
 tls_start_close :: proc(task: ^Connection_Task, abort: bool) {
 	state := task.tls_state
-	if state.closing do return
+	if state.closing {
+		return
+	}
 	state.closing = true
 
 	if abort {
-		if state.error.kind == .None do state.error = {
-			kind = .Cancelled,
+		if state.error.kind == .None {
+			state.error = {
+				kind = .Cancelled,
+			}
 		}
 
 		tls.server_async_cancel_handshake(&state.owner)
@@ -702,7 +790,9 @@ tls_start_close :: proc(task: ^Connection_Task, abort: bool) {
 		assert(false, "TLS close rejected on a live Saba owner")
 	}
 
-	if abort do bridge.abort(&state.executor)
+	if abort {
+		bridge.abort(&state.executor)
+	}
 }
 
 @(private)
@@ -713,11 +803,17 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 	if state == nil || !state.initialized {
 		step := handle_http(data)
 		state = task.tls_state
-		if state == nil || !state.initialized do return step
-		if step == .Done do tls_start_close(task, true)
+		if state == nil || !state.initialized {
+			return step
+		}
+		if step == .Done {
+			tls_start_close(task, true)
+		}
 	}
 
-	if async.cancelled(&task.task) do tls_start_close(task, true)
+	if async.cancelled(&task.task) {
+		tls_start_close(task, true)
+	}
 
 	if !state.closing && state.handshake_done && !state.ready {
 		if state.error.kind != .None {
@@ -751,7 +847,9 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 
 	if !state.closing && state.ready {
 		http_step = handle_http(data)
-		if http_step == .Done do tls_start_close(task, false)
+		if http_step == .Done {
+			tls_start_close(task, false)
+		}
 	}
 
 	if !state.closing && state.read_started && state.read_phase != task.phase {
@@ -762,14 +860,20 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 	step := bridge.drive(&state.executor)
 
 	if state.closing && state.close_done && bridge.quiescent(&state.executor) {
-		if !state.handshake_reported do tls_event(task, .Handshake)
+		if !state.handshake_reported {
+			tls_event(task, .Handshake)
+		}
 		tls_event(task, .Closed)
 		return .Done
 	}
 
-	if state.handshake_done && !state.ready && !state.closing do return .Yield
+	if state.handshake_done && !state.ready && !state.closing {
+		return .Yield
+	}
 	completed := (state.read_done && !read_was_done) || (state.write_done && !write_was_done)
-	if !state.closing && (completed || http_step == .Yield) do return .Yield
+	if !state.closing && (completed || http_step == .Yield) {
+		return .Yield
+	}
 
 	return step
 }
@@ -777,7 +881,9 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 @(private)
 connection_cancel :: proc(data: rawptr) -> async.Resume_Result {
 	task := cast(^Connection_Task)data
-	if task.tls_state == nil || !task.tls_state.initialized do return .Done
+	if task.tls_state == nil || !task.tls_state.initialized {
+		return .Done
+	}
 	tls_start_close(task, true)
 
 	return handle_connection(data)
@@ -812,7 +918,9 @@ tls_translate :: proc(error: net.Connection_Error) -> async.Error {
 
 @(private)
 tls_deadline_valid :: proc(task: ^Connection_Task, deadline: async.Deadline) -> bool {
-	if deadline.epoch == 0 do return deadline.at == 0
+	if deadline.epoch == 0 {
+		return deadline.at == 0
+	}
 	now := async.deadline_after(&task.runtime.executor, 0)
 
 	return deadline.epoch == now.epoch
@@ -820,7 +928,9 @@ tls_deadline_valid :: proc(task: ^Connection_Task, deadline: async.Deadline) -> 
 
 @(private)
 tls_wall_deadline :: proc(task: ^Connection_Task, deadline: async.Deadline) -> time.Time {
-	if deadline.epoch == 0 do return {}
+	if deadline.epoch == 0 {
+		return {}
+	}
 	now := async.deadline_after(&task.runtime.executor, 0)
 
 	return time.time_add(time.now(), time.Duration(max(i64(0), deadline.at - now.at)))
@@ -830,16 +940,24 @@ tls_wall_deadline :: proc(task: ^Connection_Task, deadline: async.Deadline) -> t
 // before the next read; authenticated bytes that won cancellation stay buffered.
 @(private)
 tls_retarget_read :: proc(state: ^TLS_State) {
-	if state.read_retarget do return
+	if state.read_retarget {
+		return
+	}
 	state.read_retarget = true
-	if state.read.pending do net.async_cancel(tls.server_async_connection(&state.owner), &state.read)
+	if state.read.pending {
+		net.async_cancel(tls.server_async_connection(&state.owner), &state.read)
+	}
 }
 
 @(private)
 transport_read :: proc(task: ^Connection_Task, destination: []u8, deadline: async.Deadline) -> (int, async.Error) {
 	state := task.tls_state
-	if state == nil do return async.read(task.socket, destination, deadline)
-	if !tls_deadline_valid(task, deadline) do return 0, {kind = .Invalid_Config}
+	if state == nil {
+		return async.read(task.socket, destination, deadline)
+	}
+	if !tls_deadline_valid(task, deadline) {
+		return 0, {kind = .Invalid_Config}
+	}
 
 	if state.read_started && (state.read_phase != task.phase || state.read_deadline != deadline) {
 		tls_retarget_read(state)
@@ -848,7 +966,9 @@ transport_read :: proc(task: ^Connection_Task, destination: []u8, deadline: asyn
 	if state.read_done && state.read_retarget {
 		if state.read.result.err.kind == .Cancelled || state.read.result.err.kind == .Timeout {
 			state.read.result.err = {}
-			if state.read.result.count == 0 do state.read_started, state.read_done = false, false
+			if state.read.result.count == 0 {
+				state.read_started, state.read_done = false, false
+			}
 		}
 
 		state.read_retarget = false
@@ -858,9 +978,13 @@ transport_read :: proc(task: ^Connection_Task, destination: []u8, deadline: asyn
 		count := min(len(destination), state.read.result.count - state.input_at)
 		copy(destination[:count], state.input[state.input_at:state.input_at + count])
 		state.input_at += count
-		if state.input_at < state.read.result.count do return count, {}
+		if state.input_at < state.read.result.count {
+			return count, {}
+		}
 		state.read_started, state.read_done, state.input_at = false, false, 0
-		if state.read.result.err.kind != .None do state.error = state.read.result.err
+		if state.read.result.err.kind != .None {
+			state.error = state.read.result.err
+		}
 		return count, tls_translate(state.read.result.err)
 	}
 
@@ -886,12 +1010,18 @@ transport_read :: proc(task: ^Connection_Task, destination: []u8, deadline: asyn
 @(private)
 transport_write :: proc(task: ^Connection_Task, source: []u8, deadline: async.Deadline) -> (int, async.Error) {
 	state := task.tls_state
-	if state == nil do return async.write(task.socket, source, deadline)
-	if !tls_deadline_valid(task, deadline) do return 0, {kind = .Invalid_Config}
+	if state == nil {
+		return async.write(task.socket, source, deadline)
+	}
+	if !tls_deadline_valid(task, deadline) {
+		return 0, {kind = .Invalid_Config}
+	}
 
 	if state.write_done {
 		state.write_started, state.write_done = false, false
-		if state.write.result.err.kind != .None do state.error = state.write.result.err
+		if state.write.result.err.kind != .None {
+			state.error = state.write.result.err
+		}
 		return state.write.result.count, tls_translate(state.write.result.err)
 	}
 
@@ -969,18 +1099,28 @@ resolve_timeouts :: proc(config: Timeout_Config) -> Resolved_Timeouts {
 		response   = RESPONSE_SEND_TIMEOUT,
 	}
 
-	if config.header > 0 do result.header = config.header
-	if config.body > 0 do result.body, result.large_body = config.body, config.body
-	if config.response > 0 do result.response = config.response
+	if config.header > 0 {
+		result.header = config.header
+	}
+	if config.body > 0 {
+		result.body, result.large_body = config.body, config.body
+	}
+	if config.response > 0 {
+		result.response = config.response
+	}
 	result.idle = result.header
-	if config.idle > 0 do result.idle = min(result.header, config.idle)
+	if config.idle > 0 {
+		result.idle = min(result.header, config.idle)
+	}
 
 	return result
 }
 
 @(private)
 body_timeout :: proc(timeouts: Resolved_Timeouts, size: int) -> time.Duration {
-	if size > REQUEST_BODY_LIMIT do return timeouts.large_body
+	if size > REQUEST_BODY_LIMIT {
+		return timeouts.large_body
+	}
 
 	return timeouts.body
 }
@@ -1006,14 +1146,18 @@ keep_alive_valid :: proc(config: Keep_Alive_Config) -> bool {
 
 @(private)
 keep_alive_request_limit :: proc(config: Keep_Alive_Config) -> int {
-	if config.max_requests == 0 do return DEFAULT_KEEP_ALIVE_REQUESTS
+	if config.max_requests == 0 {
+		return DEFAULT_KEEP_ALIVE_REQUESTS
+	}
 
 	return config.max_requests
 }
 
 @(private)
 keep_alive_idle_timeout :: proc(runtime: ^Server_Runtime) -> time.Duration {
-	if runtime.config.keep_alive.idle_timeout > 0 do return runtime.config.keep_alive.idle_timeout
+	if runtime.config.keep_alive.idle_timeout > 0 {
+		return runtime.config.keep_alive.idle_timeout
+	}
 
 	return runtime.timeouts.idle
 }
@@ -1021,14 +1165,20 @@ keep_alive_idle_timeout :: proc(runtime: ^Server_Runtime) -> time.Duration {
 @(private)
 request_wants_close :: proc(request: ^Request) -> bool {
 	for header in request.headers {
-		if !strings.equal_fold(header.name, "Connection") do continue
+		if !strings.equal_fold(header.name, "Connection") {
+			continue
+		}
 		remaining := strings.trim_space(header.value)
-		if remaining == "" || strings.has_suffix(remaining, ",") do return true
+		if remaining == "" || strings.has_suffix(remaining, ",") {
+			return true
+		}
 
 		for token in strings.split_iterator(&remaining, ",") {
 			value := strings.trim_space(token)
 			// Invalid token lists conservatively disable persistence.
-			if !http.header_name_valid(value) || strings.equal_fold(value, "close") do return true
+			if !http.header_name_valid(value) || strings.equal_fold(value, "close") {
+				return true
+			}
 		}
 	}
 
@@ -1037,10 +1187,18 @@ request_wants_close :: proc(request: ^Request) -> bool {
 
 @(private)
 response_can_reuse :: proc(task: ^Connection_Task, status: HTTP_Status) -> bool {
-	if !task.runtime.config.keep_alive.enabled || task.phase != .Dispatch do return false
-	if (status != .None && status < .OK) || request_wants_close(&task.request) do return false
-	if task.requests_completed + 1 >= keep_alive_request_limit(task.runtime.config.keep_alive) do return false
-	if async.cancelled(&task.task) || server_is_draining(task.runtime) do return false
+	if !task.runtime.config.keep_alive.enabled || task.phase != .Dispatch {
+		return false
+	}
+	if (status != .None && status < .OK) || request_wants_close(&task.request) {
+		return false
+	}
+	if task.requests_completed + 1 >= keep_alive_request_limit(task.runtime.config.keep_alive) {
+		return false
+	}
+	if async.cancelled(&task.task) || server_is_draining(task.runtime) {
+		return false
+	}
 
 	return true
 }
@@ -1050,17 +1208,26 @@ response_can_reuse :: proc(task: ^Connection_Task, status: HTTP_Status) -> bool 
 // drain takes this list lock, so admission may check drain while holding it.
 @(private)
 keep_alive_remove_idle_locked :: proc(task: ^Connection_Task) {
-	if !task.idle_registered do return
-	if task.idle_previous != nil do task.idle_previous.idle_next = task.idle_next
-	else do task.runtime.keep_alive_idle_tasks = task.idle_next
-	if task.idle_next != nil do task.idle_next.idle_previous = task.idle_previous
+	if !task.idle_registered {
+		return
+	}
+	if task.idle_previous != nil {
+		task.idle_previous.idle_next = task.idle_next
+	} else {
+		task.runtime.keep_alive_idle_tasks = task.idle_next
+	}
+	if task.idle_next != nil {
+		task.idle_next.idle_previous = task.idle_previous
+	}
 	task.idle_previous, task.idle_next = nil, nil
 	task.idle_registered = false
 }
 
 @(private)
 keep_alive_leave_idle :: proc(task: ^Connection_Task) {
-	if !task.idle_registered do return
+	if !task.idle_registered {
+		return
+	}
 	sync.lock(&task.runtime.keep_alive_mutex)
 	keep_alive_remove_idle_locked(task)
 	sync.unlock(&task.runtime.keep_alive_mutex)
@@ -1071,11 +1238,17 @@ keep_alive_enter_idle :: proc(task: ^Connection_Task) -> bool {
 	runtime := task.runtime
 	sync.lock(&runtime.keep_alive_mutex)
 	defer sync.unlock(&runtime.keep_alive_mutex)
-	if server_is_draining(runtime) || async.cancelled(&task.task) do return false
-	if task.idle_registered do return true
+	if server_is_draining(runtime) || async.cancelled(&task.task) {
+		return false
+	}
+	if task.idle_registered {
+		return true
+	}
 	task.idle_previous = nil
 	task.idle_next = runtime.keep_alive_idle_tasks
-	if task.idle_next != nil do task.idle_next.idle_previous = task
+	if task.idle_next != nil {
+		task.idle_next.idle_previous = task
+	}
 	runtime.keep_alive_idle_tasks = task
 	task.idle_registered = true
 
@@ -1103,9 +1276,13 @@ keep_alive_begin_request :: proc(task: ^Connection_Task, count: int) -> bool {
 	keep_alive_remove_idle_locked(task)
 	sync.unlock(&runtime.drain_mutex)
 	sync.unlock(&runtime.keep_alive_mutex)
-	if !admitted do return false
+	if !admitted {
+		return false
+	}
 	observe_start(task)
-	if task.observed do task.event.bytes_received = u64(count)
+	if task.observed {
+		task.event.bytes_received = u64(count)
+	}
 	task.header_used = count
 	task.header_deadline = async.deadline_after(&runtime.executor, runtime.timeouts.header)
 	task.header_read_deadline = time.tick_add(time.tick_now(), runtime.timeouts.header)
@@ -1124,9 +1301,13 @@ keep_alive_begin_request :: proc(task: ^Connection_Task, count: int) -> bool {
 keep_alive_next_request :: #force_no_inline proc(task: ^Connection_Task) -> bool {
 	finish_request_context(task)
 	observe_finish(task)
-	if server_is_draining(task.runtime) || async.cancelled(&task.task) do return false
+	if server_is_draining(task.runtime) || async.cancelled(&task.task) {
+		return false
+	}
 	remaining := task.connection.read_buffer
-	if len(remaining) > REQUEST_HEADER_LIMIT do return false
+	if len(remaining) > REQUEST_HEADER_LIMIT {
+		return false
+	}
 	saved: [REQUEST_HEADER_LIMIT]u8
 	count := copy(saved[:], remaining)
 	task.connection.read_buffer = nil
@@ -1141,7 +1322,9 @@ keep_alive_next_request :: #force_no_inline proc(task: ^Connection_Task) -> bool
 	task.observed_at = {}
 
 	if !start_operation_resources(task) {
-		if count > 0 do return keep_alive_resource_reject(task, count)
+		if count > 0 {
+			return keep_alive_resource_reject(task, count)
+		}
 		return false
 	}
 
@@ -1156,7 +1339,9 @@ keep_alive_next_request :: #force_no_inline proc(task: ^Connection_Task) -> bool
 		buffer, err := make([]u8, count, mem.dynamic_arena_allocator(&task.arena))
 
 		if err != nil {
-			if resource_pressure(task) do return keep_alive_resource_reject(task, count)
+			if resource_pressure(task) {
+				return keep_alive_resource_reject(task, count)
+			}
 			return false
 		}
 
@@ -1164,7 +1349,9 @@ keep_alive_next_request :: #force_no_inline proc(task: ^Connection_Task) -> bool
 	}
 
 	copy(task.header, saved[:count])
-	if count > 0 do return keep_alive_begin_request(task, count)
+	if count > 0 {
+		return keep_alive_begin_request(task, count)
+	}
 	arm_read_deadline(task, keep_alive_idle_timeout(task.runtime))
 	task.connection.write_deadline = {}
 	task.phase = .Idle
@@ -1174,8 +1361,12 @@ keep_alive_next_request :: #force_no_inline proc(task: ^Connection_Task) -> bool
 
 @(private)
 keep_alive_resource_reject :: proc(task: ^Connection_Task, count: int) -> bool {
-	if !keep_alive_begin_request(task, 0) do return false
-	if task.observed do task.event.bytes_received = u64(count)
+	if !keep_alive_begin_request(task, 0) {
+		return false
+	}
+	if task.observed {
+		task.event.bytes_received = u64(count)
+	}
 
 	return resource_reject(task)
 }

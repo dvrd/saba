@@ -49,7 +49,9 @@ connection_timeouts :: proc(conn: ^Connection) -> Resolved_Timeouts {
 
 // A read failure may have no HTTP status when the connection itself failed.
 read_request_body :: proc(conn: ^Connection, request: ^Request, buffer: []u8) -> (HTTP_Status, bool) {
-	if request.chunked do return read_chunked_body(conn, request, buffer)
+	if request.chunked {
+		return read_chunked_body(conn, request, buffer)
+	}
 
 	if request.content_length > len(buffer) {
 		return .Content_Too_Large, false
@@ -136,7 +138,9 @@ Request :: struct {
 
 header_value :: proc(request: ^Request, name: string) -> string {
 	for header in request.headers {
-		if strings.equal_fold(header.name, name) do return header.value
+		if strings.equal_fold(header.name, name) {
+			return header.value
+		}
 	}
 
 	return ""
@@ -192,7 +196,9 @@ chunk_error_status :: proc(error: http.Error) -> HTTP_Status {
 @(private)
 read_chunked_body :: proc(conn: ^Connection, request: ^Request, buffer: []u8) -> (HTTP_Status, bool) {
 	decoder: http1.Chunk_Decoder
-	if http1.chunk_decoder_init(&decoder, u64(len(buffer))).kind != .None do return .Content_Too_Large, false
+	if http1.chunk_decoder_init(&decoder, u64(len(buffer))).kind != .None {
+		return .Content_Too_Large, false
+	}
 	previous := conn.read_deadline
 	timeouts := connection_timeouts(conn)
 	conn.read_deadline = time.tick_add(time.tick_now(), body_timeout(timeouts, 0))
@@ -201,26 +207,40 @@ read_chunked_body :: proc(conn: ^Connection, request: ^Request, buffer: []u8) ->
 	used := 0
 
 	for {
-		if deadline_expired(conn.read_deadline) do return .Request_Timeout, false
+		if deadline_expired(conn.read_deadline) {
+			return .Request_Timeout, false
+		}
 		input := conn.read_buffer
 		buffered := len(input) > 0
 
 		if !buffered {
 			want := http1.chunk_decoder_read_limit(&decoder, len(scratch))
 			n, error := read_connection(conn, scratch[:want])
-			if error == .Timeout do return .Request_Timeout, false
-			if error != nil do return .None, false
-			if n == 0 do return .Bad_Request, false
+			if error == .Timeout {
+				return .Request_Timeout, false
+			}
+			if error != nil {
+				return .None, false
+			}
+			if n == 0 {
+				return .Bad_Request, false
+			}
 			input = scratch[:n]
 		}
 
 		consumed, written, done, error := http1.chunk_decoder_feed(&decoder, input, buffer[used:])
-		if buffered do conn.read_buffer = conn.read_buffer[consumed:]
+		if buffered {
+			conn.read_buffer = conn.read_buffer[consumed:]
+		}
 		used += written
-		if error.kind != .None do return chunk_error_status(error), false
+		if error.kind != .None {
+			return chunk_error_status(error), false
+		}
 
 		if done {
-			if deadline_expired(conn.read_deadline) do return .Request_Timeout, false
+			if deadline_expired(conn.read_deadline) {
+				return .Request_Timeout, false
+			}
 			request.body = buffer[:used]
 			request.content_length = used
 			return .None, true
@@ -229,12 +249,18 @@ read_chunked_body :: proc(conn: ^Connection, request: ^Request, buffer: []u8) ->
 }
 
 route_parameter_name :: proc(name: string) -> bool {
-	if name == "" do return false
+	if name == "" {
+		return false
+	}
 
 	for index in 0 ..< len(name) {
 		c := name[index]
-		if is_alpha(c) || c == '_' do continue
-		if index > 0 && is_digit(c) do continue
+		if is_alpha(c) || c == '_' {
+			continue
+		}
+		if index > 0 && is_digit(c) {
+			continue
+		}
 
 		return false
 	}
@@ -246,10 +272,18 @@ match_route :: proc(request: ^Request, method, pattern: string) -> bool {
 	request.path_parameters = {}
 	request.path_parameter_count = 0
 
-	if request.method != method do return false
-	if !strings.has_prefix(pattern, "/") do return false
-	if !strings.has_prefix(request.path, "/") do return false
-	if strings.has_suffix(pattern, "/") != strings.has_suffix(request.path, "/") do return false
+	if request.method != method {
+		return false
+	}
+	if !strings.has_prefix(pattern, "/") {
+		return false
+	}
+	if !strings.has_prefix(request.path, "/") {
+		return false
+	}
+	if strings.has_suffix(pattern, "/") != strings.has_suffix(request.path, "/") {
+		return false
+	}
 
 	parameters: [MAX_PATH_PARAMETERS]Path_Parameter
 	count := 0
@@ -261,23 +295,33 @@ match_route :: proc(request: ^Request, method, pattern: string) -> bool {
 		path_segment, has_path := strings.split_iterator(&path_remaining, "/")
 
 		if !has_pattern || !has_path {
-			if has_pattern != has_path do return false
+			if has_pattern != has_path {
+				return false
+			}
 
 			// Publish captures only after the whole route matches.
 			request.path_parameters = parameters
 			request.path_parameter_count = count
-			if request._observe && len(pattern) <= MAX_EVENT_ROUTE_BYTES do request.route = pattern
+			if request._observe && len(pattern) <= MAX_EVENT_ROUTE_BYTES {
+				request.route = pattern
+			}
 
 			return true
 		}
 
 		if strings.has_prefix(pattern_segment, ":") {
 			name := pattern_segment[1:]
-			if !route_parameter_name(name) || path_segment == "" do return false
-			if count == len(parameters) do return false
+			if !route_parameter_name(name) || path_segment == "" {
+				return false
+			}
+			if count == len(parameters) {
+				return false
+			}
 
 			for parameter in parameters[:count] {
-				if parameter.name == name do return false
+				if parameter.name == name {
+					return false
+				}
 			}
 
 			parameters[count] = {name, path_segment}
@@ -290,7 +334,9 @@ match_route :: proc(request: ^Request, method, pattern: string) -> bool {
 
 path_value :: proc(request: ^Request, name: string) -> string {
 	for parameter in request.path_parameters[:request.path_parameter_count] {
-		if parameter.name == name do return parameter.value
+		if parameter.name == name {
+			return parameter.value
+		}
 	}
 
 	return ""

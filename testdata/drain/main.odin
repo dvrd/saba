@@ -23,7 +23,9 @@ routes :: proc(_: ^server.Connection, request: ^server.Request) -> server.Respon
 		os.flush(os.stdout)
 		// Intentional test-only cooperative limitation: a real application must
 		// offload blocking work. The control thread can release this callback.
-		for !intrinsics.atomic_load(&fixture.released) do time.sleep(time.Millisecond)
+		for !intrinsics.atomic_load(&fixture.released) {
+			time.sleep(time.Millisecond)
+		}
 	}
 
 	if request.path == "/echo" {
@@ -78,7 +80,9 @@ main :: proc() {
 	})
 	assert(worker != nil)
 	limit := time.tick_add(time.tick_now(), 5 * time.Second)
-	for !server.server_ready(&state.control) && time.tick_diff(time.tick_now(), limit) > 0 do time.sleep(time.Millisecond)
+	for !server.server_ready(&state.control) && time.tick_diff(time.tick_now(), limit) > 0 {
+		time.sleep(time.Millisecond)
+	}
 	endpoint, ready := server.server_endpoint(&state.control)
 	assert(ready)
 	fmt.printf("ready %d\n", endpoint.port)

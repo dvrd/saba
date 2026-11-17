@@ -19,16 +19,24 @@ import "core:time"
 // Configured mounts own their URL prefix. Development reads current files so
 // edits and additions work with hot reload; production serves only preloaded data.
 serve_assets :: proc(request: ^Request, caches: []Asset_Cache, development := false) -> (Response, bool) {
-	if request.method != "GET" && request.method != "HEAD" do return {}, false
+	if request.method != "GET" && request.method != "HEAD" {
+		return {}, false
+	}
 
 	for cache in caches {
-		if !strings.has_prefix(request.path, cache.mount.prefix) do continue
+		if !strings.has_prefix(request.path, cache.mount.prefix) {
+			continue
+		}
 		relative, decoded := net.percent_decode(request.path[len(cache.mount.prefix):], request.allocator)
-		if !decoded || !module_relative_ok(relative) || strings.has_suffix(relative, ".jsx") do return not_found(request), true
+		if !decoded || !module_relative_ok(relative) || strings.has_suffix(relative, ".jsx") {
+			return not_found(request), true
+		}
 
 		if development {
 			path, found, allowed := module_file(cache.mount.directory, relative, request.allocator)
-			if !found || !allowed do return not_found(request), true
+			if !found || !allowed {
+				return not_found(request), true
+			}
 			limit := cache.max_file_bytes
 
 			if limit == 0 {
@@ -95,7 +103,9 @@ asset_content_type :: proc(path: string) -> string {
 			{".mp4", "video/mp4"},
 			{".webm", "video/webm"},
 		}) {
-		if strings.equal_fold(extension, item[0]) do return item[1]
+		if strings.equal_fold(extension, item[0]) {
+			return item[1]
+		}
 	}
 
 	return "application/octet-stream"
@@ -152,7 +162,9 @@ prepare_representation :: proc(body: []u8, content_type: string) -> Prepared_Rep
 prepared_representation_response :: proc(request: ^Request, representation: ^Prepared_Representation) -> Response {
 	assert(representation != nil)
 	tag, allocation_error := strings.clone(string(representation.tag[:]), request.allocator)
-	if allocation_error != nil do return Response{status = .Internal_Server_Error}
+	if allocation_error != nil {
+		return Response{status = .Internal_Server_Error}
+	}
 
 	if (request.method == "GET" || request.method == "HEAD") && not_modified(request, tag) {
 		return make_response(request, .Not_Modified, {{"Cache-Control", "no-cache"}, {"ETag", tag}})
@@ -188,8 +200,12 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 	}
 
 	limit, chunk_bytes := config.max_file_bytes, config.chunk_bytes
-	if limit == 0 do limit = 1024 * 1024 * 1024
-	if chunk_bytes == 0 do chunk_bytes = 64 * mem.Kilobyte
+	if limit == 0 {
+		limit = 1024 * 1024 * 1024
+	}
+	if chunk_bytes == 0 {
+		chunk_bytes = 64 * mem.Kilobyte
+	}
 	if limit < 0 ||
 	   chunk_bytes < 1 ||
 	   chunk_bytes > mem.Megabyte ||
@@ -203,13 +219,21 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 
 	// Resolve through the same containment policy used by asset mounts.
 	decoded, valid := file_relative_decode(relative, request.allocator)
-	if !valid do return not_found(request)
+	if !valid {
+		return not_found(request)
+	}
 	canonical_root, root_error := filepath.abs(root, request.allocator)
-	if root_error != nil do return not_found(request)
+	if root_error != nil {
+		return not_found(request)
+	}
 	path, found, allowed := module_file(canonical_root, decoded, request.allocator)
-	if !found || !allowed do return not_found(request)
+	if !found || !allowed {
+		return not_found(request)
+	}
 	file, open_error := os.open(path)
-	if open_error != nil do return not_found(request)
+	if open_error != nil {
+		return not_found(request)
+	}
 	transferred := false
 
 	defer if !transferred {
@@ -227,14 +251,20 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 	if tag != "" {
 		allocation_error: mem.Allocator_Error
 		tag, allocation_error = strings.clone(tag, request.allocator)
-		if allocation_error != nil do return {status = .Internal_Server_Error}
+		if allocation_error != nil {
+			return {status = .Internal_Server_Error}
+		}
 	}
 
 	cache_policy := "no-store"
-	if tag != "" do cache_policy = "no-cache"
+	if tag != "" {
+		cache_policy = "no-cache"
+	}
 
 	if not_modified(request, tag) {
-		if tag == "" do return make_response(request, .Not_Modified, {{"Cache-Control", cache_policy}})
+		if tag == "" {
+			return make_response(request, .Not_Modified, {{"Cache-Control", cache_policy}})
+		}
 		return make_response(request, .Not_Modified, {{"ETag", tag}, {"Cache-Control", cache_policy}})
 	}
 
@@ -242,7 +272,9 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 
 	if selection.kind == .Unsatisfiable {
 		value := fmt.aprintf("bytes */%d", info.size, allocator = request.allocator)
-		if value == "" do return {status = .Internal_Server_Error}
+		if value == "" {
+			return {status = .Internal_Server_Error}
+		}
 		return make_response(
 			request,
 			.Range_Not_Satisfiable,
@@ -259,10 +291,14 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 	}
 
 	content_type := config.content_type
-	if content_type == "" do content_type = asset_content_type(decoded)
+	if content_type == "" {
+		content_type = asset_content_type(decoded)
+	}
 	type_error: mem.Allocator_Error
 	content_type, type_error = strings.clone(content_type, request.allocator)
-	if type_error != nil do return {status = .Internal_Server_Error}
+	if type_error != nil {
+		return {status = .Internal_Server_Error}
+	}
 	headers: [6]Header
 	headers[0] = {"Content-Type", content_type}
 	headers[1] = {"Accept-Ranges", "bytes"}
@@ -276,15 +312,21 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 
 	if status == .Partial_Content {
 		value := fmt.aprintf("bytes %d-%d/%d", start, start + length - 1, info.size, allocator = request.allocator)
-		if value == "" do return {status = .Internal_Server_Error}
+		if value == "" {
+			return {status = .Internal_Server_Error}
+		}
 		headers[count] = {"Content-Range", value}
 		count += 1
 	}
 
 	response := make_response(request, status, headers[:count])
-	if response.status == .Internal_Server_Error do return response
+	if response.status == .Internal_Server_Error {
+		return response
+	}
 	allocator, binding, prepared := file_storage_allocator(request, config.allocator)
-	if !prepared do return {status = .Internal_Server_Error}
+	if !prepared {
+		return {status = .Internal_Server_Error}
+	}
 	producer, error := new(File_Producer, allocator)
 
 	if error != nil || producer == nil {
@@ -338,8 +380,12 @@ file_release :: proc(_: []u8, data: rawptr) {
 file_next :: proc(data: rawptr, io: ^core.Stream_IO) -> core.Stream_Step {
 	producer := cast(^File_Producer)data
 	assert(!producer.borrowed)
-	if core.request_cancelled(io.cancellation) do return .Failed
-	if producer.remaining == 0 do return .Done
+	if core.request_cancelled(io.cancellation) {
+		return .Failed
+	}
+	if producer.remaining == 0 {
+		return .Done
+	}
 
 	if len(producer.storage) == 0 {
 		error: mem.Allocator_Error
@@ -348,13 +394,17 @@ file_next :: proc(data: rawptr, io: ^core.Stream_IO) -> core.Stream_Step {
 			int(min(i64(producer.chunk_bytes), producer.remaining)),
 			producer.allocator,
 		)
-		if error != nil || len(producer.storage) == 0 do return .Failed
+		if error != nil || len(producer.storage) == 0 {
+			return .Failed
+		}
 	}
 
 	count := int(min(i64(len(producer.storage)), producer.remaining))
 	n, error := os.read_at(producer.file, producer.storage[:count], producer.offset)
 	// A shortened file aborts the fixed-length response; it cannot authorize reuse.
-	if error != nil || n != count do return .Failed
+	if error != nil || n != count {
+		return .Failed
+	}
 	chunk := owned.Chunk {
 		data      = producer.storage[:n],
 		storage   = producer.storage,
@@ -388,10 +438,14 @@ file_drop :: proc(data: rawptr) {
 
 @(private)
 file_strong_tag :: proc(tag: string) -> bool {
-	if len(tag) < 2 || tag[0] != '"' || tag[len(tag) - 1] != '"' do return false
+	if len(tag) < 2 || tag[0] != '"' || tag[len(tag) - 1] != '"' {
+		return false
+	}
 
 	for c in tag[1:len(tag) - 1] {
-		if !(c == 0x21 || (c >= 0x23 && c <= 0x7e) || c >= 0x80) do return false
+		if !(c == 0x21 || (c >= 0x23 && c <= 0x7e) || c >= 0x80) {
+			return false
+		}
 	}
 
 	return true
@@ -400,7 +454,9 @@ file_strong_tag :: proc(tag: string) -> bool {
 @(private)
 file_relative_decode :: proc(relative: string, allocator: mem.Allocator) -> (string, bool) {
 	decoded, valid := net.percent_decode(relative, allocator)
-	if !valid || !module_relative_ok(decoded) || strings.has_suffix(decoded, ".jsx") do return "", false
+	if !valid || !module_relative_ok(decoded) || strings.has_suffix(decoded, ".jsx") {
+		return "", false
+	}
 
 	return decoded, true
 }
@@ -412,9 +468,13 @@ not_modified :: proc(request: ^Request, tag: string) -> bool {
 	matched, valid := false, true
 
 	for field in request.headers {
-		if !strings.equal_fold(field.name, "If-None-Match") do continue
+		if !strings.equal_fold(field.name, "If-None-Match") {
+			continue
+		}
 		fields += 1
-		if strings.trim(field.value, " \t") == "*" do stars += 1
+		if strings.trim(field.value, " \t") == "*" {
+			stars += 1
+		}
 		found, ok := http.if_none_match(field.value, tag)
 		matched = matched || found
 		valid = valid && ok
@@ -425,7 +485,9 @@ not_modified :: proc(request: ^Request, tag: string) -> bool {
 
 @(private)
 file_request_range :: proc(request: ^Request, size: i64, tag: string) -> http.Byte_Range {
-	if request.method != "GET" do return {}
+	if request.method != "GET" {
+		return {}
+	}
 	ranges, conditions := 0, 0
 	value, condition: string
 
@@ -441,9 +503,13 @@ file_request_range :: proc(request: ^Request, size: i64, tag: string) -> http.By
 		}
 	}
 
-	if ranges != 1 || conditions > 1 do return {}
+	if ranges != 1 || conditions > 1 {
+		return {}
+	}
 	// Dates/weak/malformed/unknown validators always fall back to a full 200.
-	if conditions == 1 && (tag == "" || condition != tag) do return {}
+	if conditions == 1 && (tag == "" || condition != tag) {
+		return {}
+	}
 
 	return http.byte_range(value, size)
 }
@@ -462,16 +528,22 @@ file_storage_allocator :: proc(
 	managed := budget.same_scope(request.resources, request.resources)
 	if configured.procedure == nil {
 		allocator := request.backing_allocator
-		if allocator.procedure == nil do allocator = rt.heap_allocator()
+		if allocator.procedure == nil {
+			allocator = rt.heap_allocator()
+		}
 		return allocator, {}, true
 	}
-	if !managed do return configured, {}, true
+	if !managed {
+		return configured, {}, true
+	}
 	if charged.is_managed_allocator(configured) {
 		scope, valid := charged.allocator_scope(configured)
 		return configured, {}, valid && budget.covers(scope, request.resources)
 	}
 	binding, error := charged.create(request.resources, {backing = configured})
-	if error.kind != .None do return {}, {}, false
+	if error.kind != .None {
+		return {}, {}, false
+	}
 	return charged.allocator(binding), binding, true
 }
 

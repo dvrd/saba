@@ -25,7 +25,9 @@ Page_Cache :: struct {
 
 // Page routes and HTML borrow the server's arena, just like compiled modules.
 prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allocator) -> (Page_Cache, bool) {
-	if config.directory == "" do return {}, true
+	if config.directory == "" {
+		return {}, true
+	}
 	if !strings.has_prefix(config.module_prefix, "/") ||
 	   !strings.has_suffix(config.module_prefix, "/") ||
 	   !module_url_ok(fmt.tprintf("%spage.js", config.module_prefix)) {
@@ -73,9 +75,13 @@ prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allo
 	defer os.walker_destroy(&walker)
 
 	for file in os.walker_walk(&walker) {
-		if file.type != .Regular do continue
+		if file.type != .Regular {
+			continue
+		}
 		relative := file.fullpath[len(root) + 1:]
-		if !strings.has_suffix(relative, ".jsx") || !module_relative_ok(relative) do continue
+		if !strings.has_suffix(relative, ".jsx") || !module_relative_ok(relative) {
+			continue
+		}
 		_, found, allowed := module_file(root, relative, allocator)
 
 		if !found || !allowed {
@@ -85,13 +91,19 @@ prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allo
 
 		stem := relative[:len(relative) - 4]
 		route := fmt.aprintf("/%s", stem, allocator = allocator)
-		if stem == "index" do route = "/"
-		if strings.has_suffix(stem, "/index") do route = fmt.aprintf("/%s", stem[:len(stem) - 6], allocator = allocator)
+		if stem == "index" {
+			route = "/"
+		}
+		if strings.has_suffix(stem, "/index") {
+			route = fmt.aprintf("/%s", stem[:len(stem) - 6], allocator = allocator)
+		}
 
 		if previous, collision := sources[route]; collision {
 			// A directory index wins regardless of filesystem enumeration order.
 			winner := previous
-			if strings.has_suffix(relative, "/index.jsx") do winner = relative
+			if strings.has_suffix(relative, "/index.jsx") {
+				winner = relative
+			}
 			log.warnf(
 				"Duplicate page route %s: %s and %s; using %s (directory index takes precedence)",
 				route,
@@ -99,7 +111,9 @@ prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allo
 				relative,
 				winner,
 			)
-			if winner == previous do continue
+			if winner == previous {
+				continue
+			}
 		}
 
 		owned_source, clone_error := strings.clone(relative, allocator)
@@ -123,19 +137,27 @@ prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allo
 }
 
 serve_prepared_pages :: proc(request: ^Request, cache: Page_Cache, development: bool) -> (Response, bool) {
-	if (request.method != "GET" && request.method != "HEAD") || cache.mount.directory == "" do return {}, false
+	if (request.method != "GET" && request.method != "HEAD") || cache.mount.directory == "" {
+		return {}, false
+	}
 	path, decoded := net.percent_decode(request.path, request.allocator)
-	if !decoded || !strings.has_prefix(path, "/") || (path != "/" && !module_relative_ok(path[1:])) do return {}, false
+	if !decoded || !strings.has_prefix(path, "/") || (path != "/" && !module_relative_ok(path[1:])) {
+		return {}, false
+	}
 	current := cache
 
 	if development {
 		fresh, ok := prepare_pages(cache.mount, true, request.allocator)
-		if !ok do return Response{status = .Internal_Server_Error}, true
+		if !ok {
+			return Response{status = .Internal_Server_Error}, true
+		}
 		current = fresh
 	}
 
 	module_url, found := current.routes[path]
-	if !found do return {}, false
+	if !found {
+		return {}, false
+	}
 	entry := fmt.aprintf(
 		`<script type="module" src="%s" data-page="%s"></script>`,
 		modules.PAGE_ENTRY_URL,

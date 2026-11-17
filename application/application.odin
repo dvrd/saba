@@ -57,7 +57,9 @@ serve :: proc(config: Config) -> bool {
 	}
 
 	defer assets_api.destroy_assets(&state.assets, allocator)
-	if !prepare(&state, allocator) do return false
+	if !prepare(&state, allocator) {
+		return false
+	}
 	watcher: ^thread.Thread
 	defer {
 		sync.atomic_store(&state.reload.stopped, true)
@@ -70,7 +72,9 @@ serve :: proc(config: Config) -> bool {
 
 	if config.development {
 		watcher = start_watcher(&state)
-		if watcher == nil do return false
+		if watcher == nil {
+			return false
+		}
 	}
 
 	server := config.server
@@ -84,9 +88,13 @@ prepare :: proc(state: ^State, allocator: mem.Allocator) -> bool {
 	config := &state.config
 	valid: bool
 	state.modules, valid = modules_api.prepare_module_mounts(config.modules, config.development, allocator)
-	if !valid do return false
+	if !valid {
+		return false
+	}
 	state.pages, valid = pages_api.prepare_pages(config.pages, config.development, allocator)
-	if !valid do return false
+	if !valid {
+		return false
+	}
 	error: assets_api.Asset_Error
 	state.assets, error = assets_api.prepare_assets_bounded(config.assets, config.asset_limits, allocator)
 
@@ -107,9 +115,13 @@ prepare :: proc(state: ^State, allocator: mem.Allocator) -> bool {
 @(private)
 start_watcher :: proc(state: ^State) -> ^thread.Thread {
 	directory := state.config.hot_reload_directory
-	if directory == "" do directory = "web"
+	if directory == "" {
+		directory = "web"
+	}
 	signature, ready := development.web_signature(directory)
-	if !ready do return nil
+	if !ready {
+		return nil
+	}
 	state.reload = {
 		directory         = directory,
 		initial_signature = signature,
@@ -131,7 +143,9 @@ handle_request :: proc(data: rawptr, connection: ^core.Connection, request: ^cor
 				request    = request,
 			}
 
-			if state.config.development do view.reload = &state.reload
+			if state.config.development {
+				view.reload = &state.reload
+			}
 			response = state.config.dispatch(state.config.server.handler_data, &view)
 		} else {
 			response = state.config.server.handler(state.config.server.handler_data, connection, request)
@@ -147,7 +161,9 @@ handle_request :: proc(data: rawptr, connection: ^core.Connection, request: ^cor
 			return response // Preserve transferred owners for the core's rejection disposal.
 		}
 
-		if body != nil do response.body = body
+		if body != nil {
+			response.body = body
+		}
 	}
 
 	return response
@@ -157,7 +173,9 @@ handle_request :: proc(data: rawptr, connection: ^core.Connection, request: ^cor
 builtin_response :: proc(state: ^State, request: ^core.Request) -> (core.Response, bool) {
 	if state.config.development {
 		response, matched := development.handle(&state.reload, request)
-		if matched do return response, true
+		if matched {
+			return response, true
+		}
 	}
 
 	if core.match_route(request, "GET", modules_api.JSX_RUNTIME_URL) ||
@@ -171,9 +189,13 @@ builtin_response :: proc(state: ^State, request: ^core.Request) -> (core.Respons
 	}
 
 	response, matched := assets_api.serve_assets(request, state.assets, state.config.development)
-	if matched do return response, true
+	if matched {
+		return response, true
+	}
 	response, matched = modules_api.serve_prepared_modules(request, state.modules, state.config.development)
-	if matched do return response, true
+	if matched {
+		return response, true
+	}
 
 	return pages_api.serve_prepared_pages(request, state.pages, state.config.development)
 }

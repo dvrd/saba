@@ -13,7 +13,10 @@ main :: proc() {
 	handled, success := server.develop({package_directory = "src"})
 
 	if handled {
-		if !success do os.exit(1); return
+		if !success {
+			os.exit(1)
+		}
+		return
 	}
 
 	_ = os.write_entire_file("running", fmt.tprintf("%d:%s", os.get_pid(), #load("value.json", string)))

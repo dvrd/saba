@@ -56,7 +56,9 @@ fds :: proc() -> int {
 	count := 0
 
 	for fd in 0 ..< 4096 {
-		if posix.fcntl(posix.FD(fd), .GETFD) >= 0 do count += 1
+		if posix.fcntl(posix.FD(fd), .GETFD) >= 0 {
+			count += 1
+		}
 	}
 
 	return count
@@ -80,7 +82,9 @@ route :: proc(_: ^server.Connection, request: ^server.Request) -> server.Respons
 		return server.make_response(request, .OK, nil, transmute([]u8)body)
 	}
 
-	if request.path == "/fast" do return server.make_response(request, .OK, nil, transmute([]u8)string("ok"))
+	if request.path == "/fast" {
+		return server.make_response(request, .OK, nil, transmute([]u8)string("ok"))
+	}
 	config := server.File_Stream_Config {
 		etag        = `"fixture-v1"`,
 		chunk_bytes = 16384,
@@ -113,7 +117,9 @@ main :: proc() {
 	defer delete(state.root)
 	worker := thread.create_and_start(proc() {
 		workers, _ := strconv.parse_int(os.get_env("SABA_FILE_WORKERS", context.temp_allocator))
-		if workers == 0 do workers = 1
+		if workers == 0 {
+			workers = 1
+		}
 		state.result = server.serve({port = 0, workers = workers, handler = route, control = &state.control, keep_alive = {enabled = true}, timeouts = {response = 200 * time.Millisecond}})
 	}); assert(worker != nil)
 	for _ in 0 ..< 5000 {

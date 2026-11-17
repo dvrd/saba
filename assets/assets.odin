@@ -34,7 +34,6 @@ serve_assets :: proc(
 			request.allocator,
 		)
 		if !decoded || !module_relative_ok(relative) || strings.has_suffix(relative, ".jsx") do return not_found(request), true
-		file: Asset_File
 		if development {
 			path, found, allowed := module_file(cache.mount.directory, relative, request.allocator)
 			if !found || !allowed do return not_found(request), true
@@ -47,13 +46,15 @@ serve_assets :: proc(
 				log.errorf("Could not read asset: %s", path)
 				return Response{status = .Internal_Server_Error}, true
 			}
-			file = {body, asset_content_type(relative)}
-		} else {
-			cached, found := cache.files[relative]
-			if !found do return not_found(request), true
-			file = cached
+			return representation_response(request, body, asset_content_type(relative), true), true
 		}
-		return representation_response(request, file.body, file.content_type, development), true
+
+		cached, found := cache.files[relative]
+		if !found {
+			return not_found(request), true
+		}
+
+		return prepared_representation_response(request, &cached), true
 	}
 	return {}, false
 }
@@ -405,10 +406,8 @@ serve_file :: proc(
 Asset_Mount :: struct {
 	directory, prefix: string,
 }
-Asset_File :: struct {
-	body:         []u8,
-	content_type: string,
-}
+// Preloaded bytes plus the ETag computed once at preload.
+Asset_File :: Prepared_Representation
 Asset_Cache :: struct {
 	mount:          Asset_Mount,
 	files:          map[string]Asset_File,
@@ -727,7 +726,7 @@ preload_directory :: proc(
 		inserted, me := map_insert(
 			&cache.files,
 			key,
-			Asset_File{body, asset_content_type(relative)},
+			prepare_representation(body, asset_content_type(relative)),
 		)
 		if me != nil || inserted == nil {
 			delete(key, allocator)

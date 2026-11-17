@@ -13,8 +13,7 @@ import core "../core"
 import rt "base:runtime"
 import "core:unicode/utf8"
 import async "shared:async"
-import "core:crypto/legacy/sha1"
-import "core:encoding/base64"
+import codec "../../websocket"
 
 Development :: struct {
 	// Empty preserves ODIN environment then the historical "odin" default.
@@ -76,15 +75,7 @@ develop :: proc(config: Development) -> (handled, success: bool) {
 	if !scanned {
 		return
 	}
-	child, started := os.process_start(
-		{
-			command = command,
-			env = environment[:],
-			stdin = os.stdin,
-			stdout = os.stdout,
-			stderr = os.stderr,
-		},
-	)
+	child, started := development_start(command, environment[:])
 	if started != nil {
 		log.error("Could not start development server", started)
 		return
@@ -149,6 +140,19 @@ development_paths :: proc(config: Development, compiler: string) -> ([]string, b
 	return paths[:], true
 }
 
+@(private)
+development_start :: proc(command, environment: []string) -> (os.Process, os.Error) {
+	return os.process_start(
+		{
+			command = command,
+			env = environment,
+			stdin = os.stdin,
+			stdout = os.stdout,
+			stderr = os.stderr,
+		},
+	)
+}
+
 // The caller owns the process handle and command storage until shutdown. This
 // loop ends on SIGINT/SIGTERM; no build can replace a child after that signal.
 @(private)
@@ -207,15 +211,7 @@ development_supervise :: proc(
 		active^ = false
 		previous := command[0]
 		command[0] = next
-		next_child, start_error := os.process_start(
-			{
-				command = command,
-				env = environment[:],
-				stdin = os.stdin,
-				stdout = os.stdout,
-				stderr = os.stderr,
-			},
-		)
+		next_child, start_error := development_start(command, environment)
 		child^ = next_child
 		if start_error != nil {
 			log.error("Could not start rebuilt server", start_error)
@@ -619,7 +615,6 @@ send_bytes :: core.send_bytes
 read_connection :: core.read_connection
 REQUEST_HEADER_TIMEOUT :: core.REQUEST_HEADER_TIMEOUT
 RESPONSE_SEND_TIMEOUT :: core.RESPONSE_SEND_TIMEOUT
-WEBSOCKET_GUID: string : "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 Opcode :: enum u8 {
 	Continue = 0x00,
@@ -641,29 +636,22 @@ INVALID_PAYLOAD_DATA :: 1007
 @(private)
 websocket_accept :: proc(request: ^Request, storage: []u8) -> (string, HTTP_Status) {
 	key := header_value(request, "Sec-WebSocket-Key")
-	nonce: [16]byte
-	decoded, decode_error := base64.decode_into_buf(nonce[:], key, options = {.Strict})
-	connection := header_value(request, "Connection")
-	has_upgrade := false
-	for token in strings.split_iterator(&connection, ",") {
-		if strings.equal_fold(strings.trim_space(token), "upgrade") do has_upgrade = true
-	}
-	if decode_error != nil ||
-	   len(decoded) != len(nonce) ||
-	   header_value(request, "Sec-WebSocket-Version") != "13" ||
-	   !strings.equal_fold(header_value(request, "Upgrade"), "websocket") ||
-	   !has_upgrade {
+	if !codec.upgrade_request_fields_valid(
+		key,
+		header_value(request, "Sec-WebSocket-Version"),
+		header_value(request, "Upgrade"),
+		header_value(request, "Connection"),
+	) {
 		return "", .Bad_Request
 	}
-	hash: sha1.Context
-	digest: [sha1.DIGEST_SIZE]u8
-	sha1.init(&hash)
-	sha1.update(&hash, transmute([]u8)key)
-	sha1.update(&hash, transmute([]u8)WEBSOCKET_GUID)
-	sha1.final(&hash, digest[:])
-	accept, err := base64.encode_into_buf(storage, digest[:])
-	if err != nil do return "", .Internal_Server_Error
-	return string(accept), .None
+
+	accepted := codec.upgrade_accept_encoded(key)
+	if len(storage) < len(accepted) {
+		return "", .Internal_Server_Error
+	}
+
+	copy(storage, accepted[:])
+	return string(storage[:len(accepted)]), .None
 }
 
 upgrade_websocket :: proc(conn: ^Connection, request: ^Request) -> bool {

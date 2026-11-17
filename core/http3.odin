@@ -16,7 +16,6 @@ import "core:sync"
 import "core:time"
 import credential_store "core:crypto/tls/credentials/store"
 import async "shared:async"
-import signal "shared:async/signal"
 
 // Optional UDP listener on the ordinary server runtime. Credentials are borrowed
 // until serve returns. TCP and UDP endpoints are deliberately independent.
@@ -74,7 +73,9 @@ Http3_Request :: struct {
 
 http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
  if state == nil || !state.config.enabled || state.runtime == nil || state.config.credentials == nil do return 0, false
- if !http3_phases_valid(state.config.request_phases) || state.config.request_timeout<0 || state.config.request_timeout>MAX_SERVER_TIMEOUT do return 0,false
+	if !http3_phases_valid(state.config.request_phases) || !timeout_in_range(state.config.request_timeout) {
+		return 0, false
+	}
  if state.config.client_auth==nil && state.runtime.config.tls!=nil {state.config.client_auth=state.runtime.config.tls.client_auth}
  if state.config.disable_tickets {state.config.tickets=nil} else if state.config.tickets==nil && state.runtime.config.tls!=nil {state.config.tickets=state.runtime.config.tls.tickets}
  if state.config.handler == nil {
@@ -208,11 +209,9 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
    if !queue_deferred(task, response) {state.failed=true; return .Failed}
    // queue_deferred uses the TCP task by default. HTTP3's real owner is the
    // listener task; replace the signal before any continuation is polled.
-   signal.detach(task.deferred_signal)
-   signal.release(&task.deferred_signal)
-   created:=false
-   task.deferred_signal, created = signal.create(&owner.runtime.executor, &owner.task)
-   if !created do return .Failed
+			if !rebind_deferred_signal(task, &owner.task) {
+				return .Failed
+			}
   } else {
    state.response = response
    state.ready = true
@@ -351,11 +350,8 @@ http3_release :: proc(user: rawptr, wire: ^http3.Server_Request) {
  drop_deferred(task)
  drop_response_stream(task)
  finish_request_context(task)
- mem.dynamic_arena_destroy(&task.arena)
- finish_operation_resources(task)
- charged.release(&task.resource_transport)
- budget.release_scope(&task.resource_connection)
- sync.atomic_sub(&task.runtime.active_connections, 1)
+	release_task_storage(task)
+	sync.atomic_sub(&task.runtime.active_connections, 1)
  drain_connection_finished(task.runtime)
  free(state, rt.heap_allocator())
 }

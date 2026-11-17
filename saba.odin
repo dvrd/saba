@@ -58,20 +58,20 @@ connection_refresh :: proc(view:^Connection,transport:^core.Connection) {
 	view.write_deadline=transport.write_deadline
 }
 
-read_connection :: proc(conn:^Connection,buffer:[]u8)->(int,net.TCP_Recv_Error) {
-	local:core.Connection
-	io:=connection_transport(conn,&local)
-	n,error:=core.read_connection(io,buffer)
-	connection_refresh(conn,io)
-	return n,error
+read_connection :: proc(conn: ^Connection, buffer: []u8) -> (int, net.TCP_Recv_Error) {
+	local: core.Connection
+	io := connection_transport(conn, &local)
+	defer connection_refresh(conn, io)
+
+	return core.read_connection(io, buffer)
 }
 
-write_connection :: proc(conn:^Connection,buffer:[]u8)->(int,net.TCP_Send_Error) {
-	local:core.Connection
-	io:=connection_transport(conn,&local)
-	n,error:=core.write_connection(io,buffer)
-	connection_refresh(conn,io)
-	return n,error
+write_connection :: proc(conn: ^Connection, buffer: []u8) -> (int, net.TCP_Send_Error) {
+	local: core.Connection
+	io := connection_transport(conn, &local)
+	defer connection_refresh(conn, io)
+
+	return core.write_connection(io, buffer)
 }
 
 send_response :: proc(conn:^Connection,response:Response,request_method:string="")->bool {
@@ -91,51 +91,51 @@ send_response :: proc(conn:^Connection,response:Response,request_method:string="
 	return result
 }
 send_empty_response :: proc(conn:^Connection,status:HTTP_Status)->bool {return send_response(conn,{status=status})}
-read_request_body :: proc(conn:^Connection,request:^Request,buffer:[]u8)->(HTTP_Status,bool) {
-	local:core.Connection
-	io:=connection_transport(conn,&local)
-	status,ok:=core.read_request_body(io,request,buffer)
-	connection_refresh(conn,io)
-	return status,ok
+read_request_body :: proc(conn: ^Connection, request: ^Request, buffer: []u8) -> (HTTP_Status, bool) {
+	local: core.Connection
+	io := connection_transport(conn, &local)
+	defer connection_refresh(conn, io)
+
+	return core.read_request_body(io, request, buffer)
 }
-send_bytes :: proc(conn:^Connection,data:[]u8,operation:string)->bool {
-	local:core.Connection
-	io:=connection_transport(conn,&local)
-	ok:=core.send_bytes(io,data,operation)
-	connection_refresh(conn,io)
-	return ok
+send_bytes :: proc(conn: ^Connection, data: []u8, operation: string) -> bool {
+	local: core.Connection
+	io := connection_transport(conn, &local)
+	defer connection_refresh(conn, io)
+
+	return core.send_bytes(io, data, operation)
 }
 
-upgrade_websocket :: proc(conn:^Connection,request:^Request)->bool {
-	local:core.Connection
-	io:=connection_transport(conn,&local)
-	ok:=dev.upgrade_websocket(io,request)
-	connection_refresh(conn,io)
-	return ok
+upgrade_websocket :: proc(conn: ^Connection, request: ^Request) -> bool {
+	local: core.Connection
+	io := connection_transport(conn, &local)
+	defer connection_refresh(conn, io)
+
+	return dev.upgrade_websocket(io, request)
 }
 
-send_websocket_frame :: proc(conn:^Connection,opcode:Opcode,payload:[]u8)->bool {
-	local:core.Connection
-	io:=connection_transport(conn,&local)
-	ok:=dev.send_websocket_frame(io,opcode,payload)
-	connection_refresh(conn,io)
-	return ok
+send_websocket_frame :: proc(conn: ^Connection, opcode: Opcode, payload: []u8) -> bool {
+	local: core.Connection
+	io := connection_transport(conn, &local)
+	defer connection_refresh(conn, io)
+
+	return dev.send_websocket_frame(io, opcode, payload)
 }
 
-send_websocket_close :: proc(conn:^Connection,code:u16,reason:string)->bool {
-	local:core.Connection
-	io:=connection_transport(conn,&local)
-	ok:=dev.send_websocket_close(io,code,reason)
-	connection_refresh(conn,io)
-	return ok
+send_websocket_close :: proc(conn: ^Connection, code: u16, reason: string) -> bool {
+	local: core.Connection
+	io := connection_transport(conn, &local)
+	defer connection_refresh(conn, io)
+
+	return dev.send_websocket_close(io, code, reason)
 }
 
-read_websocket_bytes :: proc(conn:^Connection,buffer:[]u8)->bool {
-	local:core.Connection
-	io:=connection_transport(conn,&local)
-	ok:=dev.read_websocket_bytes(io,buffer)
-	connection_refresh(conn,io)
-	return ok
+read_websocket_bytes :: proc(conn: ^Connection, buffer: []u8) -> bool {
+	local: core.Connection
+	io := connection_transport(conn, &local)
+	defer connection_refresh(conn, io)
+
+	return dev.read_websocket_bytes(io, buffer)
 }
 
 Server_Control :: core.Server_Control
@@ -262,13 +262,33 @@ load_environment_file :: proc(path := ".env") -> bool {
 }
 
 @(private)
+is_alpha :: proc(c: rune) -> bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
+@(private)
+is_digit :: proc(c: rune) -> bool {
+	return c >= '0' && c <= '9'
+}
+
+@(private)
 environment_key_ok :: proc(key: string) -> bool {
-	if len(key) == 0 do return false
-	for c, index in key {
-		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' do continue
-		if index > 0 && c >= '0' && c <= '9' do continue
+	if len(key) == 0 {
 		return false
 	}
+
+	for c, index in key {
+		if is_alpha(c) || c == '_' {
+			continue
+		}
+
+		if index > 0 && is_digit(c) {
+			continue
+		}
+
+		return false
+	}
+
 	return true
 }
 

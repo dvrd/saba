@@ -12,7 +12,6 @@ import owned "core:mem/owned"
 import "core:net"
 import http "../../http"
 import exchange "shared:http/exchange"
-import signal "shared:async/signal"
 import "core:strconv"
 
 // One serialized socket/engine owner, independent lazily allocated request and
@@ -122,16 +121,22 @@ h2_begin :: proc(task: ^Connection_Task) -> bool {
 		}, options, allocator).kind == .None
 	}
 	if !ready {
-		delete(session.requests, allocator)
-		delete(session.reap, allocator)
-		delete(session.upgrades, allocator)
-		free(session, allocator)
+		h2_session_free(session)
 		return false
 	}
 	session.engine_ready = true
 	session.idle_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.header)
 	task.http2 = session
 	return true
+}
+
+@(private)
+h2_session_free :: proc(session: ^HTTP2_Session) {
+	allocator := session.allocator
+	delete(session.requests, allocator)
+	delete(session.reap, allocator)
+	delete(session.upgrades, allocator)
+	free(session, allocator)
 }
 
 @(private)
@@ -152,10 +157,7 @@ h2_destroy :: proc(task: ^Connection_Task) {
 		}
 		_ = h2.connection_destroy(&session.engine)
 	}
-	delete(session.requests,session.allocator)
-	delete(session.reap,session.allocator)
-	delete(session.upgrades,session.allocator)
- free(session, session.allocator)
+	h2_session_free(session)
 }
 
 @(private)
@@ -231,15 +233,27 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 		taken := false
 		switch value in event.payload {
 		case h2.Ready_Event, h2.Peer_Settings_Event, h2.Ping_Ack_Event:
-  case h2.Headers_Event:
-   if value.kind==.Trailers {
-    if request:=h2_request_find(task,value.stream);request!=nil && request.receiving {h2_request_trailers(request,value.summary.fields);h2_request_complete(&request.task)}
-   } else if value.kind==.Request && value.summary.protocol!="" {
-    if !h2_upgrade_open(task,value) {_=h2.connection_reset(&session.engine,value.stream,.Refused_Stream);h2_remember(session,value.stream)}
-   } else if value.kind==.Request {
-    if !h2_request_open(task,value) {_=h2.connection_reset(&session.engine,value.stream,.Refused_Stream);h2_remember(session,value.stream)}
-   }
-  case h2.Data_Event:
+		case h2.Headers_Event:
+			if value.kind == .Trailers {
+				request := h2_request_find(task, value.stream)
+				if request != nil && request.receiving {
+					h2_request_trailers(request, value.summary.fields)
+					h2_request_complete(&request.task)
+				}
+			} else if value.kind == .Request {
+				opened: bool
+				if value.summary.protocol != "" {
+					opened = h2_upgrade_open(task, value)
+				} else {
+					opened = h2_request_open(task, value)
+				}
+
+				if !opened {
+					_ = h2.connection_reset(&session.engine, value.stream, .Refused_Stream)
+					h2_remember(session, value.stream)
+				}
+			}
+		case h2.Data_Event:
    if stream:=h2_upgrade_find(task,value.stream);stream!=nil {
     taken=h2_upgrade_data(stream,event,value)
     if !taken {_=h2.connection_reset(&session.engine,value.stream,.Cancel);h2_upgrade_release(stream)}
@@ -283,7 +297,10 @@ h2_next_deadline :: proc(task: ^Connection_Task) -> time.Tick {
 @(private)
 h2_check_deadlines :: proc(task: ^Connection_Task) -> bool {
 	session := task.http2
- if h2_request_count(task)==0 && h2_upgrade_count(task)==0 && deadline_expired(session.idle_deadline) {h2_shutdown(task);return true}
+	if !h2_has_streams(task) && deadline_expired(session.idle_deadline) {
+		h2_shutdown(task)
+		return true
+	}
 	if server_is_draining(task.runtime) {
 		h2_shutdown(task)
 	}
@@ -424,7 +441,9 @@ h2_finished :: proc(task: ^Connection_Task) -> bool {
 	writing := task.tls_state != nil && task.tls_state.write_started
 	if pending || writing do return false
 	if session.failed || session.peer_gone do return true
-	if h2_upgrade_count(task)>0 || h2_request_count(task)>0 do return false
+	if h2_has_streams(task) {
+		return false
+	}
 	if !session.shutdown do return false
 	stats, ok := h2.connection_shutdown_status(&session.engine)
 	if !ok do return false
@@ -458,14 +477,16 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		if write_wait do waiting = true
 		if h2_finished(task) do return .Done
 		if progress do continue
-		if h2_upgrade_count(task)>0 || h2_request_count(task)>0 {_=async.sleep_until_earlier(&task.runtime.executor,async.deadline_after(&task.runtime.executor,time.Millisecond))}
+		if h2_has_streams(task) {
+			_ = async.sleep_until_earlier(&task.runtime.executor, async.deadline_after(&task.runtime.executor, time.Millisecond))
+		}
 		if waiting do return .Waiting
 		break
 	}
 	if h2_finished(task) do return .Done
  // The bounded turn may exhaust its work while the read is still armed. Ready
  // response queues need another owner turn even when the peer sends no bytes.
- if h2_request_count(task)>0 || h2_upgrade_count(task)>0 || h2_output_pending(session) {
+	if h2_has_streams(task) || h2_output_pending(session) {
   _=async.sleep_until_earlier(&task.runtime.executor,async.deadline_after(&task.runtime.executor,time.Millisecond))
  }
 	if waiting do return .Waiting
@@ -492,16 +513,20 @@ h2_upgrade_find :: proc(task:^Connection_Task,handle:h2.Stream_Handle)->^H2_Upgr
  return nil
 }
 @(private)
-h2_upgrade_count :: proc(task:^Connection_Task)->int {
- n:=0
+h2_has_streams :: proc(task: ^Connection_Task) -> bool {
+	for stream in task.http2.upgrades {
+		if stream != nil {
+			return true
+		}
+	}
 
- for stream in task.http2.upgrades {
-  if stream!=nil {
-   n+=1
-  }
- }
+	for request in task.http2.requests {
+		if request != nil {
+			return true
+		}
+	}
 
- return n
+	return false
 }
 @(private)
 h2_upgrade_release :: proc(stream:^H2_Upgrade) {
@@ -516,11 +541,13 @@ h2_upgrade_release :: proc(stream:^H2_Upgrade) {
  drop_upgrade(task)
  discard_response(&stream.response)
  finish_request_context(task)
- mem.dynamic_arena_destroy(&task.arena)
- finish_operation_resources(task)
- charged.release(&task.resource_transport)
- budget.release_scope(&task.resource_connection)
- for &slot in session.upgrades {if slot==stream {slot=nil;break}}
+	release_task_storage(task)
+	for &slot in session.upgrades {
+		if slot == stream {
+			slot = nil
+			break
+		}
+	}
  h2_remember(session,stream.handle)
  free(stream,session.allocator)
 }
@@ -694,6 +721,34 @@ h2_append_lower :: proc(scratch: []u8, used: ^int, name: string) -> string {
 	return string(scratch[start:used^])
 }
 
+// Appends the lowercased, non-connection-specific headers as HPACK fields.
+// False means the field table or name scratch is full.
+@(private)
+h2_append_response_fields :: proc(
+	fields: []hpack.Field,
+	count: ^int,
+	names: []u8,
+	used: ^int,
+	headers: []Header,
+	never_index_set_cookie: bool,
+) -> bool {
+	for header in headers {
+		if count^ == len(fields) || len(header.name) > len(names) - used^ {
+			return false
+		}
+
+		lower := h2_append_lower(names, used, header.name)
+		if h2_skip_response_header(lower) {
+			continue
+		}
+
+		fields[count^] = {lower, header.value, never_index_set_cookie && lower == "set-cookie"}
+		count^ += 1
+	}
+
+	return true
+}
+
 @(private)
 h2_upgrade_headers :: proc(stream:^H2_Upgrade)->bool {
  if stream.headers_sent {return true}
@@ -703,13 +758,9 @@ h2_upgrade_headers :: proc(stream:^H2_Upgrade)->bool {
  count:=1
  status:=h2_status_digits(stream.response.status)
  fields[0]={":status",string(status[:]),false}
- for header in stream.response.headers {
-  if count==len(fields) || len(header.name)>len(names)-used {return false}
-  lower:=h2_append_lower(names[:],&used,header.name)
-  if h2_skip_response_header(lower) {continue}
-  fields[count]={lower,header.value,lower=="set-cookie"}
-  count+=1
- }
+	if !h2_append_response_fields(fields[:], &count, names[:], &used, stream.response.headers, true) {
+		return false
+	}
  end:=!stream.accepted && len(stream.response.body)==0
  e:=h2.connection_send_headers(&stream.parent.http2.engine,stream.handle,fields[:count],end)
  if e.kind==.Limit_Exceeded {return false}
@@ -801,18 +852,6 @@ h2_request_find :: proc(parent:^Connection_Task,handle:h2.Stream_Handle)->^H2_Re
  return nil
 }
 @(private)
-h2_request_count :: proc(parent:^Connection_Task)->int {
- count:=0
-
- for request in parent.http2.requests {
-  if request!=nil {
-   count+=1
-  }
- }
-
- return count
-}
-@(private)
 h2_request_release :: proc(request:^H2_Request,success:bool,status:Request_Status) {
  parent:=request.parent
  task:=&request.task
@@ -824,11 +863,13 @@ h2_request_release :: proc(request:^H2_Request,success:bool,status:Request_Statu
  discard_response(&request.response)
  finish_request_context(task)
  observe_finish(task)
- mem.dynamic_arena_destroy(&task.arena)
- finish_operation_resources(task)
- charged.release(&task.resource_transport)
- budget.release_scope(&task.resource_connection)
- for &slot in session.requests {if slot==request {slot=nil;break}}
+	release_task_storage(task)
+	for &slot in session.requests {
+		if slot == request {
+			slot = nil
+			break
+		}
+	}
  h2_remember(session,request.handle)
  session.idle_deadline=time.tick_add(time.tick_now(),parent.runtime.timeouts.idle)
  free(request,session.allocator)
@@ -920,12 +961,9 @@ h2_queue_response :: proc(task:^Connection_Task,response:Response)->bool {
  if resource_pressure(task) {discarded:=response;discard_response(&discarded);return h2_request_emergency(task,.Service_Unavailable)}
  if deferred_present(response.deferred) {
   if !queue_deferred(task,response) {return false}
-  signal.detach(task.deferred_signal)
-  signal.release(&task.deferred_signal)
-  created:=false
-  task.deferred_signal,created=signal.create(&task.runtime.executor,&request.parent.task)
-  request.response_deadline=task.deferred_expires
-  return created
+		created := rebind_deferred_signal(task, &request.parent.task)
+		request.response_deadline = task.deferred_expires
+		return created
  }
  prepared:=response
  content_coding_prepare(&task.request,&prepared)
@@ -996,18 +1034,14 @@ h2_request_headers :: proc(request:^H2_Request,trailers:bool)->h2.Error {
   fields[0]={":status",string(status[:]),false}
   count=1
  }
- headers:=request.response.trailers if trailers else request.response.headers
- for header in headers {
-  if count==len(fields) || len(header.name)>len(names)-used {return {kind=.Invalid_Input}}
-  name:=h2_append_lower(names[:],&used,header.name)
+	headers := request.response.headers
+	if trailers {
+		headers = request.response.trailers
+	}
 
-  if h2_skip_response_header(name) {
-   continue
-  }
-
-  fields[count]={name,header.value,false}
-  count+=1
- }
+	if !h2_append_response_fields(fields[:], &count, names[:], &used, headers, false) {
+		return {kind = .Invalid_Input}
+	}
  code:=int(request.response.status)
  if !trailers && count<len(fields) && code>=200 && code!=204 && code!=304 && (http.response_body_allowed(code,request.task.request.method) || request.task.request.method=="HEAD") {
   size:=i64(len(request.response.body))

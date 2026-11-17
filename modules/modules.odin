@@ -86,7 +86,7 @@ Module_Mount :: struct {
 
 Module_Cache :: struct {
 	mount: Module_Mount,
-	files: map[string]string,
+	files: map[string]assets.Prepared_Representation,
 }
 
 serve_prepared_modules :: proc(
@@ -105,9 +105,9 @@ serve_prepared_modules :: proc(
 		relative, invalid, matched := module_request(request, mount.mount.prefix)
 		if !matched do continue
 		if invalid do return not_found(request), true
-		output, found := mount.files[relative]
+		prepared, found := mount.files[relative]
 		if !found do return not_found(request), true
-		return assets.representation_response(request, transmute([]u8)output, "text/javascript; charset=utf-8"), true
+		return assets.prepared_representation_response(request, &prepared), true
 	}
 	return {}, false
 }
@@ -193,7 +193,7 @@ prepare_module_mounts :: proc(
 @(private = "file")
 compile_module_directory :: proc(cache: ^Module_Cache, allocator: mem.Allocator) -> bool {
 	root := cache.mount.directory
-	cache.files = make(map[string]string, allocator)
+	cache.files = make(map[string]assets.Prepared_Representation, allocator)
 	walker := os.walker_create(root)
 	defer os.walker_destroy(&walker)
 	for file in os.walker_walk(&walker) {
@@ -237,7 +237,7 @@ compile_module_directory :: proc(cache: ^Module_Cache, allocator: mem.Allocator)
 			log.error("Could not copy module URL")
 			return false
 		}
-		cache.files[key] = output
+		cache.files[key] = assets.prepare_representation(transmute([]u8)output, "text/javascript; charset=utf-8")
 	}
 	if path, error := os.walker_error(&walker); error != nil {
 		log.errorf("Could not scan module directory %s: %v", path, error)

@@ -127,11 +127,9 @@ gzip_open :: proc(e: ^Gzip_Encoder) {
 
 @(private)
 gzip_match :: proc(e: ^Gzip_Encoder, length, distance: int) {
-	symbol := 257
 	for index := 28; index >= 0; index -= 1 {
 		if length >= GZIP_LEN_BASE[index] {
-			symbol = 257 + index
-			gzip_symbol(e, symbol)
+			gzip_symbol(e, 257 + index)
 			extra := GZIP_LEN_EXTRA[index]
 			if extra > 0 do gzip_put(e, u32(length - GZIP_LEN_BASE[index]), extra)
 			break
@@ -276,10 +274,7 @@ gzip_encode_into :: proc(e: ^Gzip_Encoder, src, dst: []u8) -> (written: int, ok:
 			written += count
 			continue
 		}
-		if !gzip_finish(e) && !e.finished {
-			if e.overflow do return 0, false
-			continue
-		}
+		gzip_finish(e)
 	}
 	for e.out_len != e.out_off {
 		count := gzip_pull(e, dst[written:])
@@ -317,7 +312,20 @@ is_digit :: proc(c: u8) -> bool {return c >= '0' && c <= '9'}
 is_alpha :: proc(c: u8) -> bool {return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')}
 // HTTP optional whitespace.
 @(private)
-is_blank :: proc(c: u8) -> bool {return c == ' ' || c == '\t'}
+is_blank :: proc(c: u8) -> bool {
+	return c == ' ' || c == '\t'
+}
+
+// Index of the next list element: skips optional whitespace and empty elements.
+@(private)
+skip_list_separators :: proc(value: string, from: int) -> int {
+	index := from
+	for index < len(value) && (is_blank(value[index]) || value[index] == ',') {
+		index += 1
+	}
+
+	return index
+}
 
 @(private)
 Coding_Choice :: struct {
@@ -388,9 +396,7 @@ accept_coding :: proc(choice: ^Coding_Choice, name: string, q: int) {
 parse_coding_list :: proc(value: string, choice: ^Coding_Choice) -> bool {
 	index := 0
 	for index < len(value) {
-		for index < len(value) && (is_blank(value[index]) || value[index] == ',') {
-			index += 1
-		}
+		index = skip_list_separators(value, index)
 		if index >= len(value) do return true
 		start := index
 		if value[index] == '*' {
@@ -451,9 +457,7 @@ gzip_preferred :: proc(choice: Coding_Choice) -> bool {
 cache_forbids_coding :: proc(value: string) -> bool {
 	index := 0
 	for index < len(value) {
-		for index < len(value) && (is_blank(value[index]) || value[index] == ',') {
-			index += 1
-		}
+		index = skip_list_separators(value, index)
 		start := index
 		for index < len(value) && value[index] != ',' && value[index] != '=' && !is_blank(value[index]) {
 			index += 1
@@ -524,9 +528,7 @@ vary_lists_encoding :: proc(headers: []Header) -> bool {
 		index := 0
 		value := header.value
 		for index < len(value) {
-			for index < len(value) && (is_blank(value[index]) || value[index] == ',') {
-				index += 1
-			}
+			index = skip_list_separators(value, index)
 			start := index
 			for index < len(value) && value[index] != ',' && !is_blank(value[index]) {
 				index += 1
@@ -623,8 +625,11 @@ gzip_next :: proc(data: rawptr, io: ^Stream_IO) -> Stream_Step {
 			state.have, state.held, state.held_off = false, nil, 0
 		}
 		if state.inner_done {
-			if gzip_finish(&state.encoder) do continue
-			if state.encoder.overflow do return gzip_fail(state)
+			gzip_finish(&state.encoder)
+			if state.encoder.overflow {
+				return gzip_fail(state)
+			}
+
 			continue
 		}
 		capture := io^

@@ -230,10 +230,9 @@ stream_write_budget :: proc(task: ^Connection_Task) -> bool {
 		cancel_request_context(task.request.cancellation, .Deadline)
 		return false
 	}
-	duration := min(remaining, task.runtime.timeouts.response)
-	task.deadline = async.deadline_after(&task.runtime.executor, duration)
-	task.connection.write_deadline = time.tick_add(time.tick_now(), duration)
-	task.output_index, task.output_offset = 0, 0
+	arm_write_deadline(task, min(remaining, task.runtime.timeouts.response))
+	task.output_index = 0
+	task.output_offset = 0
 	task.phase = .Write
 	return true
 }
@@ -400,8 +399,8 @@ produce_stream :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		} else {
 			task.output = {nil, payload, nil}
 		}
+
 		if !stream_write_budget(task) {
-			observe_failure(task, .Timeout)
 			return .Done
 		}
 		return .Yield
@@ -414,7 +413,6 @@ produce_stream :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		task.output = {}
 		if state.chunked do task.output[0] = transmute([]u8)string("0\r\n\r\n")
 		if !stream_write_budget(task) {
-			observe_failure(task, .Timeout)
 			return .Done
 		}
 		return .Yield

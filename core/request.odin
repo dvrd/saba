@@ -34,6 +34,16 @@ parse_request :: proc(raw: string, storage: []Header) -> (Request, HTTP_Status) 
 	}, status
 }
 
+// A zero body timeout means the connection was built without resolved timeouts.
+@(private)
+connection_timeouts :: proc(conn: ^Connection) -> Resolved_Timeouts {
+	if conn._timeouts.body == 0 {
+		return resolve_timeouts({})
+	}
+
+	return conn._timeouts
+}
+
 // A read failure may have no HTTP status when the connection itself failed.
 read_request_body :: proc(
 	conn: ^Connection,
@@ -50,8 +60,7 @@ read_request_body :: proc(
 
 	request.body = buffer[:request.content_length]
 	previous_deadline := conn.read_deadline
-	timeouts := conn._timeouts
-	if timeouts.body == 0 do timeouts = resolve_timeouts({})
+	timeouts := connection_timeouts(conn)
 	conn.read_deadline = time.tick_add(time.tick_now(), body_timeout(timeouts, request.content_length))
 	defer conn.read_deadline = previous_deadline
 	used := 0
@@ -195,8 +204,7 @@ read_chunked_body :: proc(
 	decoder: http1.Chunk_Decoder
 	if http1.chunk_decoder_init(&decoder, u64(len(buffer))).kind != .None do return .Content_Too_Large, false
 	previous := conn.read_deadline
-	timeouts := conn._timeouts
-	if timeouts.body == 0 do timeouts = resolve_timeouts({})
+	timeouts := connection_timeouts(conn)
 	conn.read_deadline = time.tick_add(time.tick_now(), body_timeout(timeouts, 0))
 	defer conn.read_deadline = previous
 	scratch: [2048]u8

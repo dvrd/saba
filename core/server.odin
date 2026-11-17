@@ -355,8 +355,7 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 	}
 	task.request.body = body
 	duration := body_timeout(task.runtime.timeouts, request.content_length)
-	task.deadline = async.deadline_after(&task.runtime.executor, duration)
-	task.connection.read_deadline = time.tick_add(time.tick_now(), duration)
+	arm_read_deadline(task, duration)
 	task.phase = .Body
 	if request.chunked {
 		state, allocation_error := new(Chunk_Request, allocator)
@@ -485,9 +484,9 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 	if !ok {observe_failure(task, .Protocol_Error); return false}
 	task.output = {headers, prepared.body, nil}
 	if task.request.method == "HEAD" do task.output[1] = nil
-	task.output_index, task.output_offset = 0, 0
-	task.deadline = async.deadline_after(&task.runtime.executor, task.runtime.timeouts.response)
-	task.connection.write_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.response)
+	task.output_index = 0
+	task.output_offset = 0
+	arm_write_deadline(task, task.runtime.timeouts.response)
 	if task.observed {
 		task.event.status = prepared.status
 		if task.event.status == .None do task.event.status = .OK
@@ -935,6 +934,14 @@ finish_operation_resources :: proc(task: ^Connection_Task) {
 	budget.release_scope(&task.resource_operation)
 }
 @(private)
+release_task_storage :: proc(task: ^Connection_Task) {
+	mem.dynamic_arena_destroy(&task.arena)
+	finish_operation_resources(task)
+	charged.release(&task.resource_transport)
+	budget.release_scope(&task.resource_connection)
+}
+
+@(private)
 resource_pressure :: proc(task: ^Connection_Task) -> bool {
 	return charged.stats(task.resource_binding).rejected != 0
 }
@@ -949,9 +956,9 @@ resource_reject :: proc(
 	if !encoded do return false
 	task.output = {head, nil, nil}
 	task.output_index, task.output_offset = 0, 0
-	task.reuse_after_write, task.finish_after_write = false, true
-	task.deadline = async.deadline_after(&task.runtime.executor, task.runtime.timeouts.response)
-	task.connection.write_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.response)
+	task.reuse_after_write = false
+	task.finish_after_write = true
+	arm_write_deadline(task, task.runtime.timeouts.response)
 	task.phase = .Write
 	if task.observed {
 		task.event.status = status
@@ -975,30 +982,41 @@ resource_copy_response :: proc(task: ^Connection_Task, response: ^Response) -> b
 		copy(storage, body)
 		body = storage
 	}
-	headers, he := make([]Header, len(response.headers), allocator)
-	if he != nil do return false
-	for field, i in response.headers {
-		name, ne := strings.clone(field.name, allocator)
-		value, ve := strings.clone(field.value, allocator)
-		if ne != nil || ve != nil do return false
-		headers[i] = {name, value}
+	headers, headers_ok := clone_headers(response.headers, allocator)
+	if !headers_ok {
+		return false
 	}
- trailers,trailer_error:=make([]Header,len(response.trailers),allocator)
- if trailer_error!=nil {return false}
- for field,i in response.trailers {
-  name,name_error:=strings.clone(field.name,allocator)
-  value,value_error:=strings.clone(field.value,allocator)
 
-  if name_error!=nil || value_error!=nil {
-   return false
-  }
+	trailers, trailers_ok := clone_headers(response.trailers, allocator)
+	if !trailers_ok {
+		return false
+	}
 
-  trailers[i]={name,value}
- }
- response.trailers=trailers
-	response.body, response.headers = body, headers
+	response.body = body
+	response.headers = headers
+	response.trailers = trailers
 	return true
 }
+@(private)
+clone_headers :: proc(fields: []Header, allocator: mem.Allocator) -> ([]Header, bool) {
+	cloned, error := make([]Header, len(fields), allocator)
+	if error != nil {
+		return nil, false
+	}
+
+	for field, i in fields {
+		name, name_error := strings.clone(field.name, allocator)
+		value, value_error := strings.clone(field.value, allocator)
+		if name_error != nil || value_error != nil {
+			return nil, false
+		}
+
+		cloned[i] = {name, value}
+	}
+
+	return cloned, true
+}
+
 @(private)
 connection_storage_allocator :: proc(task: ^Connection_Task) -> mem.Allocator {
 	if !scope_managed(task.resource_connection) {
@@ -1214,9 +1232,8 @@ request_context_status :: proc(ctx: Request_Context) -> Request_Status {
 	if node == nil do return .Unavailable
 	current := sync.atomic_load(&node.status)
 	if current != .Active do return current
-	if node.server != nil && sync.atomic_load(&node.server.stopping) {
-		cancel_request_context(ctx, .Shutdown)
-	} else if node.server != nil && server_cancellation_expired(node.server) {
+	if node.server != nil &&
+	   (sync.atomic_load(&node.server.stopping) || server_cancellation_expired(node.server)) {
 		cancel_request_context(ctx, .Shutdown)
 	} else if deadline_expired(node.deadline) {
 		cancel_request_context(ctx, .Deadline)
@@ -1374,6 +1391,16 @@ drop_deferred :: proc(task: ^Connection_Task) {
 	signal.detach(task.deferred_signal)
 	signal.release(&task.deferred_signal)
 	if old.drop != nil do old.drop(old.data)
+}
+
+// queue_deferred wakes the TCP task; multiplexed transports hand the wake to their owner task.
+@(private)
+rebind_deferred_signal :: proc(task: ^Connection_Task, owner: ^async.Task) -> bool {
+	signal.detach(task.deferred_signal)
+	signal.release(&task.deferred_signal)
+	created: bool
+	task.deferred_signal, created = signal.create(&task.runtime.executor, owner)
+	return created
 }
 
 @(private)

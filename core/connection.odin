@@ -30,6 +30,19 @@ deadline_expired :: proc(deadline: time.Tick) -> bool {
 	return deadline != time.Tick{} && time.tick_diff(time.tick_now(), deadline) <= 0
 }
 
+// The async deadline drives suspended I/O; the tick deadline drives the blocking helpers.
+@(private)
+arm_read_deadline :: proc(task: ^Connection_Task, duration: time.Duration) {
+	task.deadline = async.deadline_after(&task.runtime.executor, duration)
+	task.connection.read_deadline = time.tick_add(time.tick_now(), duration)
+}
+
+@(private)
+arm_write_deadline :: proc(task: ^Connection_Task, duration: time.Duration) {
+	task.deadline = async.deadline_after(&task.runtime.executor, duration)
+	task.connection.write_deadline = time.tick_add(time.tick_now(), duration)
+}
+
 wait_ready :: proc(
 	client: net.TCP_Socket,
 	events: posix.Poll_Event,
@@ -207,8 +220,16 @@ Server_Runtime :: struct {
 // Handler and handler_data must remain valid until serve returns.
 // Returns false on startup failure or an unrecoverable listener error.
 serve :: proc(config: Server) -> bool {
-	if !http2_config_valid(config.http2) {log.error("Invalid HTTP2 concurrency limit"); return false}
-	if !tls_config_valid(config.tls) {log.error("Invalid TLS configuration"); return false}
+	if !http2_config_valid(config.http2) {
+		log.error("Invalid HTTP2 concurrency limit")
+		return false
+	}
+
+	if !tls_config_valid(config.tls) {
+		log.error("Invalid TLS configuration")
+		return false
+	}
+
 	if !claim_server(config.control) {
 		log.error("Server control is already in use")
 		return false
@@ -224,9 +245,20 @@ serve :: proc(config: Server) -> bool {
 		log.error("Invalid keep-alive request count or idle timeout")
 		return false
 	}
-	if !http3_phases_valid(config.http3.request_phases) {log.error("Invalid HTTP3 phase policy");return false}
-	if config.http3.request_timeout<0 || config.http3.request_timeout>MAX_SERVER_TIMEOUT {log.error("Invalid HTTP3 request timeout");return false}
-	if config.handler_timeout<0 || config.handler_timeout>MAX_SERVER_TIMEOUT {log.error("Invalid handler timeout");return false}
+	if !http3_phases_valid(config.http3.request_phases) {
+		log.error("Invalid HTTP3 phase policy")
+		return false
+	}
+
+	if !timeout_in_range(config.http3.request_timeout) {
+		log.error("Invalid HTTP3 request timeout")
+		return false
+	}
+
+	if !timeout_in_range(config.handler_timeout) {
+		log.error("Invalid handler timeout")
+		return false
+	}
 	if !timeouts_valid(config.timeouts) {
 		log.error("Invalid server timeouts: durations must be between zero and MAX_SERVER_TIMEOUT")
 		return false
@@ -379,10 +411,10 @@ server_admit_connection :: proc(runtime: ^Server_Runtime, client: net.TCP_Socket
 	// Reserve admission before the drain cutoff. Only this accept task publishes
 	// connections, so the drain monitor cannot overtake an accepted reservation.
 	// Do not hold the mutex across allocation or application logging callbacks.
-	sync.lock(&runtime.drain_mutex)
-	allowed := !runtime.draining
-	sync.unlock(&runtime.drain_mutex)
-	if !allowed {reject_connection(client, runtime.config.tls != nil); return}
+	if server_is_draining(runtime) {
+		reject_connection(client, runtime.config.tls != nil)
+		return
+	}
 	if !server_capacity_admit(runtime) {
 		reject_connection(client, runtime.config.tls != nil)
 		return
@@ -480,9 +512,13 @@ TLS_State :: struct {
 @(private)
 tls_config_valid :: proc(config: ^TLS_Config) -> bool {
 	if config == nil do return true
-	if !tls.server_ticket_config_valid(config.tickets) || !tls.client_auth_config_valid(config.client_auth) || config.store == nil || config.handshake_timeout < 0 ||
-	   config.handshake_timeout > MAX_SERVER_TIMEOUT || config.close_timeout < 0 ||
-	   config.close_timeout > MAX_SERVER_TIMEOUT {return false}
+	if !tls.server_ticket_config_valid(config.tickets) ||
+	   !tls.client_auth_config_valid(config.client_auth) ||
+	   config.store == nil ||
+	   !timeout_in_range(config.handshake_timeout) ||
+	   !timeout_in_range(config.close_timeout) {
+		return false
+	}
 	if config.max_owned_bytes != 0 &&
 	   (config.max_owned_bytes < 1024 || config.max_owned_bytes > tls.SERVER_ASYNC_MAX_OWNED_BYTES) {return false}
 	if config.max_handshake_records < 0 || config.max_handshake_records > 65536 do return false
@@ -547,14 +583,21 @@ tls_event :: proc(task: ^Connection_Task, kind: TLS_Event_Kind) {
 	if kind == .Handshake do task.tls_state.handshake_reported = true
 	if config.on_event == nil do return
 	state := task.tls_state
-	event := TLS_Event {kind = kind, handshake_complete = state.ready,
-		peer_identity=tls.server_async_connection_state(&state.owner).peer_identity,
-  resumed=tls.server_async_connection_state(&state.owner).resumed,
-		error = state.error, close_error = state.close.result.err,
-	failure = tls.server_async_failure(&state.owner),
+	connection_state := tls.server_async_connection_state(&state.owner)
+	event := TLS_Event {
+		kind = kind,
+		handshake_complete = state.ready,
+		peer_identity = connection_state.peer_identity,
+		resumed = connection_state.resumed,
+		error = state.error,
+		close_error = state.close.result.err,
+		failure = tls.server_async_failure(&state.owner),
 		negotiated_protocol = string(state.protocol[:state.protocol_len]),
-		stats = tls.server_async_stats(&state.owner), callbacks = state.executor.callbacks,
-		write_waits = state.executor.write_waits, transport_partial_writes = state.executor.partial_writes}
+		stats = tls.server_async_stats(&state.owner),
+		callbacks = state.executor.callbacks,
+		write_waits = state.executor.write_waits,
+		transport_partial_writes = state.executor.partial_writes,
+	}
 	config.on_event(config.data, &event)
 }
 
@@ -646,8 +689,7 @@ begin_http_headers :: proc(task: ^Connection_Task) {
 	task.header = task.initial_header[:]
 	task.header_deadline = async.deadline_after(&task.runtime.executor, task.runtime.timeouts.header)
 	task.header_read_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.header)
-	task.deadline = async.deadline_after(&task.runtime.executor, task.runtime.timeouts.idle)
-	task.connection.read_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.idle)
+	arm_read_deadline(task, task.runtime.timeouts.idle)
 	task.phase = .Headers
 }
 
@@ -764,11 +806,19 @@ Resolved_Timeouts :: struct {
 	header, body, large_body, response, idle: time.Duration,
 }
 
+@(private)
+timeout_in_range :: proc(value: time.Duration) -> bool {
+	return value >= 0 && value <= MAX_SERVER_TIMEOUT
+}
+
 // Public validation is side-effect free and safe before creating a listener.
 timeouts_valid :: proc(config: Timeout_Config) -> bool {
 	for value in ([4]time.Duration{config.header, config.body, config.response, config.idle}) {
-		if value < 0 || value > MAX_SERVER_TIMEOUT do return false
+		if !timeout_in_range(value) {
+			return false
+		}
 	}
+
 	return true
 }
 
@@ -807,7 +857,7 @@ Keep_Alive_Config :: struct {
 
 keep_alive_valid :: proc(config: Keep_Alive_Config) -> bool {
 	return config.max_requests >= 0 && config.max_requests <= MAX_KEEP_ALIVE_REQUESTS &&
-		config.idle_timeout >= 0 && config.idle_timeout <= MAX_SERVER_TIMEOUT
+		timeout_in_range(config.idle_timeout)
 }
 
 @(private)
@@ -957,8 +1007,7 @@ keep_alive_next_request :: #force_no_inline proc(task: ^Connection_Task) -> bool
 	}
 	copy(task.header,saved[:count])
 	if count > 0 do return keep_alive_begin_request(task,count)
-	task.deadline = async.deadline_after(&task.runtime.executor, keep_alive_idle_timeout(task.runtime))
-	task.connection.read_deadline = time.tick_add(time.tick_now(), keep_alive_idle_timeout(task.runtime))
+	arm_read_deadline(task, keep_alive_idle_timeout(task.runtime))
 	task.connection.write_deadline = {}
 	task.phase = .Idle
 	return keep_alive_enter_idle(task)

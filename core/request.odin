@@ -219,7 +219,8 @@ read_chunked_body :: proc(
 		if error.kind != .None do return chunk_error_status(error), false
 		if done {
 			if deadline_expired(conn.read_deadline) do return .Request_Timeout, false
-			request.body = buffer[:used]; request.content_length = used
+			request.body = buffer[:used]
+			request.content_length = used
 			return .None, true
 		}
 	}

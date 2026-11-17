@@ -111,7 +111,8 @@ send_empty_response :: proc(conn: ^Connection, status: HTTP_Status) -> bool {
 // Body/header borrows remain owned by their request arena.
 discard_response :: proc(response:^Response) {
     if response==nil do return
-    old:=response^;response^={}
+    old:=response^
+    response^={}
     if old.deferred.drop!=nil do old.deferred.drop(old.deferred.data)
     if old.upgrade.drop!=nil do old.upgrade.drop(old.upgrade.data)
     if old.stream.drop!=nil do old.stream.drop(old.stream.data)
@@ -210,10 +211,12 @@ Response_Stream_State :: struct {
 
 @(private)
 drop_response_stream :: proc(task: ^Connection_Task) {
-	old := task.streaming; task.streaming = nil
+	old := task.streaming
+	task.streaming = nil
 	if old == nil do return
 	exchange.destroy(&old.exchange)
-	producer := old.producer; old.producer = {}
+	producer := old.producer
+	old.producer = {}
 	if producer.drop != nil do producer.drop(producer.data)
 	free(old, old.allocator)
 }
@@ -224,7 +227,8 @@ stream_write_budget :: proc(task: ^Connection_Task) -> bool {
 	remaining := time.tick_diff(time.tick_now(), state.expires)
 	if remaining <= 0 {
 		observe_failure(task, .Timeout)
-		cancel_request_context(task.request.cancellation, .Deadline); return false
+		cancel_request_context(task.request.cancellation, .Deadline)
+		return false
 	}
 	duration := min(remaining, task.runtime.timeouts.response)
 	task.deadline = async.deadline_after(&task.runtime.executor, duration)
@@ -243,7 +247,8 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 	   task.upgrade.resume != nil ||
 	   task.upgrade.drop != nil {
 		if producer.drop != nil do producer.drop(producer.data)
-		observe_failure(task, .Protocol_Error); return false
+		observe_failure(task, .Protocol_Error)
+		return false
 	}
 	allocator := task.request.backing_allocator
 	if allocator.procedure == nil do allocator = rt.heap_allocator()
@@ -251,15 +256,18 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 	if error != nil || state == nil {
 		if producer.drop != nil do producer.drop(producer.data)
 		if resource_pressure(task) do return resource_reject(task)
-		observe_failure(task, .Allocation_Error); return false
+		observe_failure(task, .Allocation_Error)
+		return false
 	}
-	state.producer, state.allocator = producer, allocator; task.streaming = state
+	state.producer, state.allocator = producer, allocator
+	task.streaming = state
 	limit := producer.max_chunk_bytes
 	if limit == 0 do limit = 64 * mem.Kilobyte
 	duration := producer.timeout
 	if duration == 0 do duration = task.runtime.timeouts.response
 	if limit < 1 || limit > mem.Megabyte || duration <= 0 || duration > MAX_SERVER_TIMEOUT {
-		observe_failure(task, .Protocol_Error); return false
+		observe_failure(task, .Protocol_Error)
+		return false
 	}
 	state.max_chunk_bytes = limit
 	state.expires = time.tick_add(time.tick_now(), duration)
@@ -267,7 +275,8 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 	if inherited != (time.Tick{}) && time.tick_diff(inherited, state.expires) > 0 do state.expires = inherited
 	remaining := time.tick_diff(time.tick_now(), state.expires)
 	if remaining <= 0 {
-		observe_failure(task, .Timeout); return false
+		observe_failure(task, .Timeout)
+		return false
 	}
 	state.deadline = async.deadline_after(&task.runtime.executor, remaining)
 	method: http.Method = .GET
@@ -277,9 +286,12 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 		max_body_bytes = producer.max_body_bytes, scope = task.resource_operation}, allocator,
 	); initialized.kind != .None {
 		if initialized.kind == .Budget_Rejected || resource_pressure(task) {
-			drop_response_stream(task); return resource_reject(task)
+			drop_response_stream(task)
+			return resource_reject(task)
 		}
-		observe_failure(task, .Protocol_Error); return false
+
+		observe_failure(task, .Protocol_Error)
+		return false
 	}
 	status := response.status
 	if status == .None do status = .OK
@@ -290,13 +302,15 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 	}
 	if exchange.respond(&state.exchange, head).kind != .None {
 		if resource_pressure(task) {drop_response_stream(task); return resource_reject(task)}
-		observe_failure(task, .Protocol_Error); return false
+		observe_failure(task, .Protocol_Error)
+		return false
 	}
 	stored, _ := exchange.head(&state.exchange)
 	buffer, ae := make([]u8, RESPONSE_HEADER_LIMIT, mem.dynamic_arena_allocator(&task.arena))
 	if ae != nil {
 		if resource_pressure(task) {drop_response_stream(task); return resource_reject(task)}
-		observe_failure(task, .Allocation_Error); return false
+		observe_failure(task, .Allocation_Error)
+		return false
 	}
 	task.reuse_after_write = !response.close_connection && response_can_reuse(task, status)
 	profile: http1.Response_Profile = .Close
@@ -309,7 +323,8 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 		max_bytes = RESPONSE_HEADER_LIMIT,
 	)
 	if e.kind != .None {
-		observe_failure(task, .Protocol_Error); return false
+		observe_failure(task, .Protocol_Error)
+		return false
 	}
 	state.chunked = producer.content_length < 0
 	if !http.response_body_allowed(int(status), task.request.method) {
@@ -356,47 +371,56 @@ produce_stream :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	switch step {
 	case .Waiting:
 		if !io._waiting || io._submitted {
-			observe_failure(task, .Protocol_Error); return .Done
+			observe_failure(task, .Protocol_Error)
+			return .Done
 		}
 		return .Waiting
 	case .Yield:
 		if io._waiting || io._submitted {
-			observe_failure(task, .Protocol_Error); return .Done
+			observe_failure(task, .Protocol_Error)
+			return .Done
 		}
 		return .Yield
 	case .Chunk:
 		if !io._submitted || io._waiting {
-			observe_failure(task, .Protocol_Error); return .Done
+			observe_failure(task, .Protocol_Error)
+			return .Done
 		}
 		payload, ok := exchange.body(&state.exchange)
 		if !ok {
-			observe_failure(task, .Protocol_Error); return .Done
+			observe_failure(task, .Protocol_Error)
+			return .Done
 		}
 		state.pending = true
 		if state.chunked {
 			size := strconv.write_uint(state.prefix[:], u64(len(payload)), 16)
-			n := len(size); copy(state.prefix[n:], "\r\n")
+			n := len(size)
+			copy(state.prefix[n:], "\r\n")
 			task.output = {state.prefix[:n + 2], payload, transmute([]u8)string("\r\n")}
 		} else {
 			task.output = {nil, payload, nil}
 		}
 		if !stream_write_budget(task) {
-			observe_failure(task, .Timeout); return .Done
+			observe_failure(task, .Timeout)
+			return .Done
 		}
 		return .Yield
 	case .Done:
 		if io._submitted || io._waiting || exchange.finish(&state.exchange).kind != .None {
-			observe_failure(task, .Protocol_Error); return .Done
+			observe_failure(task, .Protocol_Error)
+			return .Done
 		}
 		state.terminal = true
 		task.output = {}
 		if state.chunked do task.output[0] = transmute([]u8)string("0\r\n\r\n")
 		if !stream_write_budget(task) {
-			observe_failure(task, .Timeout); return .Done
+			observe_failure(task, .Timeout)
+			return .Done
 		}
 		return .Yield
 	case .Failed:
-		observe_failure(task, .IO_Error); return .Done
+		observe_failure(task, .IO_Error)
+		return .Done
 	}
 	return .Done
 }
@@ -408,12 +432,14 @@ stream_write_complete :: proc(task: ^Connection_Task) -> (produce, ok: bool) {
 	if state.pending {
 		state.pending = false
 		if !exchange.release_body(&state.exchange) {
-			observe_failure(task, .Protocol_Error); return false, false
+			observe_failure(task, .Protocol_Error)
+			return false, false
 		}
 	}
 	if !state.terminal do return true, true
 	if exchange.complete(&state.exchange).kind != .None {
-		observe_failure(task, .Protocol_Error); return false, false
+		observe_failure(task, .Protocol_Error)
+		return false, false
 	}
 	drop_response_stream(task)
 	return false, true

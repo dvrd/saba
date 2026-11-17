@@ -44,7 +44,8 @@ State :: struct {
 // Preparation precedes listening; watcher and prepared storage retire after serve.
 serve :: proc(config:Config)->bool {
 	if (config.server.handler==nil)==(config.dispatch==nil) {
-		log.error("Exactly one application handler is required"); return false
+		log.error("Exactly one application handler is required")
+		return false
 	}
 	arena: mem.Dynamic_Arena
 	mem.dynamic_arena_init(&arena)

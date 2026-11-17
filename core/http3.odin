@@ -137,8 +137,10 @@ http3_create_request :: proc(owner: ^Http3, wire: ^http3.Server_Request) -> ^Htt
  task.runtime = owner.runtime
  task.connection = {_task=task, _secure=true, _peer_identity=wire.peer_identity, socket=net.TCP_Socket(-1), _timeouts=owner.runtime.timeouts}
  if !start_connection_resources(task) {
-  finish_operation_resources(task); budget.release_scope(&task.resource_connection)
-  free(state, rt.heap_allocator()); return nil
+  finish_operation_resources(task)
+  budget.release_scope(&task.resource_connection)
+  free(state, rt.heap_allocator())
+  return nil
  }
  init_connection_arena(task)
  allocator := mem.dynamic_arena_allocator(&task.arena)
@@ -152,7 +154,8 @@ http3_create_request :: proc(owner: ^Http3, wire: ^http3.Server_Request) -> ^Htt
    // HTTP3 :authority is the target authority. A legacy Host field cannot
    // override it when an application reads its ordinary header view.
    if wire.authority!="" && strings.equal_fold(field.name,"host") {continue}
-   headers[count]={field.name,field.value};count+=1
+   headers[count]={field.name,field.value}
+   count+=1
   }
   if wire.authority!="" {headers[count]={"host",wire.authority};count+=1}
   task.request.headers = headers[:count]
@@ -168,8 +171,11 @@ http3_create_request :: proc(owner: ^Http3, wire: ^http3.Server_Request) -> ^Htt
  task.request.request_id = owner.runtime.next_request_id
  sync.unlock(&owner.runtime.observability_mutex)
  if !begin_request_context(task) {
-  mem.dynamic_arena_destroy(&task.arena); finish_operation_resources(task)
-  budget.release_scope(&task.resource_connection); free(state, rt.heap_allocator()); return nil
+  mem.dynamic_arena_destroy(&task.arena)
+  finish_operation_resources(task)
+  budget.release_scope(&task.resource_connection)
+  free(state, rt.heap_allocator())
+  return nil
  }
  sync.atomic_add(&owner.runtime.active_connections, 1)
  owner.calls += 1
@@ -202,7 +208,8 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
    if !queue_deferred(task, response) {state.failed=true; return .Failed}
    // queue_deferred uses the TCP task by default. HTTP3's real owner is the
    // listener task; replace the signal before any continuation is polled.
-   signal.detach(task.deferred_signal); signal.release(&task.deferred_signal)
+   signal.detach(task.deferred_signal)
+   signal.release(&task.deferred_signal)
    created:=false
    task.deferred_signal, created = signal.create(&owner.runtime.executor, &owner.task)
    if !created do return .Failed
@@ -213,7 +220,8 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
  }
  if !state.ready {
   if deadline_expired(task.deferred_expires) {
-   cancel_request_context(task.request.cancellation, .Deadline); return .Failed
+   cancel_request_context(task.request.cancellation, .Deadline)
+   return .Failed
   }
   response, step := task.deferred.poll(task.deferred.data, &Deferred_IO{
    resources=task.resource_operation, backing_allocator=task.request.backing_allocator,
@@ -225,18 +233,21 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
    return .Pending
   }
   drop_deferred(task)
-  state.response = response; state.ready=true
+  state.response = response
+  state.ready=true
  }
  response := &state.response
  if handled,status:=http3_upgrade_response(owner,wire,state,out);handled {return status}
  if deferred_present(response.deferred) || response.upgrade.data != nil || response.upgrade.resume != nil || response.upgrade.drop != nil || response.status == .Switching_Protocols {
   // TCP upgrades have no HTTP3 transport. Reject explicitly and release their
   // transferred ownership through the ordinary response disposal path.
-  discard_response(response); response^ = {status=.Not_Implemented}
+  discard_response(response)
+  response^ = {status=.Not_Implemented}
  }
  if response.status == .None do response.status = .OK
  if owner.config.max_body>0 && len(response.body)>owner.config.max_body {
-  owner.rejected=true;return .Failed
+  owner.rejected=true
+  return .Failed
  }
  if stream_present(response.stream) && owner.config.max_body>0 {
   if response.stream.max_body_bytes==0 || response.stream.max_body_bytes>i64(owner.config.max_body) do response.stream.max_body_bytes=i64(owner.config.max_body)
@@ -269,13 +280,19 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
  trailers,te:=make([]http3.Field,len(response.trailers),task.request.allocator)
  if te!=nil {return .Failed}
  for field,i in response.trailers {
-  name,error:=strings.to_lower(field.name,task.request.allocator);if error!=nil {return .Failed}
+  name,error:=strings.to_lower(field.name,task.request.allocator)
+
+  if error!=nil {
+   return .Failed
+  }
   trailers[i]={name=name,value=field.value}
  }
  out.trailers=trailers
  if stream_present(response.stream) {
-  stream := response.stream; response.stream = {}
-  prepared := response^; prepared.stream = stream
+  stream := response.stream
+  response.stream = {}
+  prepared := response^
+  prepared.stream = stream
   if !queue_stream_response(task, prepared) do return .Failed
   out.stream = {data=state, next=http3_stream_next, drop=http3_stream_drop}
   // The stream owner already started its total lifetime and applied inherited
@@ -382,19 +399,30 @@ http3_upgrade_response :: proc(owner:^Http3,wire:^http3.Server_Request,state:^Ht
  if response.status!=.OK || stream_present(response.stream) || len(response.body)>0 {discard_response(response);out.status=500;return true,.Ready}
  task:=&state.connection
  if !resource_copy_response(task,response) {return true,.Failed}
- fields,error:=make([]http3.Field,len(response.headers),task.request.allocator);if error!=nil {return true,.Failed}
+ fields,error:=make([]http3.Field,len(response.headers),task.request.allocator)
+
+ if error!=nil {
+  return true,.Failed
+ }
  for header,i in response.headers {
-  name,e:=strings.to_lower(header.name,task.request.allocator);if e!=nil {return true,.Failed}
+  name,e:=strings.to_lower(header.name,task.request.allocator)
+
+  if e!=nil {
+   return true,.Failed
+  }
   fields[i]={name=name,value=header.value}
  }
- task.upgrade=response.upgrade;response.upgrade={}
- out.status=200;out.headers=fields
+ task.upgrade=response.upgrade
+ response.upgrade={}
+ out.status=200
+ out.headers=fields
  out.duplex={data=state,resume=http3_upgrade_resume,drop=http3_upgrade_drop}
  return true,.Ready
 }
 @(private)
 http3_upgrade_resume :: proc(data:rawptr,endpoint:^http3.Connect_Stream)->http3.Duplex_Status {
- state:=cast(^Http3_Request)data;task:=&state.connection
+ state:=cast(^Http3_Request)data
+ task:=&state.connection
  if endpoint.cancelled {cancel_request_context(task.request.cancellation,.Peer_Closed)}
  if task.upgrade.resume==nil {return .Done}
  transport:=Http3_Upgrade_IO{state,endpoint}
@@ -416,13 +444,15 @@ http3_upgrade_error :: proc(status:http3.Connect_IO_Status)->async.Error {
 http3_upgrade_read :: proc(data:rawptr,dst:[]u8,deadline:async.Deadline)->(int,async.Error) {
  io:=cast(^Http3_Upgrade_IO)data
  if http3_upgrade_expired(io,deadline) {return 0,{kind=.Timeout}}
- n,status:=http3.connect_read(io.endpoint,dst);return n,http3_upgrade_error(status)
+ n,status:=http3.connect_read(io.endpoint,dst)
+ return n,http3_upgrade_error(status)
 }
 @(private)
 http3_upgrade_write :: proc(data:rawptr,src:[]u8,deadline:async.Deadline)->(int,async.Error) {
  io:=cast(^Http3_Upgrade_IO)data
  if http3_upgrade_expired(io,deadline) {return 0,{kind=.Timeout}}
- n,status:=http3.connect_write(io.endpoint,src);return n,http3_upgrade_error(status)
+ n,status:=http3.connect_write(io.endpoint,src)
+ return n,http3_upgrade_error(status)
 }
 @(private)
 http3_upgrade_wait :: proc(data:rawptr,read,write:bool,deadline:async.Deadline)->async.Error {

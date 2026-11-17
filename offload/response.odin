@@ -61,7 +61,8 @@ response_with_unmanaged_bytes :: proc(
 	state, error := new(State, rt.heap_allocator())
 	if error != nil || state == nil do return {}, false
 	state.lane, state.work, state.build = lane, work^, build
-	state.unmanaged_bytes = unmanaged_bytes; work^ = {}
+	state.unmanaged_bytes = unmanaged_bytes
+	work^ = {}
 	return {deferred = {data = state, poll = poll_result, drop = drop, timeout = timeout}}, true
 }
 
@@ -70,7 +71,8 @@ wake :: proc(data: rawptr) {_ = signal.wake((cast(^Notice)data).signal)}
 @(private)
 drop_notice :: proc(data: rawptr) {
 	notice := cast(^Notice)data
-	signal.release(&notice.signal); free(notice, rt.heap_allocator())
+	signal.release(&notice.signal)
+	free(notice, rt.heap_allocator())
 }
 
 @(private)
@@ -79,7 +81,8 @@ start :: proc(state: ^State, io: ^server.Deferred_IO) -> pool.Error {
 	if error != nil || notice == nil do return .Allocation_Failed
 	retained, ok := signal.retain(io.wake)
 	if !ok {
-		free(notice, rt.heap_allocator()); return .Invalid_Config
+		free(notice, rt.heap_allocator())
+		return .Invalid_Config
 	}
 	notice.signal = retained
 	notification := pool.Notification{notice, wake, drop_notice}
@@ -92,7 +95,8 @@ start :: proc(state: ^State, io: ^server.Deferred_IO) -> pool.Error {
 		state.unmanaged_bytes,
 	)
 	if admission != .None {
-		drop_notice(notice); return admission
+		drop_notice(notice)
+		return admission
 	}
 	state.handle, state.started = handle, true
 	return .None
@@ -123,7 +127,8 @@ poll_result :: proc(
 	case .Succeeded:
 		response, ok := state.build(view.data, io.allocator)
 		if !ok {
-			server.discard_response(&response); return {}, .Failed
+			server.discard_response(&response)
+			return {}, .Failed
 		}
 		return response, .Ready
 	case .Expired:
@@ -140,7 +145,8 @@ poll_result :: proc(
 drop :: proc(data: rawptr) {
 	state := cast(^State)data
 	if state.started {
-		_ = pool.cancel(state.handle); _ = pool.release(&state.handle)
+		_ = pool.cancel(state.handle)
+		_ = pool.release(&state.handle)
 	} else if state.work.drop != nil {
 		state.work.drop(state.work.data)
 	}

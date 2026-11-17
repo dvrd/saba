@@ -43,30 +43,39 @@ develop :: proc(config: Development) -> (handled, success: bool) {
 	if os.get_env(DEVELOPMENT_CHILD, context.temp_allocator) != "" do return false, true
 	handled = true
 	if !os.is_dir(config.package_directory) {
-		log.error("Development package directory is missing"); return
+		log.error("Development package directory is missing")
+		return
 	}
 	compiler := development_compiler(config)
 	paths, paths_ready := development_paths(config, compiler)
 	if !paths_ready {return}
 	executable, located := os.get_executable_path(context.temp_allocator)
 	if located != nil {
-		log.error("Could not locate development executable"); return
+		log.error("Could not locate development executable")
+		return
 	}
 	directory, created := os.make_directory_temp("", "saba-development-*", context.temp_allocator)
 	if created != nil {
-		log.error("Could not create development build directory"); return
+		log.error("Could not create development build directory")
+		return
 	}
 	defer _ = os.remove_all(directory)
 	environment := make([dynamic]string, context.temp_allocator)
 	inherited, env_error := os.environ(context.temp_allocator)
 	if env_error != nil {
-		log.error("Could not inherit development environment"); return
+		log.error("Could not inherit development environment")
+		return
 	}
 	append(&environment, ..inherited)
 	append(&environment, DEVELOPMENT_CHILD + "=1")
 	command := make([]string, len(os.args), context.temp_allocator)
-	copy(command, os.args); command[0] = executable
-	observed, scanned := development_signature(paths[:]); if !scanned do return
+	copy(command, os.args)
+	command[0] = executable
+	observed, scanned := development_signature(paths[:])
+
+	if !scanned {
+		return
+	}
 	child, started := os.process_start(
 		{
 			command = command,
@@ -77,7 +86,8 @@ develop :: proc(config: Development) -> (handled, success: bool) {
 		},
 	)
 	if started != nil {
-		log.error("Could not start development server", started); return
+		log.error("Could not start development server", started)
+		return
 	}
 	active := true
 	defer if active do development_stop(child)
@@ -119,16 +129,19 @@ development_paths :: proc(config: Development, compiler: string) -> ([]string, b
 			context.temp_allocator,
 		)
 		if err != nil || !state.success {
-			log.error("Could not locate Odin shared packages", string(errors)); return nil, false
+			log.error("Could not locate Odin shared packages", string(errors))
+			return nil, false
 		}
 		root := strings.trim_space(string(output))
 		for name in config.shared_packages {
 			if name == "" || strings.contains_any(name, "/\\") || name == "." || name == ".." {
-				log.error("Invalid shared package name"); return nil, false
+				log.error("Invalid shared package name")
+				return nil, false
 			}
 			path, _ := filepath.join({root, "shared", name}, context.temp_allocator)
 			if !os.is_dir(path) {
-				log.error("Development shared package is missing:", path); return nil, false
+				log.error("Development shared package is missing:", path)
+				return nil, false
 			}
 			append(&paths, path)
 		}
@@ -155,9 +168,14 @@ development_supervise :: proc(
 				log.error("Development server exited; edit a watched file to rebuild")
 			}
 		}
-		current, valid := development_signature(paths[:]); if !valid do continue
+		current, valid := development_signature(paths[:])
+
+		if !valid {
+			continue
+		}
 		if current != observed {
-			observed = current; continue
+			observed = current
+			continue
 		}
 		if current == published do continue
 		published = current
@@ -167,7 +185,8 @@ development_supervise :: proc(
 		built, build_started := development_build(config, compiler, next)
 		latest, checked := development_signature(paths[:])
 		if !built || !checked || latest != current || sync.atomic_load(&development_stopping) {
-			_ = os.remove(next); delete(next)
+			_ = os.remove(next)
+			delete(next)
 			if !sync.atomic_load(&development_stopping) {
 				if !built {
 					log.error(
@@ -186,7 +205,8 @@ development_supervise :: proc(
 		)
 		if active^ do development_stop(child^)
 		active^ = false
-		previous := command[0]; command[0] = next
+		previous := command[0]
+		command[0] = next
 		next_child, start_error := os.process_start(
 			{
 				command = command,
@@ -200,10 +220,12 @@ development_supervise :: proc(
 		if start_error != nil {
 			log.error("Could not start rebuilt server", start_error)
 		} else {
-			active^ = true; log.info("Backend restarted; connected browsers will refresh")
+			active^ = true
+			log.info("Backend restarted; connected browsers will refresh")
 		}
 		if previous != executable {
-			_ = os.remove(previous); delete(previous)
+			_ = os.remove(previous)
+			delete(previous)
 		}
 	}
 }
@@ -218,7 +240,8 @@ development_build :: proc(config: Development, compiler, next: string) -> (bool,
 	}
 	if !optimized do append(&args, "-o:none")
 	append(&args, ..config.build_arguments)
-	flag := fmt.aprintf("-out:%s", next); append(&args, flag)
+	flag := fmt.aprintf("-out:%s", next)
+	append(&args, flag)
 	log.info("Server source changed; rebuilding while the current server stays available")
 	build_started := time.tick_now()
 	builder, err := os.process_start(
@@ -230,15 +253,20 @@ development_build :: proc(config: Development, compiler, next: string) -> (bool,
 		for !sync.atomic_load(&development_stopping) {
 			state, waiting := os.process_wait(builder, 100 * time.Millisecond)
 			if waiting == nil && state.exited {
-				builder_running = false; built = state.success && state.exit_code == 0; break
+				builder_running = false
+				built = state.success && state.exit_code == 0
+				break
 			}
 			if waiting != nil && waiting != os.General_Error.Timeout {
-				development_stop(builder); builder_running = false; break
+				development_stop(builder)
+				builder_running = false
+				break
 			}
 		}
 		if builder_running do development_stop(builder)
 	}
-	delete(args); delete(flag)
+	delete(args)
+	delete(flag)
 	return built, build_started
 }
 
@@ -247,7 +275,8 @@ development_stop :: proc(process: os.Process) {
 	_ = os.process_terminate(process)
 	state, err := os.process_wait(process, 2 * time.Second)
 	if err != nil || !state.exited {
-		_ = os.process_kill(process); _, _ = os.process_wait(process)
+		_ = os.process_kill(process)
+		_, _ = os.process_wait(process)
 	}
 }
 
@@ -273,7 +302,8 @@ development_signature :: proc(paths: []string) -> (signature: u64, ok: bool) {
 			if strings.contains(info.fullpath, "/.git/") do continue
 			bytes, err := os.read_entire_file(info.fullpath, context.allocator)
 			if err != nil {
-				ok = false; break
+				ok = false
+				break
 			}
 			signature ~= hash.fnv64a(bytes, hash.fnv64a(transmute([]byte)info.fullpath))
 			delete(bytes)
@@ -640,7 +670,8 @@ upgrade_websocket :: proc(conn: ^Connection, request: ^Request) -> bool {
 	storage: [28]u8
 	accept, status := websocket_accept(request, storage[:])
 	if status != .None {
-		send_empty_response(conn, status); return false
+		send_empty_response(conn, status)
+		return false
 	}
 	return send_response(
 		conn,

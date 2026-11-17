@@ -90,13 +90,21 @@ main :: proc() {
 	for _ in 0 ..< 5000 {
 		endpoint, ready := server.server_endpoint(&state.control)
 		if ready {
-			fmt.printf("ready %d\n", endpoint.port); os.flush(os.stdout); break
+			fmt.printf("ready %d\n", endpoint.port)
+			os.flush(os.stdout)
+			break
 		}
 		time.sleep(time.Millisecond)
 	}
-	_, ready := server.server_endpoint(&state.control); assert(ready)
+	_, ready := server.server_endpoint(&state.control)
+	assert(ready)
 	// GET /events with curl -N; press Enter to stop cooperatively.
-	command: [1]u8; os.read(os.stdin, command[:]); server.stop_server(&state.control)
-	thread.join(worker); thread.destroy(worker); assert(state.result)
-	fmt.println("stopped"); os.flush(os.stdout)
+	command: [1]u8
+	os.read(os.stdin, command[:])
+	server.stop_server(&state.control)
+	thread.join(worker)
+	thread.destroy(worker)
+	assert(state.result)
+	fmt.println("stopped")
+	os.flush(os.stdout)
 }

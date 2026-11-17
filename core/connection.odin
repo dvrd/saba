@@ -210,11 +210,13 @@ serve :: proc(config: Server) -> bool {
 	if !http2_config_valid(config.http2) {log.error("Invalid HTTP2 concurrency limit"); return false}
 	if !tls_config_valid(config.tls) {log.error("Invalid TLS configuration"); return false}
 	if !claim_server(config.control) {
-		log.error("Server control is already in use"); return false
+		log.error("Server control is already in use")
+		return false
 	}
 	defer release_server(config.control)
 	if !drain_duration_valid(config.drain_timeout) {
-		log.error("Invalid server drain_timeout"); return false
+		log.error("Invalid server drain_timeout")
+		return false
 	}
 	initial, maximum, workers, valid := server_limits(config)
 	if !valid do return false
@@ -242,7 +244,8 @@ serve :: proc(config: Server) -> bool {
 
 	runtime, allocation_error := new(Server_Runtime)
 	if allocation_error != nil {
-		log.error("Could not allocate server runtime:", allocation_error); return false
+		log.error("Could not allocate server runtime:", allocation_error)
+		return false
 	}
 	defer free(runtime)
     cancellation,ce:=new(Server_Cancellation,rt.heap_allocator())
@@ -278,11 +281,13 @@ serve :: proc(config: Server) -> bool {
 		runtime.http3.config = config.http3
 		runtime.http3.runtime = runtime
 		if _, ok := http3_listen(&runtime.http3); !ok {
-			log.error("Could not start HTTP3 listener"); return false
+			log.error("Could not start HTTP3 listener")
+			return false
 		}
 		runtime.http3.task = {resume=http3_resume, data=&runtime.http3, on_done=http3_retire}
 		if e := async.spawn(&runtime.executor, &runtime.http3.task); e.kind != .None {
-			http3_close(&runtime.http3); return false
+			http3_close(&runtime.http3)
+			return false
 		}
 	}
 	runtime.accept_task = {
@@ -290,7 +295,8 @@ serve :: proc(config: Server) -> bool {
 		data   = runtime,
 	}
 	if err := async.register(&runtime.executor, &runtime.accept_task); err.kind != .None {
-		log.error("Could not register listener task:", err); return false
+		log.error("Could not register listener task:", err)
+		return false
 	}
 	listener, listen_error := async.listen(
 		&runtime.executor,
@@ -298,12 +304,14 @@ serve :: proc(config: Server) -> bool {
 		{address, config.port},
 	)
 	if listen_error.kind != .None {
-		log.error("Could not start server:", listen_error); return false
+		log.error("Could not start server:", listen_error)
+		return false
 	}
 	runtime.listener = listener
 	endpoint, endpoint_error := async.bound_endpoint(listener)
 	if endpoint_error.kind != .None {
-		log.error("Could not obtain listening address:", endpoint_error); return false
+		log.error("Could not obtain listening address:", endpoint_error)
+		return false
 	}
 	publish_server(config.control, runtime, endpoint)
 	async.wake(&runtime.executor, &runtime.accept_task)
@@ -376,12 +384,14 @@ server_admit_connection :: proc(runtime: ^Server_Runtime, client: net.TCP_Socket
 	sync.unlock(&runtime.drain_mutex)
 	if !allowed {reject_connection(client, runtime.config.tls != nil); return}
 	if !server_capacity_admit(runtime) {
-		reject_connection(client, runtime.config.tls != nil); return
+		reject_connection(client, runtime.config.tls != nil)
+		return
 	}
 	task, allocation_error := new(Connection_Task)
 	if allocation_error != nil {
 		server_capacity_allocation_failed(runtime)
-		reject_connection(client, runtime.config.tls != nil); return
+		reject_connection(client, runtime.config.tls != nil)
+		return
 	}
 	task^ = {
 		runtime = runtime,
@@ -392,7 +402,9 @@ server_admit_connection :: proc(runtime: ^Server_Runtime, client: net.TCP_Socket
 	if !start_connection_resources(task) {
 		server_capacity_allocation_failed(runtime)
 		budget.release_scope(&task.resource_connection)
-		reject_connection(client, runtime.config.tls != nil); free(task); return
+		reject_connection(client, runtime.config.tls != nil)
+		free(task)
+		return
 	}
 	init_connection_arena(task)
 	task.task = {
@@ -578,7 +590,8 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 	if async.cancelled(&task.task) do tls_start_close(task, true)
 	if !state.closing && state.handshake_done && !state.ready {
 		if state.error.kind != .None {
-			tls_event(task, .Handshake); tls_start_close(task, false)
+			tls_event(task, .Handshake)
+			tls_start_close(task, false)
 		} else if bridge.set_request_budget(&state.executor, {}).kind == .None {
 			state.ready = true
 			selected := tls.server_async_connection_state(&state.owner).negotiated_protocol

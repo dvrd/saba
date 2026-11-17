@@ -133,10 +133,13 @@ protocol_close :: proc(session: ^Session, code: u16, reason: Close_Reason) {
 accept_header :: proc(session: ^Session, io: ^IO) -> Step {
 	header, _, error := codec.frame_header_decode(session.input_header[:session.header_used], true)
 	if error != .None {
-		session.event.frame = error; protocol_close(session, 1002, .Protocol_Error); return .Progress
+		session.event.frame = error
+		protocol_close(session, 1002, .Protocol_Error)
+		return .Progress
 	}
 	if header.payload_length > u64(session.config.max_frame_bytes) {
-		protocol_close(session, 1009, .Protocol_Error); return .Progress
+		protocol_close(session, 1009, .Protocol_Error)
+		return .Progress
 	}
 	session.header = header
 	if u8(header.opcode) >= 8 {
@@ -144,7 +147,8 @@ accept_header :: proc(session: ^Session, io: ^IO) -> Step {
 	} else {
 		if session.close_requested {return .Done}
 		if session.fragments == session.config.max_fragments {
-			protocol_close(session, 1009, .Protocol_Error); return .Progress
+			protocol_close(session, 1009, .Protocol_Error)
+			return .Progress
 		}
 		session.fragments += 1
 		if session.message_deadline.epoch == 0 {
@@ -157,7 +161,8 @@ accept_header :: proc(session: ^Session, io: ^IO) -> Step {
 			code := u16(1002)
 			if allocation.kind == .Message_Oversized do code = 1009
 			if allocation.kind == .Allocation_Failed do code = 1011
-			protocol_close(session, code, .Protocol_Error); return .Progress
+			protocol_close(session, code, .Protocol_Error)
+			return .Progress
 		}
 		session.payload = payload
 		session.metrics.peak_message_bytes = max(session.metrics.peak_message_bytes, len(session.message.message))
@@ -191,7 +196,8 @@ finish_frame :: proc(session: ^Session, io: ^IO) -> Step {
 		error := codec.message_finish(&session.message, session.header.fin)
 		if error.kind != .None {
 			session.event.message = error
-			protocol_close(session, 1007, .Protocol_Error); return .Progress
+			protocol_close(session, 1007, .Protocol_Error)
+			return .Progress
 		}
 		if session.message.message_ready {
 			session.metrics.messages_in += 1
@@ -216,7 +222,9 @@ read_step :: proc(session: ^Session, io: ^IO) -> Step {
 			// than Header_Incomplete is a real prefix violation.
 			_, _, error := codec.frame_header_decode(session.input_header[:2], true)
 			if error != .Header_Incomplete {
-				session.event.frame = error; protocol_close(session, 1002, .Protocol_Error); return .Progress
+				session.event.frame = error
+				protocol_close(session, 1002, .Protocol_Error)
+				return .Progress
 			}
 			length := session.input_header[1] & 127
 			session.header_expected = 6
@@ -638,7 +646,8 @@ prepare_upgrade :: proc(request: ^core.Request, config: Config, app: Application
 		if protocol!="" {
 			allocated,header_error:=make([]core.Header,1,request.allocator)
 			if header_error!=nil do return {},{kind=.Allocation_Failed,allocation=header_error,status=.Internal_Server_Error}
-			headers=allocated;headers[0]={"sec-websocket-protocol",session.protocol}
+			headers=allocated
+			headers[0]={"sec-websocket-protocol",session.protocol}
 		}
 	} else {
 		accept, accept_error := make([]u8, 28, request.allocator)

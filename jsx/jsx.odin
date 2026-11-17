@@ -240,7 +240,8 @@ jsx_element :: proc(p: ^JSX_Parser) {
 				for i in 0 ..< len(part) {
 					if (i == 0 && !jsx_identifier_start(part[i])) ||
 					   (i > 0 && !jsx_identifier_part(part[i])) {
-						jsx_fail(p, "Invalid JSX component member name");return
+						jsx_fail(p, "Invalid JSX component member name")
+						return
 					}
 				}
 			}
@@ -387,7 +388,8 @@ jsx_entity_string :: proc(p: ^JSX_Parser, text: string) {
 				if c >= 'a' && c <= 'f' {digit = int(c - 'a') + 10}
 				if c >= 'A' && c <= 'F' {digit = int(c - 'A') + 10}
 				if digit < 0 || digit >= base || r > 0x10ffff / rune(base) {
-					jsx_fail(p, "Invalid numeric JSX entity");return
+					jsx_fail(p, "Invalid numeric JSX entity")
+					return
 				}
 				r = r * rune(base) + rune(digit)
 			}

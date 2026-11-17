@@ -135,7 +135,8 @@ prepare_representation :: proc(body: []u8, content_type: string) -> Prepared_Rep
 	sha2.init_256(&hasher)
 	sha2.update(&hasher, body)
 	sha2.final(&hasher, digest[:])
-	prepared.tag[0] = '"'; prepared.tag[65] = '"'
+	prepared.tag[0] = '"'
+	prepared.tag[65] = '"'
 	alphabet := "0123456789abcdef"
 	for byte, index in digest {
 		prepared.tag[1+index*2] = alphabet[byte>>4]
@@ -242,7 +243,8 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 	if status == .Partial_Content {
 		value := fmt.aprintf("bytes %d-%d/%d", start, start+length-1, info.size, allocator=request.allocator)
 		if value == "" do return {status=.Internal_Server_Error}
-		headers[count] = {"Content-Range", value}; count += 1
+		headers[count] = {"Content-Range", value}
+		count += 1
 	}
 	response := make_response(request, status, headers[:count])
 	if response.status == .Internal_Server_Error do return response
@@ -250,7 +252,8 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 	if !prepared do return {status=.Internal_Server_Error}
 	producer, error := new(File_Producer, allocator)
 	if error != nil || producer == nil {
-		charged.release(&binding); return {status=.Internal_Server_Error}
+		charged.release(&binding)
+		return {status=.Internal_Server_Error}
 	}
 	producer^ = {file=file, offset=start, remaining=length, chunk_bytes=chunk_bytes,
 		allocator=allocator, binding=binding}
@@ -301,7 +304,8 @@ file_next :: proc(data: rawptr, io: ^core.Stream_IO) -> core.Stream_Step {
 		owned.destroy(&chunk)
 		return .Failed
 	}
-	producer.offset += i64(n); producer.remaining -= i64(n)
+	producer.offset += i64(n)
+	producer.remaining -= i64(n)
 	return .Chunk
 }
 
@@ -342,7 +346,8 @@ not_modified :: proc(request: ^Request, tag: string) -> bool {
 		fields += 1
 		if strings.trim(field.value, " \t") == "*" do stars += 1
 		found, ok := http.if_none_match(field.value, tag)
-		matched = matched || found; valid = valid && ok
+		matched = matched || found
+		valid = valid && ok
 	}
 	return matched && valid && (stars == 0 || fields == 1)
 }
@@ -511,7 +516,8 @@ prepare_assets_bounded :: proc(
 	for mount, index in mounts {
 		error := preload_mount(&caches[index], mount, l, &counts, allocator)
 		if error.kind != .None {
-			error.mount_index = index; return nil, error
+			error.mount_index = index
+			return nil, error
 		}
 	}
 	success = true
@@ -524,11 +530,13 @@ destroy_assets :: proc(caches: ^[]Asset_Cache, allocator: mem.Allocator) {
 	if caches == nil {
 		return
 	}
-	old := caches^; caches^ = nil
+	old := caches^
+	caches^ = nil
 	for cache in old {
 		for key, value in cache.files {delete(key, allocator); delete(value.body, allocator)}
 		delete(cache.files)
-		delete(cache.mount.directory, allocator); delete(cache.mount.prefix, allocator)
+		delete(cache.mount.directory, allocator)
+		delete(cache.mount.prefix, allocator)
 	}
 	delete(old, allocator)
 }
@@ -596,11 +604,13 @@ preload_mount :: proc(
 		return {kind = .Allocation_Failed, allocation = qe}
 	}
 	if _, pe := append(&pending, first); pe != nil {
-		delete(first, pending.allocator); return {kind = .Allocation_Failed, allocation = pe}
+		delete(first, pending.allocator)
+		return {kind = .Allocation_Failed, allocation = pe}
 	}
 	for head := 0; head < len(pending); head += 1 {
 		error := preload_directory(cache, pending[head], &pending, l, counts, allocator, &scratch)
-		delete(pending[head], pending.allocator); pending[head] = ""
+		delete(pending[head], pending.allocator)
+		pending[head] = ""
 		if error.kind != .None {
 			return error
 		}
@@ -703,14 +713,17 @@ preload_directory :: proc(
 		}
 		key, ke := strings.clone(relative, allocator)
 		if ke != nil || raw_data(key) == nil {
-			delete(body, allocator); return {kind = .Allocation_Failed, allocation = ke}
+			delete(body, allocator)
+			return {kind = .Allocation_Failed, allocation = ke}
 		}
 		if len(cache.files) > max(int) / 2 - 1 {
-			delete(key, allocator); delete(body, allocator)
+			delete(key, allocator)
+			delete(body, allocator)
 			return {kind = .File_Limit, limit = l.max_files, observed = len(cache.files)}
 		}
 		if me := reserve(&cache.files, 2 * (len(cache.files) + 1)); me != nil {
-			delete(key, allocator); delete(body, allocator)
+			delete(key, allocator)
+			delete(body, allocator)
 			return {kind = .Allocation_Failed, allocation = me}
 		}
 		inserted, me := map_insert(
@@ -719,10 +732,12 @@ preload_directory :: proc(
 			Asset_File{body, asset_content_type(relative)},
 		)
 		if me != nil || inserted == nil {
-			delete(key, allocator); delete(body, allocator)
+			delete(key, allocator)
+			delete(body, allocator)
 			return {kind = .Allocation_Failed, allocation = me}
 		}
-		counts.files += 1; counts.bytes += len(body)
+		counts.files += 1
+		counts.bytes += len(body)
 	}
 	_, ie := os.read_directory_iterator_error(&iterator)
 	if ie != nil {

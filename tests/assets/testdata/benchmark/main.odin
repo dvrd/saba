@@ -1,7 +1,7 @@
 #+build darwin
 package main
 
-import assets "../../.."
+import assets "../../../../assets"
 import "core:crypto/hash"
 import "core:encoding/hex"
 import "core:fmt"

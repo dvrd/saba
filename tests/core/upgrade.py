@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import argparse,json,os,queue,socket,struct,subprocess,tempfile,threading
 from pathlib import Path
-CORE=Path(__file__).resolve().parents[1]
+CORE=Path(__file__).resolve().parents[2]/'core'
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--sanitize',choices=['address','thread']);args=parser.parse_args()

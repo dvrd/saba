@@ -1,6 +1,6 @@
 package saba_offload_test
 
-import adapter ".."
+import adapter "../../offload"
 import server "../../core"
 import "core:testing"
 import "core:time"

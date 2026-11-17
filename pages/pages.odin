@@ -17,10 +17,13 @@ Page_Mount :: struct {
 	module_prefix: string,
 }
 
+// Production prepares each route's HTML once into `routes`. Development keeps
+// only the route -> module URL table in `modules` and rebuilds pages per request.
 Page_Cache :: struct {
-	mount:  Page_Mount,
-	shell:  string,
-	routes: map[string]string,
+	mount:   Page_Mount,
+	shell:   string,
+	routes:  map[string]assets.Prepared_Representation,
+	modules: map[string]string,
 }
 
 // Page routes and HTML borrow the server's arena, just like compiled modules.
@@ -66,8 +69,8 @@ prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allo
 
 	cache := Page_Cache {
 		mount  = mount,
-		shell  = string(source),
-		routes = make(map[string]string, allocator),
+		shell   = string(source),
+		modules = make(map[string]string, allocator),
 	}
 
 	sources := make(map[string]string, allocator)
@@ -126,14 +129,40 @@ prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allo
 		sources[route] = owned_source
 		encoded := net.percent_encode(stem, allocator)
 		encoded, _ = strings.replace_all(encoded, "%2F", "/", allocator)
-		cache.routes[route] = fmt.aprintf("%s%s.js", mount.module_prefix, encoded, allocator = allocator)
+		cache.modules[route] = fmt.aprintf("%s%s.js", mount.module_prefix, encoded, allocator = allocator)
 	}
 
 	if _, walk_error := os.walker_error(&walker); walk_error != nil {
 		log.error("Could not scan page directory"); return {}, false
 	}
 
+	if development {
+		return cache, true
+	}
+
+	cache.routes = make(map[string]assets.Prepared_Representation, allocator)
+
+	for route, module_url in cache.modules {
+		html := page_html(cache.shell, module_url, allocator)
+		cache.routes[route] = assets.prepare_representation(transmute([]u8)html, "text/html; charset=utf-8")
+	}
+
+	// Production serves only the prepared bytes; the table lives in the caller's arena.
+	cache.modules = nil
+
 	return cache, true
+}
+
+page_html :: proc(shell, module_url: string, allocator: mem.Allocator) -> string {
+	entry := fmt.aprintf(
+		`<script type="module" src="%s" data-page="%s"></script>`,
+		modules.PAGE_ENTRY_URL,
+		page_attribute(module_url, allocator),
+		allocator = allocator,
+	)
+	html, _ := strings.replace_all(shell, "<!--saba:page-->", entry, allocator)
+
+	return html
 }
 
 serve_prepared_pages :: proc(request: ^Request, cache: Page_Cache, development: bool) -> (Response, bool) {
@@ -144,29 +173,31 @@ serve_prepared_pages :: proc(request: ^Request, cache: Page_Cache, development: 
 	if !decoded || !strings.has_prefix(path, "/") || (path != "/" && !module_relative_ok(path[1:])) {
 		return {}, false
 	}
-	current := cache
 
-	if development {
-		fresh, ok := prepare_pages(cache.mount, true, request.allocator)
-		if !ok {
-			return Response{status = .Internal_Server_Error}, true
+	if !development {
+		prepared, found := cache.routes[path]
+		if !found {
+			return {}, false
 		}
-		current = fresh
+
+		return assets.prepared_representation_response(request, &prepared), true
 	}
 
-	module_url, found := current.routes[path]
+	current, ok := prepare_pages(cache.mount, true, request.allocator)
+
+	if !ok {
+		return Response{status = .Internal_Server_Error}, true
+	}
+
+	module_url, found := current.modules[path]
+
 	if !found {
 		return {}, false
 	}
-	entry := fmt.aprintf(
-		`<script type="module" src="%s" data-page="%s"></script>`,
-		modules.PAGE_ENTRY_URL,
-		page_attribute(module_url, request.allocator),
-		allocator = request.allocator,
-	)
-	html, _ := strings.replace_all(current.shell, "<!--saba:page-->", entry, request.allocator)
 
-	return assets.representation_response(request, transmute([]u8)html, "text/html; charset=utf-8", development), true
+	html := page_html(current.shell, module_url, request.allocator)
+
+	return assets.representation_response(request, transmute([]u8)html, "text/html; charset=utf-8", true), true
 }
 
 page_attribute :: proc(value: string, allocator: mem.Allocator) -> string {

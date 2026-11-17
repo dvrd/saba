@@ -240,7 +240,7 @@ client :: proc(
 	)
 	fmt.printf("OPEN error=%v phase=%v\n", error.kind, error.phase)
 	assert(error.kind == .None)
-	defer surf.websocket_release_message(&conn)
+	defer codec.message_release(&conn.message_state)
 	assert(surf.websocket_subprotocol(&conn) == "chat.v2")
 	conn2: surf.WebSocket_Conn
 	tunnel2: surf.HTTP2_Tunnel
@@ -248,7 +248,7 @@ client :: proc(
 		surf.websocket_http2_open(&http, &tunnel2, &conn2, url, {origin = "https://allowed.invalid", subprotocols = {"chat.v2"}}).kind ==
 		.None,
 	)
-	defer surf.websocket_release_message(&conn2)
+	defer codec.message_release(&conn2.message_state)
 	response, re := surf.http_client_exchange(&http, {method = .GET, url = health})
 	assert(re.kind == .None && string(response.body) == "http-ok")
 	if identity != nil {

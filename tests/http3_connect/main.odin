@@ -281,7 +281,7 @@ client :: proc(
 	)
 	fmt.printf("OPEN error=%v phase=%v\n", error.kind, error.phase)
 	assert(error.kind == .None)
-	defer surf.websocket_release_message(&conn)
+	defer codec.message_release(&conn.message_state)
 	assert(surf.websocket_subprotocol(&conn) == "chat.v2")
 	conn2: surf.WebSocket_Conn
 	tunnel2: surf.HTTP3_Tunnel
@@ -289,7 +289,7 @@ client :: proc(
 		surf.websocket_http3_open(&http, &tunnel2, &conn2, url, {origin = "https://allowed.invalid", subprotocols = {"chat.v2"}}).kind ==
 		.None,
 	)
-	defer surf.websocket_release_message(&conn2)
+	defer codec.message_release(&conn2.message_state)
 	conn3: surf.WebSocket_Conn
 	tunnel3: surf.HTTP3_Tunnel
 	assert(
@@ -300,7 +300,7 @@ client :: proc(
 	expired: [1]u8
 	_, _, expired_error := surf.websocket_read_message(&conn3, expired[:])
 	assert(expired_error.kind != .None)
-	surf.websocket_release_message(&conn3)
+	codec.message_release(&conn3.message_state)
 	for _ in 0 ..< 6 {
 		health_response, health_error := surf.http_client_exchange(&http, {method = .GET, url = health})
 		assert(health_error.kind == .None && string(health_response.body) == "http-ok")
@@ -357,7 +357,7 @@ client :: proc(
 	)
 	surf.http_client_close(&http)
 	assert(live_tunnel.wire.owner == nil)
-	surf.websocket_release_message(&live_socket)
+	codec.message_release(&live_socket.message_state)
 	h3.pool_close(&pool)
 	if identity != nil {
 		view, e := store.stats(identity)

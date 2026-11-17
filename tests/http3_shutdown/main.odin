@@ -400,8 +400,8 @@ client_shutdown :: proc(port, cert_path: string) {
 	}
 
 	assert(!h3.pool_pending(&pool))
-	surf.websocket_release_message(&socket)
-	surf.websocket_release_message(&second_socket)
+	codec.message_release(&socket.message_state)
+	codec.message_release(&second_socket.message_state)
 	fmt.println("OK per-peer and global GOAWAY preserve WebSockets and ordinary requests")
 }
 client_peer :: proc(mode, port, cert_path: string) {
@@ -435,7 +435,7 @@ client_peer :: proc(mode, port, cert_path: string) {
 		_, n, e := surf.websocket_read_message(&socket, buffer[:])
 		assert(e.kind == .None && string(buffer[:n]) == "client-drain-live")
 		assert(surf.websocket_close(&socket, 1000, "").kind == .None)
-		surf.websocket_release_message(&socket)
+		codec.message_release(&socket.message_state)
 		deadline := time.time_add(time.now(), 4 * time.Second)
 
 		for h3.pool_pending(&pool) && time.diff(time.now(), deadline) > 0 {

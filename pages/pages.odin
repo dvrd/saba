@@ -10,7 +10,6 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import core "../core"
-import paths "../paths"
 
 Page_Mount :: struct {
 	directory:     string,
@@ -143,6 +142,3 @@ page_attribute :: proc(value: string, allocator: mem.Allocator) -> string {
 
 Request :: core.Request
 Response :: core.Response
-module_file :: paths.module_file
-module_relative_ok :: paths.module_relative_ok
-module_url_ok :: paths.module_url_ok

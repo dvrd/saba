@@ -16,7 +16,6 @@ import budget "core:sync/budget"
 import owned "core:mem/owned"
 import "core:os"
 import "core:time"
-import paths "../paths"
 
 // Configured mounts own their URL prefix. Development reads current files so
 // edits and additions work with hot reload; production serves only preloaded data.
@@ -751,6 +750,3 @@ Response :: core.Response
 Header :: core.Header
 make_response :: core.make_response
 not_found :: core.not_found
-module_file :: paths.module_file
-module_relative_ok :: paths.module_relative_ok
-module_url_ok :: paths.module_url_ok

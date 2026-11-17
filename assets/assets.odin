@@ -151,18 +151,7 @@ prepared_representation_response :: proc(
 	assert(representation != nil)
 	tag, allocation_error := strings.clone(string(representation.tag[:]), request.allocator)
 	if allocation_error != nil do return Response{status = .Internal_Server_Error}
-	matched, valid := false, true
-	fields, stars := 0, 0
-	for field in request.headers {
-		if !strings.equal_fold(field.name, "If-None-Match") do continue
-		fields += 1
-		if strings.trim(field.value, " \t") == "*" do stars += 1
-		found, ok := http.if_none_match(field.value, tag)
-		matched = matched || found
-		valid = valid && ok
-	}
-	if (request.method == "GET" || request.method == "HEAD") &&
-	   valid && matched && (stars == 0 || fields == 1) {
+	if (request.method == "GET" || request.method == "HEAD") && not_modified(request, tag) {
 		return make_response(request, .Not_Modified,
 			{{"Cache-Control", "no-cache"}, {"ETag", tag}})
 	}
@@ -222,7 +211,7 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 	}
 	cache_policy := "no-store"
 	if tag != "" do cache_policy = "no-cache"
-	if file_not_modified(request, tag) {
+	if not_modified(request, tag) {
 		if tag == "" do return make_response(request, .Not_Modified, {{"Cache-Control", cache_policy}})
 		return make_response(request, .Not_Modified, {{"ETag", tag}, {"Cache-Control", cache_policy}})
 	}
@@ -230,9 +219,8 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 	if selection.kind == .Unsatisfiable {
 		value := fmt.aprintf("bytes */%d", info.size, allocator=request.allocator)
 		if value == "" do return {status=.Internal_Server_Error}
-		response := make_response(request, .Range_Not_Satisfiable,
+		return make_response(request, .Range_Not_Satisfiable,
 			{{"Content-Range", value}, {"Accept-Ranges", "bytes"}, {"Cache-Control", cache_policy}})
-		return response
 	}
 	start, length := i64(0), info.size
 	status: core.HTTP_Status = .OK
@@ -344,8 +332,9 @@ file_relative_decode :: proc(relative: string, allocator: mem.Allocator) -> (str
 	return decoded, true
 }
 
+// A lone `*` or a matching validator; any malformed If-None-Match field disables the match.
 @(private)
-file_not_modified :: proc(request: ^Request, tag: string) -> bool {
+not_modified :: proc(request: ^Request, tag: string) -> bool {
 	fields, stars := 0, 0
 	matched, valid := false, true
 	for field in request.headers {

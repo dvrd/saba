@@ -4,7 +4,6 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:strings"
 import "core:unicode/utf8"
-import paths "../paths"
 
 JSX_Error :: struct {
 	file:         string,
@@ -86,7 +85,7 @@ jsx_helper_name :: proc(source, base: string) -> string {
 			for end < len(source) && end - start < 6 {
 				c := source[end]
 				digit := -1
-				if c >= '0' && c <= '9' do digit = int(c - '0')
+				if jsx_digit(c) do digit = int(c - '0')
 				if c >= 'a' && c <= 'f' do digit = int(c - 'a') + 10
 				if c >= 'A' && c <= 'F' do digit = int(c - 'A') + 10
 				if digit < 0 do break
@@ -157,7 +156,9 @@ jsx_identifier_start :: proc(c: u8) -> bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c == '_' || c == '$' || c >= 128
 }
 @(private)
-jsx_identifier_part :: proc(c: u8) -> bool {return jsx_identifier_start(c) || c >= '0' && c <= '9'}
+jsx_digit :: proc(c: u8) -> bool {return c >= '0' && c <= '9'}
+@(private)
+jsx_identifier_part :: proc(c: u8) -> bool {return jsx_identifier_start(c) || jsx_digit(c)}
 
 @(private)
 jsx_whitespace :: proc(p: ^JSX_Parser) {
@@ -551,7 +552,7 @@ jsx_javascript_scan :: proc(
 					word == "catch" ||
 					statement_start && (word == "export" || word == "default" || word == "async")
 			}
-		case c >= '0' && c <= '9':
+		case jsx_digit(c):
 			p.position += 1
 			for jsx_identifier_part(jsx_peek(p)) || jsx_peek(p) == '.' do p.position += 1
 			expect_value = false
@@ -608,6 +609,5 @@ jsx_javascript_scan :: proc(
 	return
 }
 
-module_url_ok :: paths.module_url_ok
 
 JSX_RUNTIME_URL :: "/__saba/dom.js"

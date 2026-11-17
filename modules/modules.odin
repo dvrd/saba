@@ -248,11 +248,9 @@ compile_module_directory :: proc(cache: ^Module_Cache, allocator: mem.Allocator)
 }
 
 transform_jsx :: jsx.transform_jsx
-JSX_Error :: jsx.JSX_Error
 
 Request :: core.Request
 Response :: core.Response
-Header :: core.Header
 make_response :: core.make_response
 not_found :: core.not_found
 module_file :: paths.module_file

@@ -27,7 +27,7 @@ def main():
         run([a.odin,'build',HERE/'http3_conformance',f'-collection:shared={SHARED}','-warnings-as-errors','-vet',f'-sanitize:{a.sanitize}',f'-out:{binary}'])
         report['binary_sha256']=sha(binary)
         for case in a.cases:
-            run([a.python,HERE/'http3_conformance/peer.py',case,'--binary',binary,'--cert',SHARED/'surf/tests/http3/localhost.pem','--key',SHARED/'http/v3/testdata/rsa2048.pem'],40)
+            run([a.python,HERE/'http3_conformance/peer.py',case,'--binary',binary,'--cert',HERE / 'testdata/tls/localhost.pem','--key',HERE / 'testdata/tls/rsa2048.pem'],40)
         report['peer_after']=manifest([peer_root]);assert peer_before==report['peer_after'],'published peer sources changed'
         report['passed']=True
     finally:

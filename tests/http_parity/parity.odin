@@ -3,13 +3,12 @@ package http_parity_tests
 import server "../.."
 import http "shared:http"
 import http1 "shared:http/v1"
-import corpus "shared:http/testsupport"
 import "core:testing"
 import "core:log"
 
 @(test)
 request_corpus_matches_shared_parser :: proc(t: ^testing.T) {
-	for item in corpus.REQUESTS {
+	for item in REQUESTS {
 		headers: [128]server.Header
 		protocol_headers: [128]http.Header
 		actual, status := server.parse_request(item.wire, headers[:])

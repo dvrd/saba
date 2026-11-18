@@ -23,10 +23,10 @@ def main():
     records = [run(['/opt/homebrew/bin/go', 'build', '-o', peer, HERE / 'http2_multiplex/peer.go'], env),
                run([args.odin, 'build', HERE / 'http2_multiplex', f'-collection:shared={SHARED}',
                     '-vet', '-warnings-as-errors', f'-sanitize:{args.sanitize}', f'-out:{binary}'], env)]
-    records += exercise(binary, [SHARED / 'surf/tests/http3/localhost.pem', SHARED / 'http/v3/testdata/rsa2048.pem'],
+    records += exercise(binary, [HERE / 'testdata/tls/localhost.pem', HERE / 'testdata/tls/rsa2048.pem'],
                         [lambda port: [peer, f'127.0.0.1:{port}']], env)
     assert 'created=23 disposed=23 cancelled=3' in records[-1]['stdout'], records[-1]
-    records += exercise(binary, [SHARED / 'surf/tests/http3/localhost.pem', SHARED / 'http/v3/testdata/rsa2048.pem'],
+    records += exercise(binary, [HERE / 'testdata/tls/localhost.pem', HERE / 'testdata/tls/rsa2048.pem'],
                         [lambda port: [peer, f'127.0.0.1:{port}', 'drain']], env)
     result = dict(passed=True, sanitizer=args.sanitize, records=records)
     args.report.write_text(json.dumps(result, indent=2) + '\n')

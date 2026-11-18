@@ -75,8 +75,8 @@ def main():
     env["GO111MODULE"] = "off"
     prefix = Path(f"/tmp/webtools389-{args.sanitize}-{os.getpid()}")
     binary, peer = prefix.with_suffix(".server"), prefix.with_suffix(".peer")
-    cert = SHARED / "surf/tests/http3/localhost.pem"
-    key = SHARED / "http/v3/testdata/rsa2048.pem"
+    cert = HERE / 'testdata/tls/localhost.pem'
+    key = HERE / 'testdata/tls/rsa2048.pem'
     records = [run(["/opt/homebrew/bin/go", "build", "-o", peer, HERE / "http2_connect/peer.go"], env),
                run([args.odin, "build", HERE / "http2_connect", f"-collection:shared={SHARED}",
                     "-warnings-as-errors", f"-sanitize:{args.sanitize}", f"-out:{binary}"], env)]

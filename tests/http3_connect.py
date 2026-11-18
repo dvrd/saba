@@ -7,7 +7,7 @@ spec=importlib.util.spec_from_file_location('h2_harness',HERE/'http2_connect.py'
 def main():
  p=argparse.ArgumentParser();p.add_argument('--odin',type=Path,required=True);p.add_argument('--sanitize',choices=['address','thread'],default='address');p.add_argument('--python',default='/tmp/webtools397-peer/bin/python');p.add_argument('--mutual-tls',action='store_true');p.add_argument('--report',type=Path,required=True);a=p.parse_args()
  env=os.environ.copy();env['PYTHONDONTWRITEBYTECODE']='1';env['PATH']='/opt/homebrew/opt/llvm@22/bin:'+env['PATH']
- binary=Path(f'/tmp/webtools397-{a.sanitize}-{os.getpid()}');cert=SHARED/'surf/tests/http3/localhost.pem';key=SHARED/'http/v3/testdata/rsa2048.pem';peer=HERE/'http3_connect/peer.py'
+ binary=Path(f'/tmp/webtools397-{a.sanitize}-{os.getpid()}');cert=HERE / 'testdata/tls/localhost.pem';key=HERE / 'testdata/tls/rsa2048.pem';peer=HERE/'http3_connect/peer.py'
  records=[h.run([a.odin,'build',HERE/'http3_connect',f'-collection:shared={SHARED}','-warnings-as-errors',f'-sanitize:{a.sanitize}',f'-out:{binary}'],env)]
  records+=h.exercise(binary,['server',cert,key],[lambda port:[binary,'client',port,cert],lambda port:[a.python,peer,'client',port]],env)
  with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]

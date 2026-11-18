@@ -21,7 +21,7 @@ def digest(path):
 
 def sources():
     return {str(p.relative_to(SHARED)): digest(p)
-            for root in (SABA, SHARED / 'http') for p in root.rglob('*')
+            for root in (SABA,) for p in root.rglob('*')
             if p.is_file() and p.suffix in ('.odin', '.py', '.pem')}
 
 
@@ -34,7 +34,7 @@ def main():
     args = parser.parse_args()
     # Imported fixtures belong to the validated source tree, never a bytecode cache.
     sys.dont_write_bytecode = True
-    path = SHARED / 'http/v3/testdata/request_phases/run.py'
+    path = HERE / 'testdata/tls/request_phases/run.py'
     spec = importlib.util.spec_from_file_location('http_phase_harness', path)
     harness = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(harness)

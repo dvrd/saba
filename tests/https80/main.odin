@@ -245,6 +245,8 @@ main :: proc() {
 	}
 
 	fixture = &state
+	// The server is stopped and its worker joined before main returns: nothing reads this frame afterwards.
+	defer fixture = nil
 	for &value, index in large {
 		value = u8(index % 251)
 	}

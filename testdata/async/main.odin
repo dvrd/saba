@@ -98,6 +98,8 @@ main :: proc() {
 	state: State
 	state.logger = context.logger
 	fixture_configure(&state)
+	// The server is stopped and its worker joined before main returns: nothing reads this frame afterwards.
+	defer fixture_control = nil
 
 	if os.get_env("SABA_TEST_PRESTOP", context.temp_allocator) == "1" {
 		server.stop_server(&state.control)

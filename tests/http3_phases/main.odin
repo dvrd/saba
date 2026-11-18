@@ -143,6 +143,8 @@ main :: proc() {
 	assert(store.replace(owned, &identity).kind == .None)
 	state: State
 	active = &state
+	// The server is stopped and its worker joined before main returns: nothing reads this frame afterwards.
+	defer active = nil
 	state.config = {
 		handler = route,
 		control = &state.control,

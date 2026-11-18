@@ -44,6 +44,8 @@ main :: proc() {
 	context.logger = log.nil_logger()
 	state: State
 	fixture = &state
+	// The server is stopped and its worker joined before main returns: nothing reads this frame afterwards.
+	defer fixture = nil
 	workers, _ := strconv.parse_int(os.get_env("DRAIN_WORKERS", context.temp_allocator))
 	milliseconds, _ := strconv.parse_int(os.get_env("DRAIN_MS", context.temp_allocator))
 	state.config = {

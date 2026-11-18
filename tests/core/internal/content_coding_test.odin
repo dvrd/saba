@@ -476,11 +476,11 @@ content_coding_head_has_no_body_and_stream_keeps_backpressure :: proc(t: ^testin
 }
 
 coding_decode_brotli :: proc(t: ^testing.T, encoded, expected: []u8) {
-	buffer: bytes.Buffer
-	defer bytes.buffer_destroy(&buffer)
-	error := brotli.load(encoded, &buffer, expected_output_size = len(expected))
+	output: [dynamic]u8
+	defer delete(output)
+	error := brotli.decompress(&output, encoded, expected_output_size = len(expected))
 	testing.expect_value(t, error, nil)
-	testing.expect(t, bytes.buffer_to_string(&buffer) == string(expected))
+	testing.expect(t, string(output[:]) == string(expected))
 }
 
 @(test)

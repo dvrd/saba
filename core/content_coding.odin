@@ -50,8 +50,9 @@ encode_smaller :: proc(coding: Content_Coding, src: []u8, level: brotli.Level, a
 
 	switch coding {
 	case .Brotli:
-		result, brotli_error := brotli.encode(src, level, scratch)
-		encoded, error = result, brotli_error != nil
+		packed: [dynamic]u8
+		brotli_error := brotli.compress(&packed, src, level, scratch)
+		encoded, error = packed[:], brotli_error != nil
 	case .Gzip:
 		result, gzip_error := gzip.encode(src, .Best, scratch)
 		encoded, error = result, gzip_error != nil

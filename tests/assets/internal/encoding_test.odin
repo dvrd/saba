@@ -32,10 +32,10 @@ encoding_field :: proc(response: Response, name: string) -> (string, bool) {
 }
 
 encoding_decode_brotli :: proc(t: ^testing.T, packed, expected: []u8) {
-	buffer: bytes.Buffer
-	defer bytes.buffer_destroy(&buffer)
-	testing.expect_value(t, brotli.load(packed, &buffer, expected_output_size = len(expected)), nil)
-	testing.expect(t, bytes.buffer_to_string(&buffer) == string(expected))
+	output: [dynamic]u8
+	defer delete(output)
+	testing.expect_value(t, brotli.decompress(&output, packed, expected_output_size = len(expected)), nil)
+	testing.expect(t, string(output[:]) == string(expected))
 }
 
 encoding_decode_gzip :: proc(t: ^testing.T, packed, expected: []u8) {

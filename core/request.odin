@@ -4,10 +4,14 @@ import "core:log"
 import http "../../http"
 import http1 "../../http/v1"
 import "core:strings"
-import "core:time"
 import "core:encoding/json"
 import "core:mem"
 import budget "core:sync/budget"
+
+// Only the generic read_json uses these; a program that never instantiates
+// it would otherwise fail -vet on unused imports.
+_ :: json
+_ :: log
 
 REQUEST_HEADER_LIMIT :: 8192
 REQUEST_HEADER_COUNT_LIMIT :: 128

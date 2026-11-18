@@ -52,7 +52,7 @@ http3_retry_normal_serve_uses_explicit_store_before_dispatch :: proc(t: ^testing
 	testing.set_fail_timeout(t, 15 * time.Second)
 	credential, ce := tlscredentials.create(
 		#load("../tests/testdata/tls/localhost.pem"),
-		#load("../../http/v3/testdata/rsa2048.pem"),
+		#load("../tests/testdata/tls/rsa2048.pem"),
 		{},
 		context.allocator,
 	)

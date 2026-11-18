@@ -24,7 +24,7 @@ transforms_html_components_fragments_and_expressions :: proc(t: ^testing.T) {
 		{"const node = <p>\n  Hello\n  world\n</p>;", `const node = __saba_jsx("p", {}, "Hello world");`},
 		{
 			`const node = <div title="&#x1f389; &#233;">&lt;safe&gt;</div>;`,
-			`const node = __saba_jsx("div", {"title": "\ud83c\udf89 é",}, "<safe>");`,
+			`const node = __saba_jsx("div", {"title": "🎉 é",}, "<safe>");`,
 		},
 		{
 			`const node = <UI.Card value={{ nested: [1, 2] }}>{items.map((item) => <p>{item}</p>)}</UI.Card>;`,

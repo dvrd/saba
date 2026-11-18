@@ -1,8 +1,7 @@
 package saba_assets
 
-import "core:bytes"
 import "core:compress/brotli"
-import "core:compress/gzip"
+import "core:compress/deflate"
 import "core:fmt"
 import "core:mem"
 import "core:os"
@@ -39,10 +38,10 @@ encoding_decode_brotli :: proc(t: ^testing.T, packed, expected: []u8) {
 }
 
 encoding_decode_gzip :: proc(t: ^testing.T, packed, expected: []u8) {
-	buffer: bytes.Buffer
-	defer bytes.buffer_destroy(&buffer)
-	testing.expect_value(t, gzip.load_from_bytes(packed, &buffer, len(packed), len(expected)), nil)
-	testing.expect(t, bytes.buffer_to_string(&buffer) == string(expected))
+	output: [dynamic]u8
+	defer delete(output)
+	testing.expect_value(t, deflate.inflate_gzip(&output, packed, len(expected)), nil)
+	testing.expect(t, string(output[:]) == string(expected))
 }
 
 @(test)

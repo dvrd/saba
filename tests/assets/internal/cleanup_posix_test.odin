@@ -3,15 +3,34 @@ package saba_assets
 
 import "core:fmt"
 import "core:os"
+import "core:strings"
 import "core:sys/posix"
 import "core:testing"
 
-asset_count_fds :: proc() -> int {
+// Other tests open and close descriptors on their own threads, so only the
+// descriptors open on this test's files are counted.
+asset_count_fds :: proc(paths: []string) -> int {
+	owned := make([]posix.stat_t, len(paths), context.temp_allocator)
+
+	for path, i in paths {
+		name := strings.clone_to_cstring(path, context.temp_allocator)
+		assert(posix.stat(name, &owned[i]) == .OK)
+	}
+
 	count := 0
 
 	for fd in 0 ..< 4096 {
-		if posix.fcntl(posix.FD(fd), .GETFD) >= 0 {
-			count += 1
+		info: posix.stat_t
+
+		if posix.fstat(posix.FD(fd), &info) != .OK {
+			continue
+		}
+
+		for file in owned {
+			if info.st_dev == file.st_dev && info.st_ino == file.st_ino {
+				count += 1
+				break
+			}
 		}
 	}
 
@@ -26,11 +45,12 @@ asset_early_failure_closes_directory_files_and_iterators :: proc(t: ^testing.T) 
 	assert(os.make_directory(fmt.tprintf("%s/sub", directory)) == nil)
 	asset_test_write(directory, "sub/a", "large-body")
 	asset_test_write(directory, "sub/b", "body")
-	// Warm platform filesystem helpers before taking the descriptor baseline.
-	caches, error := prepare_assets_bounded({{directory, ""}}, {}, context.allocator)
-	assert(error.kind == .None)
-	destroy_assets(&caches, context.allocator)
-	before := asset_count_fds()
+	owned := []string {
+		directory,
+		fmt.tprintf("%s/sub", directory),
+		fmt.tprintf("%s/sub/a", directory),
+		fmt.tprintf("%s/sub/b", directory),
+	}
 
 	for _ in 0 ..< 32 {
 		output, failure := prepare_assets_bounded({{directory, ""}}, {max_file_bytes = 1}, context.allocator)
@@ -41,7 +61,7 @@ asset_early_failure_closes_directory_files_and_iterators :: proc(t: ^testing.T) 
 		testing.expect(t, output == nil)
 	}
 
-	testing.expect_value(t, asset_count_fds(), before)
+	testing.expect_value(t, asset_count_fds(owned), 0)
 }
 
 @(test)

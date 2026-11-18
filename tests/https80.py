@@ -50,7 +50,7 @@ def input_directories(shared, sdk):
     # Packages this server compiles. The rest of shared/ is not an input.
     return [
         shared/'saba', shared/'http', shared/'websocket', shared/'surf',
-        shared/'async', shared/'files', shared/'kakunou', shared/'tls',
+        shared/'async', shared/'kakunou',
         sdk/'core', sdk/'base/runtime',
         sdk/'tests/core/crypto/tls/credentials/testdata',
     ]

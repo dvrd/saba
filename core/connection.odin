@@ -13,8 +13,8 @@ import async "shared:async"
 import store "core:crypto/tls/credentials/store"
 import bridge "shared:async/connection"
 import "core:strings"
-import http "../../http"
-import http3 "../../http/v3"
+import http "shared:http"
+import http3 "shared:http/v3"
 
 Connection :: struct {
 	_task:          ^Connection_Task,

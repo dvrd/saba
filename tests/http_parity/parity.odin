@@ -1,9 +1,9 @@
 package http_parity_tests
 
 import server "../.."
-import http "../../../http"
-import http1 "../../../http/v1"
-import corpus "../../../http/testsupport"
+import http "shared:http"
+import http1 "shared:http/v1"
+import corpus "shared:http/testsupport"
 import "core:testing"
 import "core:log"
 

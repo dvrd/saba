@@ -1,10 +1,10 @@
 package saba_core
 
-import http "../../http"
-import http1 "../../http/v1"
+import http "shared:http"
+import http1 "shared:http/v1"
 import "core:log"
 import "core:time"
-import exchange "../../http/exchange"
+import exchange "shared:http/exchange"
 import rt "base:runtime"
 import "core:mem"
 import budget "core:sync/budget"

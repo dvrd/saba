@@ -1,8 +1,8 @@
 package saba_core
 
 import "core:log"
-import http "../../http"
-import http1 "../../http/v1"
+import http "shared:http"
+import http1 "shared:http/v1"
 import "core:strings"
 import "core:encoding/json"
 import "core:mem"

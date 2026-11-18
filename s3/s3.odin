@@ -1,6 +1,6 @@
 package saba_s3
 
-import aws "../../aws"
+import aws "shared:aws"
 
 // Optional compatibility adapter. AWS alone owns credentials, SigV4, uploads,
 // presigning and HTTP execution; importing Saba core never imports this package.

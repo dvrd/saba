@@ -1,8 +1,8 @@
 package saba_core
 
-import http3 "../../http/v3"
-import http "../../http"
-import exchange "../../http/exchange"
+import http3 "shared:http/v3"
+import http "shared:http"
+import exchange "shared:http/exchange"
 import rt "base:runtime"
 import "core:mem"
 import charged "core:mem/budget"

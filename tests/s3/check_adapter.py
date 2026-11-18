@@ -13,7 +13,7 @@ shared=Path(__file__).resolve().parents[3]
 with tempfile.TemporaryDirectory(prefix='saba-s3-adapter-') as temporary:
     root=Path(temporary)
     packages=root/'shared'
-    for name in ('aws','files'):
+    for name in ('aws',):
         shutil.copytree(shared/name,packages/name,ignore=shutil.ignore_patterns('.git','__pycache__','*_test.odin'))
     shutil.copytree(shared/'saba/s3',packages/'saba/s3',ignore=shutil.ignore_patterns('__pycache__'))
     (packages/'surf').mkdir()
@@ -66,7 +66,7 @@ main :: proc() {
     subprocess.run([args.odin,'build',str(root/'app'),'-collection:shared='+str(packages),'-sanitize:address','-warnings-as-errors','-out:'+str(binary)],check=True)
     subprocess.run([str(binary),str(body)],check=True,timeout=5)
     real=root/'real-shared'
-    for name in ('aws','files','surf','http','ascii','websocket'):
+    for name in ('aws','surf','http','websocket'):
         shutil.copytree(shared/name,real/name,ignore=shutil.ignore_patterns('.git','__pycache__','*_test.odin'))
     shutil.copytree(shared/'saba/s3',real/'saba/s3',ignore=shutil.ignore_patterns('__pycache__'))
     (root/'real-app').mkdir()

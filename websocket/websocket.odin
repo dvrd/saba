@@ -2,11 +2,11 @@ package saba_websocket
 
 import "core:time"
 import core "../core"
-import codec "../../websocket"
+import codec "shared:websocket"
 import "core:mem"
 import charged "core:mem/budget"
 import budget "core:sync/budget"
-import async "../../async"
+import async "shared:async"
 import "core:unicode/utf8"
 import rt "base:runtime"
 import "core:strings"

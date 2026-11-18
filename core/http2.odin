@@ -10,7 +10,7 @@ import hpack "shared:http/v2/hpack"
 import charged "core:mem/budget"
 import owned "core:mem/owned"
 import "core:net"
-import http "../../http"
+import http "shared:http"
 import exchange "shared:http/exchange"
 import "core:strconv"
 

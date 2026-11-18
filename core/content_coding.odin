@@ -1,6 +1,6 @@
 package saba_core
 
-import exchange "../../http/exchange"
+import exchange "shared:http/exchange"
 import rt "base:runtime"
 import "core:compress/brotli"
 import "core:compress/deflate"

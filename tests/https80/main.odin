@@ -1,8 +1,8 @@
 package main
 
-import server "../../core"
-import application "../../application"
-import facade "../.."
+import server "shared:saba/core"
+import application "shared:saba/application"
+import facade "shared:saba"
 import credentials "core:crypto/tls/credentials"
 import store "core:crypto/tls/credentials/store"
 import signal "shared:async/signal"

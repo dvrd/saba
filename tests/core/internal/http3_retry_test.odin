@@ -1,6 +1,6 @@
 package saba_core
 
-import surf "../../surf"
+import surf "shared:surf"
 import "core:crypto"
 import "core:crypto/tls"
 import tlscredentials "core:crypto/tls/credentials"
@@ -51,8 +51,8 @@ retry_saba_handler :: proc(data: rawptr, conn: ^Connection, request: ^Request) -
 http3_retry_normal_serve_uses_explicit_store_before_dispatch :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 15 * time.Second)
 	credential, ce := tlscredentials.create(
-		#load("../tests/testdata/tls/localhost.pem"),
-		#load("../tests/testdata/tls/rsa2048.pem"),
+		#load("../../tests/testdata/tls/localhost.pem"),
+		#load("../../tests/testdata/tls/rsa2048.pem"),
 		{},
 		context.allocator,
 	)
@@ -115,7 +115,7 @@ http3_retry_normal_serve_uses_explicit_store_before_dispatch :: proc(t: ^testing
 	)
 	defer delete(stdout); defer delete(stderr)
 	roots: tls.Root_Pool
-	assert(tls.root_pool_parse(&roots, #load("../tests/testdata/tls/localhost.pem")).kind == .None)
+	assert(tls.root_pool_parse(&roots, #load("../../tests/testdata/tls/localhost.pem")).kind == .None)
 	defer tls.root_pool_destroy(&roots)
 	response, surf_error := surf.execute(
 		{method = .GET, url = url},

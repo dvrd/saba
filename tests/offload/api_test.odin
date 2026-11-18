@@ -1,7 +1,7 @@
 package saba_offload_test
 
-import adapter "../../offload"
-import server "../../core"
+import adapter "shared:saba/offload"
+import server "shared:saba/core"
 import "core:testing"
 import "core:time"
 import pool "shared:async/offload"

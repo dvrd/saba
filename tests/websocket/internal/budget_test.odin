@@ -2,7 +2,7 @@ package saba_websocket
 
 import rt "base:runtime"
 import core "../core"
-import async "../../async"
+import async "shared:async"
 import "core:mem"
 import budget "core:sync/budget"
 import "core:testing"

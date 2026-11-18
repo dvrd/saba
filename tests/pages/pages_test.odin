@@ -1,7 +1,7 @@
 package saba_pages_test
 
-import core "../../core"
-import pages "../../pages"
+import core "shared:saba/core"
+import pages "shared:saba/pages"
 import "core:fmt"
 import "core:mem"
 import "core:os"

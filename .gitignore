@@ -2,8 +2,12 @@
 *.o
 *.obj
 *.exe
+
 .DS_Store
+
 .cruft/
+.krs/
 
 # Python loopback harness imports
 __pycache__/
+

@@ -1,6 +1,6 @@
 package main
 
-import server "../.."
+import server "shared:saba"
 import "base:intrinsics"
 import "core:fmt"
 import "core:log"

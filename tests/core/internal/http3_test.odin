@@ -1,6 +1,6 @@
 package saba_core
 
-import http3 "../../http/v3"
+import http3 "shared:http/v3"
 import async "shared:async"
 import signal "shared:async/signal"
 import owned "core:mem/owned"

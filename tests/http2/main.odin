@@ -1,6 +1,6 @@
 package main
 
-import server "../../core"
+import server "shared:saba/core"
 import credentials "core:crypto/tls/credentials"
 import store "core:crypto/tls/credentials/store"
 import "core:fmt"

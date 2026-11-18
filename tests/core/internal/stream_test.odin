@@ -1,6 +1,6 @@
 package saba_core
 
-import exchange "../../http/exchange"
+import exchange "shared:http/exchange"
 import "core:mem"
 import owned "core:mem/owned"
 import "core:strings"

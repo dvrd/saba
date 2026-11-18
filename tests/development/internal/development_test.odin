@@ -44,7 +44,7 @@ development_rebuild_keeps_failed_builds_running_and_cleans_up :: proc(t: ^testin
 	}
 	main_path := fmt.tprintf("%s/main.odin", source)
 	value_path := fmt.tprintf("%s/value.json", source)
-	if !testing.expect(t, os.write_entire_file(main_path, #load("../testdata/development/main.odin", string)) == nil, "prepare development edit") {
+	if !testing.expect(t, os.write_entire_file(main_path, #load("../../testdata/development/main.odin", string)) == nil, "prepare development edit") {
 		return
 	}
 	if !testing.expect(t, os.write_entire_file(value_path, "first") == nil, "prepare development edit") {

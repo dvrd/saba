@@ -1,6 +1,6 @@
 package http_parity_tests
 
-import server "../.."
+import server "shared:saba"
 import http "shared:http"
 import http1 "shared:http/v1"
 import "core:testing"

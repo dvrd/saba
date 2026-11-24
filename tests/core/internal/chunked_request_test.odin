@@ -38,3 +38,24 @@ chunked_json_uses_complete_decoded_body :: proc(t: ^testing.T) {
 	testing.expect_value(t, read_json(&request, &value), .None)
 	testing.expect_value(t, value.n, 7)
 }
+
+@(test)
+json_without_a_length_needs_one_only_on_http1 :: proc(t: ^testing.T) {
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
+	defer mem.dynamic_arena_destroy(&arena)
+
+	for version in ([]string{"HTTP/1.1", "HTTP/1.0", "HTTP/2", "HTTP/3"}) {
+		request := Request {
+			allocator = mem.dynamic_arena_allocator(&arena),
+			version   = version,
+			headers   = {{"Content-Type", "application/json"}},
+			body      = transmute([]u8)string(`{"n":7}`),
+		}
+		value: struct {
+			n: int,
+		}
+		expected: HTTP_Status = .None if version == "HTTP/2" || version == "HTTP/3" else .Length_Required
+		testing.expect_value(t, read_json(&request, &value), expected)
+	}
+}

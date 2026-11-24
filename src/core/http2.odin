@@ -801,14 +801,20 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 			continue
 		}
 
+		// Nothing moved this pass. With no read armed (a full ingress buffer the
+		// engine cannot take yet) the timer is the only wake: wait for it rather
+		// than yield straight back into the same stalled pass.
+		timed := false
 		if h2_has_streams(task) {
-			_ = async.sleep_until_earlier(
-				&task.runtime.executor,
-				async.deadline_after(&task.runtime.executor, time.Millisecond),
-			)
+			timed =
+				async.sleep_until_earlier(
+					&task.runtime.executor,
+					async.deadline_after(&task.runtime.executor, time.Millisecond),
+				).kind ==
+				.Pending
 		}
 
-		if waiting {
+		if waiting || timed {
 			return .Waiting
 		}
 		break

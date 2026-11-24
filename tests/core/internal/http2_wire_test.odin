@@ -81,6 +81,10 @@ h2w_handler :: proc(data: rawptr, _: ^Connection, request: ^Request) -> Response
 			header = {"x-filler", "value"}
 		}
 		return {status = .OK, headers = headers, body = transmute([]u8)string("huge")}
+	case "/trailers":
+		trailers := make([]Header, 1, request.allocator)
+		trailers[0] = {"grpc-status", "0"}
+		return {status = .OK, body = transmute([]u8)string("body"), trailers = trailers}
 	case "/echo":
 		return {status = .OK, body = request.body}
 	}
@@ -677,5 +681,50 @@ h2_request_body_is_assembled_across_data_frames :: proc(t: ^testing.T) {
 		if testing.expect_value(t, count, SIZE) {
 			testing.expect(t, string(received) == string(body), "echoed body differs from the request body")
 		}
+	})
+}
+
+// A response with trailers ends its stream with a second field section.
+@(test)
+h2_response_trailers_follow_the_body :: proc(t: ^testing.T) {
+	state: H2W_Server
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		wire: [dynamic]u8
+		defer delete(wire)
+		h2w_get(&wire, 1, "/trailers")
+		if !testing.expect(t, h2w_preface(peer) && h2w_send(peer, wire[:])) {
+			return
+		}
+		status, sections, data := 0, 0, 0
+		ended_by: u8
+		for {
+			frame, ok := h2w_next(peer)
+			if !ok {
+				break
+			}
+			if frame.stream != 1 {
+				continue
+			}
+			if !testing.expect(t, frame.kind != 3, "a response with trailers was reset") {
+				return
+			}
+			if frame.kind == 1 {
+				sections += 1
+				if sections == 1 {
+					status = h2w_status(frame)
+				}
+			}
+			if frame.kind == 0 {
+				data += len(frame.payload)
+			}
+			if frame.flags & 0x1 != 0 && frame.kind <= 1 {
+				ended_by = frame.kind
+				break
+			}
+		}
+		testing.expect_value(t, status, 200)
+		testing.expect_value(t, data, 4)
+		testing.expect_value(t, sections, 2)
+		testing.expect_value(t, ended_by, 1)
 	})
 }

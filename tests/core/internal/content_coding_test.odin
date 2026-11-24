@@ -813,3 +813,37 @@ loopback_request_with_accept_encoding_br_gets_a_brotli_body :: proc(t: ^testing.
 	joined = true
 	testing.expect(t, fixture.ok)
 }
+
+@(test)
+coded_response_drops_the_handler_content_length :: proc(t: ^testing.T) {
+	allocator := context.temp_allocator
+	plain := coding_repeat(2000, allocator)
+	handler_headers := []Header{{"Content-Type", "text/plain"}, {"Content-Length", "2000"}}
+	buffer: [512]u8
+
+	for accept in ([]string{"", "gzip", "br"}) {
+		request := Request {
+			allocator = allocator,
+			method    = "GET",
+		}
+		if accept != "" {
+			request.headers = {{"Accept-Encoding", accept}}
+		}
+		response := Response {
+			status  = .OK,
+			headers = handler_headers,
+			body    = plain,
+		}
+
+		content_coding_prepare(&request, &response)
+		_, encoded := coding_field(response.headers, "Content-Encoding")
+		_, stated := coding_field(response.headers, "Content-Length")
+		testing.expect_value(t, encoded, accept != "")
+		testing.expect_value(t, stated, accept == "")
+		_, valid := response_headers(response, buffer[:], true)
+		testing.expectf(t, valid, "head for Accept-Encoding %q", accept)
+	}
+
+	testing.expect_value(t, len(handler_headers), 2)
+	testing.expect_value(t, handler_headers[1].name, "Content-Length")
+}

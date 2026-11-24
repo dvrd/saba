@@ -123,15 +123,16 @@ read_connection :: proc(conn: ^Connection, buffer: []u8) -> (received: int, err:
 	deadline: time.Tick
 
 	for {
-		if deadline_expired(conn.read_deadline) {
-			return 0, .Timeout
-		}
-
+		// Bytes already received are delivered whatever the deadline says.
 		if len(conn.read_buffer) > 0 {
 			n := copy(buffer, conn.read_buffer)
 			conn.read_buffer = conn.read_buffer[n:]
 
 			return n, nil
+		}
+
+		if deadline_expired(conn.read_deadline) {
+			return 0, .Timeout
 		}
 
 		if deadline == (time.Tick{}) {
@@ -168,11 +169,12 @@ write_connection :: proc(conn: ^Connection, data: []u8) -> (sent: int, err: net.
 	deadline := blocking_deadline(conn.write_deadline, conn._timeouts.response, RESPONSE_SEND_TIMEOUT)
 
 	for {
-		if deadline_expired(deadline) {
-			return sent, .Timeout
-		}
+		// A write that already completed is not a timeout.
 		if sent == len(data) {
 			return sent, nil
+		}
+		if deadline_expired(deadline) {
+			return sent, .Timeout
 		}
 
 		// Bound each call so sustained progress cannot bypass the deadline check.

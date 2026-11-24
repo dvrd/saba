@@ -828,6 +828,19 @@ weaken_etag :: proc(request: ^Request, headers: []Header) {
 	}
 }
 
+// Only for headers this request already owns (append_response_headers copied them).
+drop_content_length :: proc(response: ^Response) {
+	kept := 0
+	for header in response.headers {
+		if strings.equal_fold(header.name, "Content-Length") {
+			continue
+		}
+		response.headers[kept] = header
+		kept += 1
+	}
+	response.headers = response.headers[:kept]
+}
+
 // Applies after the handler returns. Buffered bodies keep identity unless the
 // coded body is strictly smaller. Eligible streams become one coded body with
 // chunked framing. HEAD advertises that framing and does not poll or allocate an
@@ -912,6 +925,8 @@ content_coding_prepare :: proc(request: ^Request, response: ^Response) {
 		response.body = encoded
 	}
 	if coding != .Identity {
+		// The handler's own Content-Length described the plain body.
+		drop_content_length(response)
 		weaken_etag(request, response.headers)
 	}
 	if coding != .Identity && head {

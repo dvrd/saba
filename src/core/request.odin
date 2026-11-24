@@ -110,7 +110,9 @@ read_json :: proc(request: ^Request, input: ^$T) -> HTTP_Status {
 		return .Unsupported_Media_Type
 	}
 
-	if !request.has_content_length && !request.chunked {
+	// HTTP/2 and HTTP/3 delimit a body by the end of its stream.
+	framed := request.version == "HTTP/2" || request.version == "HTTP/3"
+	if !framed && !request.has_content_length && !request.chunked {
 		return .Length_Required
 	}
 

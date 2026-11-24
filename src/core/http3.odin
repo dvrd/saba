@@ -687,6 +687,10 @@ http3_upgrade_response :: proc(
 	if wire.connect == nil || wire.protocol != "websocket" || response.upgrade.resume == nil {
 		return false, .Pending
 	}
+	// An unset status means 200, as it does for every other response.
+	if response.status == .None {
+		response.status = .OK
+	}
 	if response.status != .OK || stream_present(response.stream) || len(response.body) > 0 {
 		discard_response(response)
 		out.status = 500

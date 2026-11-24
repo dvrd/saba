@@ -1569,7 +1569,8 @@ resource_reject :: proc(task: ^Connection_Task, status: HTTP_Status = .Service_U
 }
 // Unknown raw borrows have no full-allocation provenance. Copy before suspension.
 resource_copy_response :: proc(task: ^Connection_Task, response: ^Response) -> bool {
-	if len(response.trailers) > 0 && task.request.version != "HTTP/3" {
+	// HTTP/1 responses are not sent chunked with a trailer section.
+	if len(response.trailers) > 0 && task.request.version != "HTTP/2" && task.request.version != "HTTP/3" {
 		return false
 	}
 

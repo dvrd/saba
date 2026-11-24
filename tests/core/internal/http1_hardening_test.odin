@@ -877,3 +877,27 @@ loopback_silent_connection_is_not_counted_as_a_request :: proc(t: ^testing.T) {
 	testing.expect_value(t, metrics.started, u64(1))
 	testing.expect_value(t, metrics.completed, u64(1))
 }
+
+@(test)
+blocking_helpers_finish_before_they_consult_an_expired_deadline :: proc(t: ^testing.T) {
+	past := time.tick_add(time.tick_now(), -time.Second)
+	received := []u8{'a', 'b'}
+	conn := Connection {
+		read_buffer    = received,
+		read_deadline  = past,
+		write_deadline = past,
+	}
+
+	buffer: [4]u8
+	n, read_error := read_connection(&conn, buffer[:])
+	testing.expect_value(t, n, 2)
+	testing.expect_value(t, read_error, nil)
+	_, read_error = read_connection(&conn, buffer[:])
+	testing.expect_value(t, read_error, net.TCP_Recv_Error.Timeout)
+
+	sent, write_error := write_connection(&conn, nil)
+	testing.expect_value(t, sent, 0)
+	testing.expect_value(t, write_error, nil)
+	_, write_error = write_connection(&conn, buffer[:])
+	testing.expect_value(t, write_error, net.TCP_Send_Error.Timeout)
+}

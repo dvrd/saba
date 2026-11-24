@@ -3,6 +3,7 @@ package saba_pages_test
 import core "shared:saba/core"
 import pages "shared:saba/pages"
 import "core:fmt"
+import "core:log"
 import "core:mem"
 import "core:os"
 import "core:strings"
@@ -87,4 +88,42 @@ development_pages_follow_file_changes :: proc(t: ^testing.T) {
 	response, found := pages.serve_prepared_pages(&request, cache, true)
 	testing.expect(t, found)
 	testing.expect(t, strings.contains(string(response.body), `data-page="/m/extra.js"`))
+}
+
+@(test)
+parameterized_page_routes :: proc(t: ^testing.T) {
+	dir, err := os.make_directory_temp("", "saba-routes-*", context.allocator)
+	assert(err == nil)
+	defer delete(dir)
+	defer os.remove_all(dir)
+	mount := page_fixture(dir)
+	assert(os.make_directory(fmt.tprintf("%s/items", dir)) == nil)
+	for name in ([]string{"[id]", "new"}) {
+		assert(os.write_entire_file(fmt.tprintf("%s/items/%s.jsx", dir, name), "export default () => null;") == nil)
+	}
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
+	defer mem.dynamic_arena_destroy(&arena)
+	allocator := mem.dynamic_arena_allocator(&arena)
+	for development in ([]bool{false, true}) {
+		cache, ok := pages.prepare_pages(mount, development, allocator)
+		if !testing.expect(t, ok) { return }
+		request := core.Request{method = "GET", path = "/items/%E5%B1%B1", allocator = allocator}
+		result, matched := pages.serve_prepared_pages(&request, cache, development)
+		testing.expect(t, matched && strings.contains(string(result.body), `data-route="/items/:id"`))
+		testing.expect_value(t, core.path_value(&request, "id"), "山")
+		request.path = "/items/new"
+		literal, exact := pages.serve_prepared_pages(&request, cache, development)
+		testing.expect(t, exact && strings.contains(string(literal.body), `data-page="/m/items/new.js"`))
+		testing.expect(t, !strings.contains(string(literal.body), "data-route="))
+		for path in ([]string{"/items/", "/items/42/", "/items/a%2fb", "/items/a%5Cb", "/items/%ff", "/items/%GG"}) {
+			request.path = path
+			_, invalid := pages.serve_prepared_pages(&request, cache, development)
+			testing.expectf(t, !invalid, "page accepted %s", path)
+		}
+	}
+	assert(os.write_entire_file(fmt.tprintf("%s/items/[slug].jsx", dir), "export default () => null;") == nil)
+	context.logger = log.nil_logger()
+	_, ambiguous := pages.prepare_pages(mount, false, allocator)
+	testing.expect(t, !ambiguous)
 }

@@ -75,6 +75,43 @@ application_builtin_priority_and_development_injection :: proc(t: ^testing.T) {
 }
 
 @(test)
+application_serves_window_modules_as_conditional_representations :: proc(t: ^testing.T) {
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
+	defer mem.dynamic_arena_destroy(&arena)
+
+	state: State
+	request := core.Request {allocator = mem.dynamic_arena_allocator(&arena)}
+	for source in ([]struct {path, body: string} {
+		{modules_api.SLIDING_WINDOW_URL, modules_api.SLIDING_WINDOW},
+		{modules_api.SLOT_WINDOW_URL, modules_api.SLOT_WINDOW},
+		{modules_api.SCALAR_RECORDS_URL, modules_api.SCALAR_RECORDS},
+	}) {
+		request.path = source.path
+		for method in ([]string{"GET", "HEAD"}) {
+			request.method = method
+			request.headers = nil
+			response, matched := builtin_response(&state, &request)
+			if !testing.expect(t, matched && response.status == .OK && len(response.headers) >= 3) {
+				return
+			}
+			// The transport suppresses HEAD bodies after computing their representation length.
+			testing.expect_value(t, string(response.body), source.body)
+			testing.expect_value(t, response.headers[0].value, "text/javascript; charset=utf-8")
+			testing.expect_value(t, response.headers[2].name, "ETag")
+			request.headers = {{"If-None-Match", response.headers[2].value}}
+			conditional, found := builtin_response(&state, &request)
+			testing.expect(t, found)
+			testing.expect_value(t, conditional.status, .Not_Modified)
+			testing.expect_value(t, len(conditional.body), 0)
+		}
+		request.method = "POST"
+		_, matched := builtin_response(&state, &request)
+		testing.expect(t, !matched)
+	}
+}
+
+@(test)
 application_context_adapter_borrows_live_development_state :: proc(t: ^testing.T) {
 	calls := 0
 	state := State {

@@ -8,6 +8,7 @@ import "core:mem"
 import "core:net"
 import "core:os"
 import "core:path/filepath"
+import "core:slice"
 import "core:strings"
 import core "../core"
 
@@ -15,6 +16,11 @@ Page_Mount :: struct {
 	directory:     string,
 	shell:         string,
 	module_prefix: string,
+	templates:     Template_Build,
+	// Bounds page preparation like an asset mount: max_files pages or template
+	// variants, max_file_bytes per shell or source, max_total_bytes of prepared
+	// HTML and linked modules. Zero fields select the asset defaults.
+	limits:        assets.Asset_Limits,
 }
 
 // Production prepares each route's HTML once into `routes`. Development keeps
@@ -24,12 +30,26 @@ Page_Cache :: struct {
 	shell:   string,
 	routes:  map[string]assets.Prepared_Representation,
 	modules: map[string]string,
+	patterns: []string,
+	build: Build_Cache,
 }
 
 // Page routes and HTML borrow the server's arena, just like compiled modules.
-prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allocator) -> (Page_Cache, bool) {
+prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allocator, module_mounts: []modules.Module_Cache = nil) -> (Page_Cache, bool) {
+	cache, prepared := prepare_legacy_pages(config, development, allocator)
+	if !prepared { return {}, false }
+	if !prepare_templates(&cache, config.templates, module_mounts, allocator, config.limits) { return {}, false }
+	return cache, true
+}
+
+prepare_legacy_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allocator) -> (Page_Cache, bool) {
 	if config.directory == "" {
 		return {}, true
+	}
+	l, limits_valid := assets.normalize_limits(config.limits)
+	if !limits_valid {
+		log.error("Page limits are invalid")
+		return {}, false
 	}
 	if !strings.has_prefix(config.module_prefix, "/") ||
 	   !strings.has_suffix(config.module_prefix, "/") ||
@@ -55,10 +75,10 @@ prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allo
 	mount.directory = root
 	mount.shell, _ = strings.clone(config.shell, allocator)
 	mount.module_prefix, _ = strings.clone(config.module_prefix, allocator)
-	source, read_error := os.read_entire_file(config.shell, allocator)
+	source, read := assets.read_limited(config.shell, l.max_file_bytes, allocator)
 
-	if read_error != nil {
-		log.error("Could not read page shell")
+	if read.kind != .None {
+		log.errorf("Could not read page shell (limit %d bytes): %v %v", l.max_file_bytes, read.kind, read.io)
 		return {}, false
 	}
 
@@ -74,10 +94,18 @@ prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allo
 	}
 
 	sources := make(map[string]string, allocator)
+	shapes := make(map[string]string, allocator)
+	patterns := make([dynamic]string, allocator)
 	walker := os.walker_create(root)
 	defer os.walker_destroy(&walker)
+	page_count, entry_count := 0, 0
 
 	for file in os.walker_walk(&walker) {
+		entry_count += 1
+		if entry_count > l.max_entries {
+			log.errorf("Page directory exceeds the limit of %d entries", l.max_entries)
+			return {}, false
+		}
 		if file.type != .Regular {
 			continue
 		}
@@ -99,6 +127,25 @@ prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allo
 		}
 		if strings.has_suffix(stem, "/index") {
 			route = fmt.aprintf("/%s", stem[:len(stem) - 6], allocator = allocator)
+		}
+		pattern, shape, valid := page_pattern(route, allocator)
+		if !valid {
+			log.errorf("Invalid page route in %s", relative)
+			return {}, false
+		}
+		page_count += 1
+		if page_count > l.max_files {
+			log.errorf("Page directory exceeds the limit of %d pages", l.max_files)
+			return {}, false
+		}
+		if shape != "" {
+			if previous, present := shapes[shape]; present {
+				log.errorf("Ambiguous parameterized routes %s and %s", previous, relative)
+				return {}, false
+			}
+			shapes[shape] = route
+			append(&patterns, pattern)
+			route = pattern
 		}
 
 		if previous, collision := sources[route]; collision {
@@ -135,6 +182,8 @@ prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allo
 	if _, walk_error := os.walker_error(&walker); walk_error != nil {
 		log.error("Could not scan page directory"); return {}, false
 	}
+	cache.patterns = patterns[:]
+	slice.sort_by(cache.patterns, literal_first)
 
 	if development {
 		return cache, true
@@ -142,8 +191,18 @@ prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allo
 
 	cache.routes = make(map[string]assets.Prepared_Representation, allocator)
 
+	if len(cache.modules) * len(cache.shell) > l.max_total_bytes {
+		log.errorf(
+			"Prepared pages exceed the limit of %d bytes: %d pages of a %d byte shell",
+			l.max_total_bytes,
+			len(cache.modules),
+			len(cache.shell),
+		)
+		return {}, false
+	}
+
 	for route, module_url in cache.modules {
-		html := page_html(cache.shell, module_url, allocator)
+		html := page_html(cache.shell, module_url, allocator, route)
 		cache.routes[route], _ = assets.prepare_encoded_representation(
 			transmute([]u8)html,
 			"text/html; charset=utf-8",
@@ -157,11 +216,16 @@ prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allo
 	return cache, true
 }
 
-page_html :: proc(shell, module_url: string, allocator: mem.Allocator) -> string {
+page_html :: proc(shell, module_url: string, allocator: mem.Allocator, route := "") -> string {
+	pattern := ""
+	if strings.contains(route, ":") {
+		pattern = fmt.aprintf(` data-route="%s"`, page_attribute(route, allocator), allocator = allocator)
+	}
 	entry := fmt.aprintf(
-		`<script type="module" src="%s" data-page="%s"></script>`,
+		`<script type="module" src="%s" data-page="%s"%s></script>`,
 		modules.PAGE_ENTRY_URL,
 		page_attribute(module_url, allocator),
+		pattern,
 		allocator = allocator,
 	)
 	html, _ := strings.replace_all(shell, "<!--saba:page-->", entry, allocator)
@@ -170,36 +234,41 @@ page_html :: proc(shell, module_url: string, allocator: mem.Allocator) -> string
 }
 
 serve_prepared_pages :: proc(request: ^Request, cache: Page_Cache, development: bool) -> (Response, bool) {
-	if (request.method != "GET" && request.method != "HEAD") || cache.mount.directory == "" {
+	if (request.method != "GET" && request.method != "HEAD") || (cache.mount.directory == "" && len(cache.build.documents) == 0) {
 		return {}, false
 	}
-	path, decoded := net.percent_decode(request.path, request.allocator)
-	if !decoded || !strings.has_prefix(path, "/") || (path != "/" && !module_relative_ok(path[1:])) {
+	path, decoded := document_path(request.path, request.allocator)
+	if !decoded {
 		return {}, false
 	}
-
-	if !development {
-		prepared, found := cache.routes[path]
-		if !found {
+	if !development || len(cache.build.documents) != 0 {
+		if pattern, found := matched_page(cache, request, path); found {
+			if doc, compiled := cache.build.documents[pattern]; compiled {
+				return serve_document(request, doc, development), true
+			}
+			if !development {
+				prepared := cache.routes[pattern]
+				return assets.prepared_representation_response(request, &prepared), true
+			}
+		}
+		if !development || cache.mount.directory == "" {
 			return {}, false
 		}
-
-		return assets.prepared_representation_response(request, &prepared), true
 	}
 
-	current, ok := prepare_pages(cache.mount, true, request.allocator)
+	current, ok := prepare_legacy_pages(cache.mount, true, request.allocator)
 
 	if !ok {
 		return Response{status = .Internal_Server_Error}, true
 	}
 
-	module_url, found := current.modules[path]
+	pattern, found := matched_page(current, request, path)
 
 	if !found {
 		return {}, false
 	}
 
-	html := page_html(current.shell, module_url, request.allocator)
+	html := page_html(current.shell, current.modules[pattern], request.allocator, pattern)
 
 	return assets.representation_response(request, transmute([]u8)html, "text/html; charset=utf-8", true), true
 }

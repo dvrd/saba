@@ -167,12 +167,12 @@ prepared_representation_negotiates_per_request_and_keeps_tags_per_variant :: pro
 	tag, _ = encoding_field(head, "ETag")
 	testing.expect_value(t, tag, brotli_tag)
 
-	// Without variants the response is unchanged: three headers, no Vary.
+	// Without variants the response is unchanged: type, policy, validator and nosniff; no Vary.
 	plain_only := prepare_representation(plain[:64], "text/plain")
 	request.method = "GET"
 	request.headers = {{"Accept-Encoding", "br, gzip"}}
 	identity := prepared_representation_response(&request, &plain_only)
-	testing.expect_value(t, len(identity.headers), 3)
+	testing.expect_value(t, len(identity.headers), 4)
 	testing.expect(t, !identity.uncoded)
 	_, varied = encoding_field(identity, "Vary")
 	testing.expect(t, !varied)

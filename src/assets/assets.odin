@@ -28,7 +28,7 @@ serve_assets :: proc(request: ^Request, caches: []Asset_Cache, development := fa
 			continue
 		}
 		relative, decoded := net.percent_decode(request.path[len(cache.mount.prefix):], request.allocator)
-		if !decoded || !module_relative_ok(relative) || strings.has_suffix(relative, ".jsx") {
+		if !decoded || !module_relative_ok(relative) || jsx_source(relative) {
 			return not_found(request), true
 		}
 
@@ -120,7 +120,12 @@ representation_response :: proc(
 	development := false,
 ) -> Response {
 	if development {
-		return make_response(request, .OK, {{"Content-Type", content_type}, {"Cache-Control", "no-store"}}, body)
+		return make_response(
+			request,
+			.OK,
+			{{"Content-Type", content_type}, {"Cache-Control", "no-store"}, NOSNIFF},
+			body,
+		)
 	}
 	prepared := prepare_representation(body, content_type)
 	return prepared_representation_response(request, &prepared)
@@ -173,7 +178,15 @@ prepare_representation :: proc(body: []u8, content_type: string) -> Prepared_Rep
 	return prepared
 }
 
-// Compresses once, at prepare time: Brotli at its best level and gzip, each only when
+// Every representation a mount, build or document serves names its own type;
+// browsers must not second-guess it from the bytes.
+NOSNIFF :: Header{"X-Content-Type-Options", "nosniff"}
+
+// Retained builds are recompressed on every start; the best level is reserved
+// for the active generation.
+RETAINED_BROTLI_LEVEL :: type_of(core.BROTLI_PREPARED_LEVEL)(5)
+
+// Compresses once, at prepare time: Brotli at `level` (its best by default) and gzip, each only when
 // smaller than the original and while `budget` bytes remain. A variant that cannot
 // be allocated or is not smaller is simply absent. Returns the bytes retained.
 prepare_encoded_representation :: proc(
@@ -181,6 +194,7 @@ prepare_encoded_representation :: proc(
 	content_type: string,
 	allocator: mem.Allocator,
 	budget := max(int),
+	level := core.BROTLI_PREPARED_LEVEL,
 ) -> (
 	prepared: Prepared_Representation,
 	retained: int,
@@ -194,7 +208,7 @@ prepare_encoded_representation :: proc(
 
 	remaining := budget
 
-	if smaller := core.encode_smaller(.Brotli, body, core.BROTLI_PREPARED_LEVEL, allocator); smaller != nil {
+	if smaller := core.encode_smaller(.Brotli, body, level, allocator); smaller != nil {
 		if len(smaller) <= remaining {
 			prepared.brotli = encoded_representation(&prepared, smaller, "-br\"")
 			remaining -= len(smaller)
@@ -253,12 +267,24 @@ representation_coding :: proc(request: ^Request, representation: ^Prepared_Repre
 	return core.negotiate_coding(core.parse_accept_encoding(request.headers), available)
 }
 
-prepared_representation_response :: proc(request: ^Request, representation: ^Prepared_Representation) -> Response {
+Prepared_Cache_Policy :: enum {
+	Revalidate,
+	Private_Revalidate,
+	No_Store,
+	Private_No_Store,
+	Immutable,
+}
+
+prepared_representation_response :: proc(
+	request: ^Request,
+	representation: ^Prepared_Representation,
+	policy := Prepared_Cache_Policy.Revalidate,
+	vary := "",
+) -> Response {
 	assert(representation != nil)
 	coding := representation_coding(request, representation)
 	body := representation.body
 	tag_bytes := representation.tag[:]
-
 	switch coding {
 	case .Brotli:
 		body = representation.brotli.body
@@ -269,49 +295,63 @@ prepared_representation_response :: proc(request: ^Request, representation: ^Pre
 	case .Identity:
 	}
 
-	tag, allocation_error := strings.clone(string(tag_bytes), request.allocator)
-	if allocation_error != nil {
-		return Response{status = .Internal_Server_Error}
+	cache_controls := [Prepared_Cache_Policy]string {
+		.Revalidate         = "no-cache",
+		.Private_Revalidate = "private, no-cache",
+		.No_Store           = "no-store",
+		.Private_No_Store   = "private, no-store",
+		.Immutable          = "public, max-age=31536000, immutable",
+	}
+	tag: string
+	status := core.HTTP_Status.OK
+	if policy != .No_Store && policy != .Private_No_Store {
+		err: mem.Allocator_Error
+		tag, err = strings.clone(string(tag_bytes), request.allocator)
+		if err != nil { return {status = .Internal_Server_Error} }
+		if (request.method == "GET" || request.method == "HEAD") && not_modified(request, tag) {
+			body = nil
+			status = .Not_Modified
+		}
 	}
 
-	// Another Accept-Encoding selects another representation of the same URL.
-	varies := representation.gzip.body != nil || representation.brotli.body != nil
-	fields: [5]Header
+	fields: [6]Header
 	count := 0
-	response: Response
-
-	if (request.method == "GET" || request.method == "HEAD") && not_modified(request, tag) {
-		fields[0] = {"Cache-Control", "no-cache"}
-		fields[1] = {"ETag", tag}
-		count = 2
-
-		if varies {
-			fields[count] = {"Vary", "Accept-Encoding"}
-			count += 1
-		}
-
-		response = make_response(request, .Not_Modified, fields[:count])
-	} else {
-		fields[0] = {"Content-Type", representation.content_type}
-		fields[1] = {"Cache-Control", "no-cache"}
-		fields[2] = {"ETag", tag}
-		count = 3
-
-		if coding != .Identity {
-			fields[count] = {"Content-Encoding", core.content_coding_token(coding)}
-			count += 1
-		}
-
-		if varies {
-			fields[count] = {"Vary", "Accept-Encoding"}
-			count += 1
-		}
-
-		response = make_response(request, .OK, fields[:count], body)
+	if status == .OK {
+		fields[count] = {"Content-Type", representation.content_type}
+		count += 1
+	}
+	fields[count] = {"Cache-Control", cache_controls[policy]}
+	count += 1
+	if tag != "" {
+		fields[count] = {"ETag", tag}
+		count += 1
+	}
+	if status == .OK && coding != .Identity {
+		fields[count] = {"Content-Encoding", core.content_coding_token(coding)}
+		count += 1
 	}
 
+	// Keep the selection inputs identical for successful and conditional responses.
+	selection := vary
+	if representation.gzip.body != nil || representation.brotli.body != nil {
+		if vary == "" {
+			selection = "Accept-Encoding"
+		} else if !core.vary_lists_encoding({{"Vary", vary}}) {
+			combined, err := strings.concatenate({vary, ", Accept-Encoding"}, request.allocator)
+			if err != nil { return {status = .Internal_Server_Error} }
+			selection = combined
+		}
+	}
+	if selection != "" {
+		fields[count] = {"Vary", selection}
+		count += 1
+	}
+	if status == .OK {
+		fields[count] = NOSNIFF
+		count += 1
+	}
+	response := make_response(request, status, fields[:count], body)
 	response.uncoded = representation.prepared
-
 	return response
 }
 
@@ -436,11 +476,12 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 	if type_error != nil {
 		return {status = .Internal_Server_Error}
 	}
-	headers: [6]Header
+	headers: [7]Header
 	headers[0] = {"Content-Type", content_type}
 	headers[1] = {"Accept-Ranges", "bytes"}
 	headers[2] = {"Cache-Control", cache_policy}
-	count := 3
+	headers[3] = NOSNIFF
+	count := 4
 
 	if tag != "" {
 		headers[count] = {"ETag", tag}
@@ -585,7 +626,7 @@ file_strong_tag :: proc(tag: string) -> bool {
 
 file_relative_decode :: proc(relative: string, allocator: mem.Allocator) -> (string, bool) {
 	decoded, valid := net.percent_decode(relative, allocator)
-	if !valid || !module_relative_ok(decoded) || strings.has_suffix(decoded, ".jsx") {
+	if !valid || !module_relative_ok(decoded) || jsx_source(decoded) {
 		return "", false
 	}
 
@@ -675,15 +716,17 @@ file_storage_allocator :: proc(
 	return charged.allocator(binding), binding, true
 }
 
+// Buffers one regular file of at most FILE_BYTES_MAX; larger files belong to
+// serve_file_stream. The path is the caller's and never reaches the client.
 serve_file :: proc(request: ^Request, path: string, content_type := "text/html; charset=utf-8") -> Response {
-	body, file_err := os.read_entire_file(path, request.allocator)
+	body, read := read_limited(path, FILE_BYTES_MAX, request.allocator)
 
-	if file_err != nil {
-		log.error("Could not read file:", path, "| error:", file_err)
+	if read.kind != .None {
+		log.error("Could not read file:", path, "| error:", read.kind, read.io)
 		return Response{status = .Internal_Server_Error}
 	}
 
-	return make_response(request, .OK, []Header{{"Content-Type", content_type}}, body)
+	return make_response(request, .OK, []Header{{"Content-Type", content_type}, NOSNIFF}, body)
 }
 
 Asset_Mount :: struct {
@@ -968,7 +1011,7 @@ preload_directory :: proc(
 
 		relative := file.fullpath[len(cache.mount.directory) + 1:]
 
-		if !module_relative_ok(relative) || strings.has_suffix(relative, ".jsx") {
+		if !module_relative_ok(relative) || jsx_source(relative) {
 			continue
 		}
 

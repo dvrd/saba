@@ -10,7 +10,8 @@ main :: proc() {
 	logger := log.create_console_logger()
 	defer log.destroy_console_logger(logger)
 	context.logger = logger
-	handled, success := server.develop({package_directory = "src"})
+	collection := fmt.tprintf("-collection:shared=%s", os.get_env("SABA_TEST_SHARED", context.temp_allocator))
+	handled, success := server.develop({package_directory = "src", build_arguments = {collection}})
 
 	if handled {
 		if !success {

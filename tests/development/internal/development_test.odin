@@ -2,9 +2,11 @@ package saba_development
 
 import "core:fmt"
 import "core:log"
+import "core:mem"
 import "core:os"
 import "core:strconv"
 import "core:strings"
+import "core:sync"
 import "core:sys/posix"
 import "core:testing"
 import "core:time"
@@ -55,8 +57,9 @@ development_rebuild_keeps_failed_builds_running_and_cleans_up :: proc(t: ^testin
 	if compiler == "" {
 		compiler = "odin"
 	}
+	collection := fmt.tprintf("-collection:shared=%s", os.get_env("SABA_TEST_SHARED", context.temp_allocator))
 	build, output, errors, built := os.process_exec(
-		{command = {compiler, "build", source, fmt.tprintf("-out:%s", binary)}},
+		{command = {compiler, "build", source, fmt.tprintf("-out:%s", binary), collection}},
 		context.temp_allocator,
 	)
 	if !testing.expectf(t, built == nil && build.success, "compile supervisor: %s%s", string(output), string(errors)) {
@@ -216,4 +219,174 @@ signature_hashes_content_only_when_size_or_mtime_change :: proc(t: ^testing.T) {
 	testing.expect(t, removed != edited)
 	testing.expect_value(t, len(cache.files), 1)
 	testing.expect_value(t, cache.hashed, 4)
+}
+
+// The hot reload scan reads source text only, and never an unbounded file.
+@(test)
+web_signature_reads_only_bounded_source_text :: proc(t: ^testing.T) {
+	directory, err := os.make_directory_temp("", "saba-watch-test-*", context.temp_allocator)
+	if !testing.expect(t, err == nil, "isolated directory") {
+		return
+	}
+	defer _ = os.remove_all(directory)
+	assert(os.make_directory(fmt.tprintf("%s/node_modules", directory)) == nil)
+	assert(os.make_directory(fmt.tprintf("%s/.cache", directory)) == nil)
+	page := fmt.tprintf("%s/page.jsx", directory)
+	image := fmt.tprintf("%s/photo.png", directory)
+	bundle := fmt.tprintf("%s/bundle.js", directory)
+	signature_test_write(page, "export default () => null")
+	signature_test_write(image, "not really a png")
+	signature_test_write(fmt.tprintf("%s/node_modules/dep.js", directory), "export default 1")
+	signature_test_write(fmt.tprintf("%s/.cache/state.json", directory), "{}")
+	signature_test_write(fmt.tprintf("%s/.env", directory), "SECRET=1")
+	// Sparse: larger than the content limit without writing it.
+	large, open_error := os.open(bundle, {.Write, .Create})
+	assert(open_error == nil)
+	_, seek_error := os.seek(large, WATCH_CONTENT_BYTES, .Start)
+	assert(seek_error == nil)
+	_, write_error := os.write(large, []u8{1})
+	assert(write_error == nil)
+	os.close(large)
+
+	cache: Signature_Cache
+	defer signature_cache_destroy(&cache)
+	base, ok := web_signature(directory, &cache)
+	testing.expect(t, ok)
+	testing.expect_value(t, cache.hashed, 1) // page.jsx alone was read
+	testing.expect_value(t, len(cache.files), 3)
+
+	// Nothing under an ignored directory or a dotfile can trigger a reload.
+	signature_test_write(fmt.tprintf("%s/node_modules/dep.js", directory), "export default 2")
+	signature_test_write(fmt.tprintf("%s/.cache/state.json", directory), `{"n":1}`)
+	signature_test_write(fmt.tprintf("%s/.env", directory), "SECRET=2")
+	ignored, _ := web_signature(directory, &cache)
+	testing.expect_value(t, ignored, base)
+
+	// Unread files still publish a change of size or modification time.
+	later := time.time_add(time.now(), time.Hour)
+	assert(os.change_times(image, later, later) == nil)
+	touched, _ := web_signature(directory, &cache)
+	testing.expect(t, touched != base, "a replaced image did not change the signature")
+	assert(os.change_times(bundle, later, later) == nil)
+	rebuilt, _ := web_signature(directory, &cache)
+	testing.expect(t, rebuilt != touched, "a replaced bundle did not change the signature")
+	testing.expect_value(t, cache.hashed, 1)
+
+	testing.expect(t, watched_content("a/View.JSX") && watched_content("site.css"))
+	testing.expect(t, !watched_content("font.woff2") && !watched_content("archive.zip"))
+}
+
+// Only the page this server delivered may subscribe to reload events.
+@(test)
+reload_socket_rejects_foreign_origins :: proc(t: ^testing.T) {
+	testing.expect(t, reload_origin_allowed("", "localhost:8080"))
+	testing.expect(t, reload_origin_allowed("http://localhost:8080", "localhost:8080"))
+	testing.expect(t, reload_origin_allowed("HTTPS://Dev.Example:8443", "dev.example:8443"))
+	testing.expect(t, !reload_origin_allowed("http://evil.example", "localhost:8080"))
+	testing.expect(t, !reload_origin_allowed("http://localhost:8080.evil.example", "localhost:8080"))
+	testing.expect(t, !reload_origin_allowed("http://localhost:9090", "localhost:8080"))
+	testing.expect(t, !reload_origin_allowed("null", "localhost:8080"))
+	testing.expect(t, !reload_origin_allowed("http://localhost:8080", ""))
+
+	state: Reload_State
+	request := Request {
+		method    = "GET",
+		path      = "/__reload",
+		allocator = context.temp_allocator,
+	}
+	handshake := []Header {
+		{"Host", "localhost:8080"},
+		{"Upgrade", "websocket"},
+		{"Connection", "Upgrade"},
+		{"Sec-WebSocket-Version", "13"},
+		{"Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ=="},
+		{"Origin", "http://evil.example"},
+	}
+	request.headers = handshake
+	refused, matched := handle(&state, &request)
+	testing.expect(t, matched)
+	testing.expect_value(t, refused.status, HTTP_Status.Forbidden)
+	testing.expect(t, refused.upgrade.data == nil)
+
+	handshake[5].value = "http://localhost:8080"
+	accepted, _ := handle(&state, &request)
+	testing.expect_value(t, accepted.status, HTTP_Status.Switching_Protocols)
+	if accepted.upgrade.drop != nil {
+		accepted.upgrade.drop(accepted.upgrade.data)
+	}
+	// Non-browser clients send no Origin and keep working.
+	request.headers = handshake[:5]
+	tool, _ := handle(&state, &request)
+	testing.expect_value(t, tool.status, HTTP_Status.Switching_Protocols)
+	if tool.upgrade.drop != nil {
+		tool.upgrade.drop(tool.upgrade.data)
+	}
+}
+
+Watch_Step_Fixture :: struct {
+	rebuilds: int,
+	publish:  bool,
+}
+
+// A long session must not accumulate rebuild scratch on the watcher thread.
+@(test)
+watcher_releases_scratch_storage_after_each_scan :: proc(t: ^testing.T) {
+	// The directory name must outlive the private scratch allocator below.
+	directory, err := os.make_directory_temp("", "saba-watch-step-*", context.allocator)
+	if !testing.expect(t, err == nil, "isolated directory") {
+		return
+	}
+	defer delete(directory)
+	defer _ = os.remove_all(directory)
+	page := strings.concatenate({directory, "/page.js"})
+	defer delete(page)
+	signature_test_write(page, "one")
+
+	fixture := Watch_Step_Fixture {
+		publish = true,
+	}
+	state := Reload_State {
+		directory = directory,
+		reload_data = &fixture,
+		before_reload = proc(data: rawptr) -> bool {
+			fixture := cast(^Watch_Step_Fixture)data
+			fixture.rebuilds += 1
+			// What a rebuild does: formatted names and diagnostics in scratch storage.
+			for index in 0 ..< 64 {
+				_ = fmt.tprintf("/__saba/build/%d/module-%d.js", fixture.rebuilds, index)
+			}
+			return fixture.publish
+		},
+	}
+	storage := make([]u8, 1 << 20)
+	defer delete(storage)
+	arena: mem.Arena
+	mem.arena_init(&arena, storage)
+	context.temp_allocator = mem.arena_allocator(&arena)
+
+	cache: Signature_Cache
+	defer signature_cache_destroy(&cache)
+	progress: Watch_Progress
+	progress.observed, _ = web_signature(directory, &cache)
+	progress.published = progress.observed
+	mem.arena_free_all(&arena)
+
+	watch_web_step(&state, &progress, &cache)
+	testing.expect_value(t, fixture.rebuilds, 0)
+	signature_test_write(page, "two!")
+	watch_web_step(&state, &progress, &cache) // observed
+	testing.expect_value(t, fixture.rebuilds, 0)
+	watch_web_step(&state, &progress, &cache) // confirmed and published
+	testing.expect_value(t, fixture.rebuilds, 1)
+	testing.expect_value(t, sync.atomic_load(&state.version), u64(1))
+	testing.expect_value(t, arena.offset, 0)
+
+	// A failed rebuild publishes nothing and still releases its scratch.
+	fixture.publish = false
+	signature_test_write(page, "three")
+	watch_web_step(&state, &progress, &cache)
+	watch_web_step(&state, &progress, &cache)
+	testing.expect_value(t, fixture.rebuilds, 2)
+	testing.expect_value(t, sync.atomic_load(&state.version), u64(1))
+	testing.expect_value(t, arena.offset, 0)
 }

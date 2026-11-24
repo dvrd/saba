@@ -41,3 +41,9 @@ module_relative_ok :: proc(relative: string) -> bool {
 
 	return true
 }
+
+// Component sources never leave a mount. Case-insensitive volumes resolve
+// `page.JSX` to `page.jsx`, so the suffix is compared without regard to case.
+jsx_source :: proc(path: string) -> bool {
+	return len(path) >= 4 && strings.equal_fold(path[len(path) - 4:], ".jsx")
+}

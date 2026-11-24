@@ -395,7 +395,14 @@ signature_cache_finish :: proc(cache: ^Signature_Cache, complete: bool) {
 }
 
 // Path and content folded into one value, so a rename changes the signature.
-file_signature :: proc(info: os.File_Info, cache: ^Signature_Cache) -> (signature: u64, ok: bool) {
+file_signature :: proc(
+	info: os.File_Info,
+	cache: ^Signature_Cache,
+	content := true,
+) -> (
+	signature: u64,
+	ok: bool,
+) {
 	if cache != nil {
 		stamp, found := cache.files[info.fullpath]
 
@@ -405,6 +412,24 @@ file_signature :: proc(info: os.File_Info, cache: ^Signature_Cache) -> (signatur
 
 			return stamp.hash, true
 		}
+	}
+
+	if !content || info.size > WATCH_CONTENT_BYTES {
+		// Never read: a change of size or modification time is the whole signal.
+		stamp := [2]i64{info.size, time.to_unix_nanoseconds(info.modification_time)}
+		signature = hash.fnv64a(
+			(cast([^]byte)&stamp)[:size_of(stamp)],
+			hash.fnv64a(transmute([]byte)info.fullpath),
+		)
+		if cache != nil {
+			entry := File_Stamp{info.size, info.modification_time, signature, cache.scan}
+			if _, found := cache.files[info.fullpath]; found {
+				cache.files[info.fullpath] = entry
+			} else {
+				cache.files[strings.clone(info.fullpath)] = entry
+			}
+		}
+		return signature, true
 	}
 
 	bytes, err := os.read_entire_file(info.fullpath, context.allocator)
@@ -488,6 +513,36 @@ development_signature :: proc(paths: []string, cache: ^Signature_Cache = nil) ->
 	return
 }
 
+// The hot reload scan reads only source text, and only up to this size. Images,
+// fonts, media, archives and anything larger are compared by size and
+// modification time, so a large web root costs a directory walk per scan.
+WATCH_CONTENT_BYTES :: 8 << 20
+
+watched_content :: proc(name: string) -> bool {
+	extension := filepath.ext(name)
+	for known in ([]string {
+			".js",
+			".jsx",
+			".mjs",
+			".css",
+			".html",
+			".htm",
+			".json",
+			".svg",
+			".txt",
+			".md",
+			".xml",
+			".webmanifest",
+			".odin",
+			".sql",
+		}) {
+		if strings.equal_fold(extension, known) {
+			return true
+		}
+	}
+	return false
+}
+
 RELOAD_CLIENT :: #load("reload_client.js", string)
 RELOAD_CLIENT_TAG :: `<script type="module" src="/__reload/client.js"></script>`
 
@@ -499,6 +554,8 @@ Reload_State :: struct {
 	stopped:           bool,
 	initial_signature: u64,
 	logger:            log.Logger,
+	before_reload:     proc(rawptr) -> bool,
+	reload_data:       rawptr,
 }
 
 reload_client_response :: proc(request: ^Request) -> Response {
@@ -561,7 +618,7 @@ inject_reload_client :: proc(html: []u8, allocator := context.allocator) -> (inj
 	return injected, true
 }
 
-web_signature :: proc(directory: string, cache: ^Signature_Cache = nil) -> (signature: u64, ok: bool) {
+web_signature :: proc(directory: string, cache: ^Signature_Cache = nil, skip_build_archives := false) -> (signature: u64, ok: bool) {
 	walker := os.walker_create(directory)
 	defer os.walker_destroy(&walker)
 
@@ -570,11 +627,21 @@ web_signature :: proc(directory: string, cache: ^Signature_Cache = nil) -> (sign
 	defer signature_cache_finish(cache, ok)
 
 	for info in os.walker_walk(&walker) {
-		if info.type != .Regular {
+		if info.type == .Directory {
+			// Never served, and often very large.
+			if strings.has_prefix(info.name, ".") || info.name == "node_modules" {
+				os.walker_skip_dir(&walker)
+			}
+			continue
+		}
+		if info.type != .Regular || strings.has_prefix(info.name, ".") {
+			continue
+		}
+		if skip_build_archives && (strings.has_suffix(info.name, ".saba-build.json") || strings.has_suffix(info.name, ".saba-build.json.staging")) {
 			continue
 		}
 
-		file_signature, readable := file_signature(info, cache)
+		file_signature, readable := file_signature(info, cache, watched_content(info.name))
 
 		if !readable {
 			log.error("Could not read watched file:", info.fullpath)
@@ -593,35 +660,65 @@ web_signature :: proc(directory: string, cache: ^Signature_Cache = nil) -> (sign
 	return
 }
 
+Watch_Progress :: struct {
+	observed, published: u64,
+}
+
 watch_web :: proc(state: ^Reload_State) {
 	context.logger = state.logger
 
-	observed := state.initial_signature
-	published := state.initial_signature
+	progress := Watch_Progress{state.initial_signature, state.initial_signature}
 	cache: Signature_Cache
 	defer signature_cache_destroy(&cache)
 
 	for !sync.atomic_load(&state.stopped) {
 		time.sleep(RELOAD_INTERVAL)
-
-		current, ok := web_signature(state.directory, &cache)
-		if !ok {
-			continue
-		}
-
-		// Wait for two matching scans before publishing a change.
-		if current != observed {
-			observed = current
-			continue
-		}
-
-		if current != published {
-			version := sync.atomic_load(&state.version)
-			sync.atomic_store(&state.version, version + 1)
-
-			published = current
-		}
+		watch_web_step(state, &progress, &cache)
 	}
+}
+
+// One scan and, when two scans agree on a change, one publication. Scratch
+// storage used by the scan and by a rebuild is released before returning, so a
+// long session does not accumulate it on the watcher thread.
+watch_web_step :: proc(state: ^Reload_State, progress: ^Watch_Progress, cache: ^Signature_Cache) {
+	defer free_all(context.temp_allocator)
+
+	current, ok := web_signature(state.directory, cache, state.before_reload != nil)
+	if !ok {
+		return
+	}
+
+	// Wait for two matching scans before publishing a change.
+	if current != progress.observed {
+		progress.observed = current
+		return
+	}
+
+	if current != progress.published {
+		progress.published = current
+		if state.before_reload != nil && !state.before_reload(state.reload_data) {
+			return
+		}
+		version := sync.atomic_load(&state.version)
+		sync.atomic_store(&state.version, version + 1)
+	}
+}
+
+// A browser sends Origin with every WebSocket handshake. Only the page this
+// server itself delivered may subscribe; clients that send none are not browsers.
+reload_origin_allowed :: proc(origin, host: string) -> bool {
+	if origin == "" {
+		return true
+	}
+	authority := origin
+	if len(origin) >= 8 && strings.equal_fold(origin[:8], "https://") {
+		authority = origin[8:]
+	} else if len(origin) >= 7 && strings.equal_fold(origin[:7], "http://") {
+		authority = origin[7:]
+	} else {
+		return false
+	}
+	return host != "" && strings.equal_fold(authority, host)
 }
 
 Session_Phase :: enum {
@@ -650,6 +747,9 @@ handle :: proc(state: ^Reload_State, request: ^Request) -> (Response, bool) {
 	}
 	if !core.match_route(request, "GET", "/__reload") {
 		return {}, false
+	}
+	if !reload_origin_allowed(header_value(request, "Origin"), header_value(request, "Host")) {
+		return {status = .Forbidden}, true
 	}
 	accept_storage, allocation_error := make([]u8, 28, request.allocator)
 	if allocation_error != nil {

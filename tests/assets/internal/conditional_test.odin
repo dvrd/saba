@@ -48,7 +48,9 @@ representation_validators_and_conditional_fields :: proc(t: ^testing.T) {
 				testing.expect_value(t, cached.headers[index].value, field.value)
 			}
 			testing.expect_value(t, response.status, item.status)
-			testing.expect_value(t, response.headers[len(response.headers) - 1].value, tag)
+			// Looked up by name: a 200 now ends with X-Content-Type-Options.
+			validator, _ := encoding_field(response, "ETag")
+			testing.expect_value(t, validator, tag)
 			if item.status == .Not_Modified {
 				testing.expect_value(t, len(response.body), 0)
 			} else {
@@ -64,7 +66,8 @@ representation_validators_and_conditional_fields :: proc(t: ^testing.T) {
 	dev := representation_response(&request, body, "text/plain", true)
 	testing.expect_value(t, dev.status, .OK)
 	testing.expect_value(t, dev.headers[1].value, "no-store")
-	testing.expect_value(t, len(dev.headers), 2)
+	testing.expect_value(t, len(dev.headers), 3)
+	testing.expect_value(t, dev.headers[2].value, "nosniff")
 	empty := representation_response(&request, nil, "text/plain")
 	testing.expect_value(
 		t,

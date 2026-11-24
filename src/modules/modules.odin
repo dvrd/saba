@@ -10,6 +10,8 @@ import "core:strings"
 import jsx "../jsx"
 import "core:mem"
 import core "../core"
+import rt "base:runtime"
+import "core:sync"
 
 // Mounts an entire module directory. Development transforms JSX on request;
 // production file-only callers may serve already generated JavaScript. Server
@@ -20,6 +22,7 @@ serve_modules :: proc(
 	directory: string,
 	prefix := "/",
 	development := false,
+	exclude: []string = nil,
 ) -> (
 	response: Response,
 	matched: bool,
@@ -28,7 +31,7 @@ serve_modules :: proc(
 	if !module_matched {
 		return {}, false
 	}
-	if response_error {
+	if response_error || module_excluded(exclude, relative) {
 		return not_found(request), true
 	}
 	root, root_error := filepath.abs(directory, request.allocator)
@@ -36,9 +39,13 @@ serve_modules :: proc(
 		log.errorf("Could not resolve module directory %s: %v", directory, root_error)
 		return Response{status = .Internal_Server_Error}, true
 	}
+	return read_module(request, root, relative, development), true
+}
+
+read_module :: proc(request: ^Request, root, relative: string, development: bool) -> Response {
 	javascript, has_javascript, javascript_allowed := module_file(root, relative, request.allocator)
 	if !javascript_allowed {
-		return not_found(request), true
+		return not_found(request)
 	}
 	if development {
 		source, has_source, source_allowed := module_file(
@@ -47,45 +54,53 @@ serve_modules :: proc(
 			request.allocator,
 		)
 		if !source_allowed {
-			return not_found(request), true
+			return not_found(request)
 		}
 
 		if has_source && has_javascript {
 			log.errorf("JSX output collides with an existing JavaScript file: %s", relative)
-			return Response{status = .Internal_Server_Error}, true
+			return Response{status = .Internal_Server_Error}
 		}
 
 		if has_source {
-			return serve_jsx(request, source), true
+			// The client sees the mount-relative name; the log keeps the full path.
+			return serve_jsx(request, source, fmt.tprintf("%s.jsx", relative[:len(relative) - len(".js")]))
 		}
 	}
 	if !has_javascript {
-		return not_found(request), true
+		return not_found(request)
 	}
-	body, read_error := os.read_entire_file(javascript, request.allocator)
-	if read_error != nil {
-		return Response{status = .Internal_Server_Error}, true
+	body, read := assets.read_limited(javascript, assets.DEFAULT_ASSET_LIMITS.max_file_bytes, request.allocator)
+	if read.kind != .None {
+		log.errorf("Could not read module %s: %v %v", javascript, read.kind, read.io)
+		return Response{status = .Internal_Server_Error}
 	}
-	return assets.representation_response(request, body, "text/javascript; charset=utf-8", development), true
+	return assets.representation_response(request, body, "text/javascript; charset=utf-8", development)
 }
 
-serve_jsx :: proc(request: ^Request, source_path: string) -> Response {
-	source, read_error := os.read_entire_file(source_path, request.allocator)
+// `display` names the source in the diagnostic sent to the browser. It defaults
+// to the file's base name so a filesystem layout never reaches a client.
+serve_jsx :: proc(request: ^Request, source_path: string, display := "") -> Response {
+	source, read := assets.read_limited(source_path, assets.DEFAULT_ASSET_LIMITS.max_file_bytes, request.allocator)
 
-	if read_error != nil {
-		log.errorf("Could not read JSX module %s: %v", source_path, read_error)
+	if read.kind != .None {
+		log.errorf("Could not read JSX module %s: %v %v", source_path, read.kind, read.io)
 		return Response{status = .Internal_Server_Error}
 	}
 
 	output, error := transform_jsx(string(source), source_path, request.allocator)
 
 	if error.message != "" {
-		message := fmt.tprintf("%s:%d:%d: %s", error.file, error.line, error.column, error.message)
-		log.error(message)
+		shown := display
+		if shown == "" {
+			shown = filepath.base(source_path)
+		}
+		log.errorf("%s:%d:%d: %s", error.file, error.line, error.column, error.message)
+		message := fmt.aprintf("%s:%d:%d: %s", shown, error.line, error.column, error.message, allocator = request.allocator)
 		return make_response(
 			request,
 			.Internal_Server_Error,
-			{{"Content-Type", "text/plain; charset=utf-8"}, {"Cache-Control", "no-store"}},
+			{{"Content-Type", "text/plain; charset=utf-8"}, {"Cache-Control", "no-store"}, assets.NOSNIFF},
 			transmute([]u8)message,
 		)
 	}
@@ -97,6 +112,26 @@ serve_jsx :: proc(request: ^Request, source_path: string) -> Response {
 Module_Mount :: struct {
 	directory: string,
 	prefix:    string,
+	// Mount-relative files or directories that are not browser modules, for
+	// example "server" or "tools/build.js". They are neither compiled nor served.
+	exclude:   []string,
+}
+
+module_excluded :: proc(exclude: []string, relative: string) -> bool {
+	for entry in exclude {
+		name := strings.trim(entry, "/")
+		if name == "" {
+			continue
+		}
+		if relative == name || (len(relative) > len(name) && strings.has_prefix(relative, name) && relative[len(name)] == '/') {
+			return true
+		}
+		// A compiled component is addressed as .js and stored as .jsx.
+		if strings.has_suffix(name, ".jsx") && strings.has_suffix(relative, ".js") && relative[:len(relative) - 3] == name[:len(name) - 4] {
+			return true
+		}
+	}
+	return false
 }
 
 Module_Cache :: struct {
@@ -107,7 +142,7 @@ Module_Cache :: struct {
 serve_prepared_modules :: proc(request: ^Request, mounts: []Module_Cache, development: bool) -> (Response, bool) {
 	for mount in mounts {
 		if development {
-			if response, matched := serve_modules(request, mount.mount.directory, mount.mount.prefix, true); matched {
+			if response, matched := serve_modules(request, mount.mount.directory, mount.mount.prefix, true, mount.mount.exclude); matched {
 				return response, true
 			}
 			continue
@@ -154,16 +189,104 @@ module_request :: proc(request: ^Request, prefix: string) -> (path: string, inva
 
 JSX_RUNTIME_URL :: jsx.JSX_RUNTIME_URL
 JSX_RUNTIME :: #load("dom.js", string)
-
-jsx_runtime_response :: proc(request: ^Request) -> Response {
-	return assets.representation_response(request, transmute([]u8)JSX_RUNTIME, "text/javascript; charset=utf-8")
-}
-
 PAGE_ENTRY_URL :: "/__saba/page-entry.js"
 PAGE_ENTRY :: #load("page-entry.js", string)
+SLIDING_WINDOW_URL :: "/__saba/sliding-window.js"
+SLIDING_WINDOW :: #load("sliding-window.js", string)
+SLOT_WINDOW_URL :: "/__saba/slot-window.js"
+SLOT_WINDOW :: #load("slot-window.js", string)
+SCALAR_RECORDS_URL :: "/__saba/scalar-records.js"
+SCALAR_RECORDS :: #load("scalar-records.js", string)
+
+READS_URL :: "/__saba/reads.js"
+READS :: #load("reads.js", string)
+MUTATIONS_URL :: "/__saba/mutations.js"
+MUTATIONS :: #load("mutations.js", string)
+EDITOR_URL :: "/__saba/editor.js"
+EDITOR :: #load("editor.js", string)
+ATTACH_URL :: "/__saba/attach.js"
+ATTACH :: #load("attach.js", string)
+
+// The framework modules every legacy page may request by a fixed URL. Their
+// validators and encoded variants are computed once per process, not per request.
+Builtin_Module :: struct {
+	url, source: string,
+}
+
+BUILTIN_MODULES :: [?]Builtin_Module {
+	{JSX_RUNTIME_URL, JSX_RUNTIME},
+	{PAGE_ENTRY_URL, PAGE_ENTRY},
+	{SLIDING_WINDOW_URL, SLIDING_WINDOW},
+	{SLOT_WINDOW_URL, SLOT_WINDOW},
+	{SCALAR_RECORDS_URL, SCALAR_RECORDS},
+	{READS_URL, READS},
+	{MUTATIONS_URL, MUTATIONS},
+	{EDITOR_URL, EDITOR},
+	{ATTACH_URL, ATTACH},
+}
+
+@(private)
+builtin_prepared: [len(BUILTIN_MODULES)]assets.Prepared_Representation
+@(private)
+builtin_once: sync.Once
+
+// Idempotent and safe from any thread. The application prepares before
+// listening; a direct caller prepares on its first request instead.
+prepare_builtin_modules :: proc() {
+	sync.once_do(&builtin_once, proc() {
+		// Process-lifetime storage, deliberately outside any request or build arena.
+		for module, index in BUILTIN_MODULES {
+			builtin_prepared[index], _ = assets.prepare_encoded_representation(
+				transmute([]u8)module.source,
+				"text/javascript; charset=utf-8",
+				rt.heap_allocator(),
+			)
+		}
+	})
+}
+
+builtin_module :: proc(url: string) -> (^assets.Prepared_Representation, bool) {
+	for module, index in BUILTIN_MODULES {
+		if module.url == url {
+			prepare_builtin_modules()
+			return &builtin_prepared[index], true
+		}
+	}
+	return nil, false
+}
+
+// Matches GET and HEAD of one framework module URL.
+builtin_module_response :: proc(request: ^Request) -> (Response, bool) {
+	if request.method != "GET" && request.method != "HEAD" {
+		return {}, false
+	}
+	prepared, found := builtin_module(request.path)
+	if !found {
+		return {}, false
+	}
+	return assets.prepared_representation_response(request, prepared), true
+}
+
+@(private)
+builtin_response :: proc(request: ^Request, url: string) -> Response {
+	prepared, _ := builtin_module(url)
+	return assets.prepared_representation_response(request, prepared)
+}
+
+jsx_runtime_response :: proc(request: ^Request) -> Response {
+	return builtin_response(request, JSX_RUNTIME_URL)
+}
 
 page_entry_response :: proc(request: ^Request) -> Response {
-	return assets.representation_response(request, transmute([]u8)PAGE_ENTRY, "text/javascript; charset=utf-8")
+	return builtin_response(request, PAGE_ENTRY_URL)
+}
+
+reads_response :: proc(request: ^Request) -> Response {
+	return builtin_response(request, READS_URL)
+}
+
+sliding_window_response :: proc(request: ^Request) -> Response {
+	return builtin_response(request, SLIDING_WINDOW_URL)
 }
 
 // Server-owned memory keeps compiled modules alive through the final response.
@@ -172,15 +295,28 @@ prepare_module_mounts :: proc(
 	mounts: []Module_Mount,
 	development: bool,
 	allocator: mem.Allocator,
+	// Zero fields select the asset defaults: 16 mounts, 4096 modules, 16384
+	// directory entries, 8 MiB per file and 64 MiB retained across all mounts.
+	limits := assets.Asset_Limits{},
 ) -> (
 	[]Module_Cache,
 	bool,
 ) {
+	l, limits_valid := assets.normalize_limits(limits)
+	if !limits_valid {
+		log.error("Module limits are invalid")
+		return nil, false
+	}
+	if len(mounts) > l.max_mounts {
+		log.errorf("Module mounts exceed the limit of %d: %d", l.max_mounts, len(mounts))
+		return nil, false
+	}
 	prepared, allocation_error := make([]Module_Cache, len(mounts), allocator)
 	if allocation_error != nil {
 		log.error("Could not allocate module mounts")
 		return nil, false
 	}
+	counts: assets.Asset_Counts
 	for mount, index in mounts {
 		prefix := mount.prefix
 		if prefix == "" {
@@ -213,27 +349,58 @@ prepare_module_mounts :: proc(
 			return nil, false
 		}
 
-		prepared[index].mount = {root, owned_prefix}
-		if !development && !compile_module_directory(&prepared[index], allocator) {
+		exclude, exclude_error := make([]string, len(mount.exclude), allocator)
+		if exclude_error != nil {
+			log.error("Could not copy module exclusions")
+			return nil, false
+		}
+		for entry, at in mount.exclude {
+			exclude[at], _ = strings.clone(entry, allocator)
+		}
+
+		prepared[index].mount = {directory = root, prefix = owned_prefix, exclude = exclude}
+		if !development && !compile_module_directory(&prepared[index], allocator, l, &counts) {
 			return nil, false
 		}
 	}
 	return prepared, true
 }
 
-compile_module_directory :: proc(cache: ^Module_Cache, allocator: mem.Allocator) -> bool {
+compile_module_directory :: proc(
+	cache: ^Module_Cache,
+	allocator: mem.Allocator,
+	limits := assets.Asset_Limits{},
+	counts: ^assets.Asset_Counts = nil,
+) -> bool {
+	l, limits_valid := assets.normalize_limits(limits)
+	if !limits_valid {
+		log.error("Module limits are invalid")
+		return false
+	}
+	local: assets.Asset_Counts
+	counts := counts
+	if counts == nil {
+		counts = &local
+	}
 	root := cache.mount.directory
 	cache.files = make(map[string]assets.Prepared_Representation, allocator)
 	walker := os.walker_create(root)
 	defer os.walker_destroy(&walker)
 
 	for file in os.walker_walk(&walker) {
+		counts.entries += 1
+		if counts.entries > l.max_entries {
+			log.errorf("Module directory %s exceeds the limit of %d entries", root, l.max_entries)
+			return false
+		}
 		if file.type != .Regular {
 			continue
 		}
 		relative := file.fullpath[len(root) + 1:]
 		is_jsx := strings.has_suffix(relative, ".jsx")
-		if (!is_jsx && !strings.has_suffix(relative, ".js")) || !module_relative_ok(relative) {
+		if (!is_jsx && !strings.has_suffix(relative, ".js")) ||
+		   !module_relative_ok(relative) ||
+		   module_excluded(cache.mount.exclude, relative) {
 			continue
 		}
 		resolved, found, allowed := module_file(root, relative, allocator)
@@ -253,10 +420,23 @@ compile_module_directory :: proc(cache: ^Module_Cache, allocator: mem.Allocator)
 			return false
 		}
 
-		source, read_error := os.read_entire_file(resolved, allocator)
+		if counts.files == l.max_files {
+			log.errorf("Module mounts exceed the limit of %d files at %s", l.max_files, resolved)
+			return false
+		}
+		remaining := l.max_total_bytes - counts.bytes
+		source, read := assets.read_limited(resolved, max(1, min(l.max_file_bytes, remaining)), allocator)
 
-		if read_error != nil {
-			log.errorf("Could not read module %s: %v", resolved, read_error)
+		if read.kind != .None {
+			if read.kind == .Limit_Exceeded {
+				if remaining < l.max_file_bytes {
+					log.errorf("Module mounts exceed the limit of %d retained bytes at %s", l.max_total_bytes, resolved)
+				} else {
+					log.errorf("Module %s exceeds the limit of %d bytes", resolved, l.max_file_bytes)
+				}
+				return false
+			}
+			log.errorf("Could not read module %s: %v %v", resolved, read.kind, read.io)
 			return false
 		}
 
@@ -279,6 +459,11 @@ compile_module_directory :: proc(cache: ^Module_Cache, allocator: mem.Allocator)
 			output = javascript
 		}
 
+		if len(output) > remaining {
+			log.errorf("Module mounts exceed the limit of %d retained bytes at %s", l.max_total_bytes, resolved)
+			return false
+		}
+
 		key, key_error := strings.clone(url, allocator)
 
 		if key_error != nil {
@@ -286,11 +471,15 @@ compile_module_directory :: proc(cache: ^Module_Cache, allocator: mem.Allocator)
 			return false
 		}
 
-		cache.files[key], _ = assets.prepare_encoded_representation(
+		extra: int
+		cache.files[key], extra = assets.prepare_encoded_representation(
 			transmute([]u8)output,
 			"text/javascript; charset=utf-8",
 			allocator,
+			remaining - len(output),
 		)
+		counts.files += 1
+		counts.bytes += len(output) + extra
 	}
 
 	if path, error := os.walker_error(&walker); error != nil {

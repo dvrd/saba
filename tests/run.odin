@@ -117,6 +117,14 @@ run :: proc() -> int {
 	if error := os.symlink(join(repository, "src"), join(shared, "saba")); error != nil {
 		return fail("Could not mount Saba in the test collection", error)
 	}
+	// Private tests reach their fixtures as ../../testdata/... or ../../tests/...
+	// from src/<package>. A nested build that enters the library through the link
+	// above resolves those beside the link, so the fixtures are linked there too.
+	for directory in ([]string{"tests", "testdata"}) {
+		if error := os.symlink(join(repository, directory), join(shared, directory)); error != nil {
+			return fail(fmt.tprintf("Could not mount %s in the test collection", directory), error)
+		}
+	}
 
 	if error := os.set_env("ODIN", options.compiler); error != nil {
 		return fail("Could not set test compiler", error)

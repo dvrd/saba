@@ -18,9 +18,9 @@
     {
       "name": "http",
       "source": "local",
-      "tag": "v0.1.0",
-      "commit": "5899d6e2839cadd7d21943554dd22ecbe1932087",
-      "hash": "ec1318e05a853822eb30bb9350d14e5097ccf55783bb5872510f28489f8eedf3"
+      "tag": "v0.3.0",
+      "commit": "285eee3ca6ad7f0155eb19721a5aa667343add83",
+      "hash": "e71b5b59ab487ac692ff5ffd06dd217a6b7fe5a4d0edb6a90003c29b84ae80f9"
     },
     {
       "name": "kakunou",

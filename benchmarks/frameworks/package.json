@@ -1,0 +1,23 @@
+{
+  "name": "saba-framework-benchmarks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@solidjs/compiler": "2.0.2",
+    "@solidjs/web": "2.0.3",
+    "esbuild": "0.28.2",
+    "htmx.org": "2.0.11",
+    "idiomorph": "0.8.0",
+    "preact": "10.29.8",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "solid-js": "2.0.3",
+    "svelte": "5.58.0"
+  }
+}

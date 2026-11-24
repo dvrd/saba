@@ -1,0 +1,19 @@
+:root { font: 16px/1.4 system-ui, sans-serif; color: #162823; background: #f8faf8; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 76rem; padding: 1.5rem; margin: auto; }
+h1, h2, p { margin: 0; }
+h1 { font-size: 1.75rem; }
+h2, label { font-size: 1rem; font-weight: 600; }
+form { padding-block: 1rem; }
+.fields { display: flex; gap: .5rem; margin-block: .35rem; }
+input, button { font: inherit; }
+input { width: min(24rem, 72%); padding: .35rem; }
+button { padding: .35rem 1rem; }
+output, #status { display: block; min-height: 1.4em; overflow-wrap: anywhere; }
+#status { color: #455a51; font-size: .875rem; }
+.lists { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; }
+ol { margin: .5rem 0; padding: 0; list-style: none; max-height: 45vh; overflow: auto; }
+li { padding: .3rem; border-bottom: 1px solid #d9e0dc; overflow-wrap: anywhere; }
+/* Chromium attributes text presentation to its block-level paint container. */
+#status [elementtiming] { display: block; }

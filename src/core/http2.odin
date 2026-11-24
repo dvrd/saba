@@ -29,8 +29,10 @@ H2_INGRESS :: 16 * 1024
 // generated :status and content-length. Larger responses become a 500.
 H2_NAME_SCRATCH :: 8192
 H2_FIELD_CAP :: REQUEST_HEADER_COUNT_LIMIT + 8
-// Peer RST_STREAM allowance: a burst, refilled per second. A peer that keeps
-// cancelling its own streams faster than this is closed with ENHANCE_YOUR_CALM.
+// Allowance for peer frames that advance no request (the engine's
+// Limits.unproductive_frames): RST_STREAM, provoked stream errors, PING,
+// SETTINGS, PRIORITY and empty DATA. A burst, refilled per second by
+// h2_refill; a peer that outruns it is closed with ENHANCE_YOUR_CALM.
 H2_RESET_BURST :: 200
 H2_RESET_REFILL :: 50
 H2_BODY_INITIAL :: 4096
@@ -53,14 +55,8 @@ HTTP2_Session :: struct {
 	// flush and the peer's acknowledgement. wake_deadline is a periodic owner
 	// wake used when no stream or connection deadline is pending.
 	close_deadline, wake_deadline:             time.Tick,
-	reset_tokens:                              int,
 	reset_refill:                              time.Tick,
-	calm, goaway_writing, holding:             bool,
-	// The engine has no GOAWAY-with-code call, so the ENHANCE_YOUR_CALM frame is
-	// written by the owner after the aborted engine's output has drained.
-	goaway:                                    [h2.FRAME_HEADER_SIZE + 8]u8,
-	goaway_sent:                               int,
-	last_stream:                               u32,
+	holding:                                   bool,
 	// One polled DATA event kept borrowed while its tunnel's input queue is full.
 	held:                                      h2.Event_View,
 	read_deadline:                             async.Deadline,
@@ -86,6 +82,7 @@ h2_make_limits :: proc(streams: int) -> h2.Limits {
 		pending_pings = 4,
 		continuation_frames = 8,
 		work_per_feed = 32 * 1024,
+		unproductive_frames = H2_RESET_BURST,
 	}
 }
 
@@ -175,7 +172,6 @@ h2_begin :: proc(task: ^Connection_Task) -> bool {
 	}
 
 	session.engine_ready = true
-	session.reset_tokens = H2_RESET_BURST
 	session.reset_refill = time.tick_now()
 	session.idle_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.header)
 	task.http2 = session
@@ -359,7 +355,6 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 				}
 			} else if value.kind == .Request {
 				opened: bool
-				session.last_stream = max(session.last_stream, value.stream.stream_id)
 
 				if value.summary.protocol != "" {
 					opened = h2_upgrade_open(task, value)
@@ -404,7 +399,6 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 			}
 
 			h2_remember(session, value.stream)
-			h2_count_reset(task)
 		case h2.Promise_Event:
 		// promise_policy is Decline. Releasing the event is enough.
 		case h2.Goaway_Event:
@@ -424,36 +418,20 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 	return progress
 }
 
-// Rapid reset (CVE-2023-44487): every peer RST_STREAM spends one token. The
-// handler already ran for that stream, so an empty bucket ends the connection.
-h2_count_reset :: proc(task: ^Connection_Task) {
-	session := task.http2
-	now := time.tick_now()
-	elapsed := time.tick_diff(session.reset_refill, now)
+// Rapid reset (CVE-2023-44487) and its relatives: the engine spends one token
+// of Limits.unproductive_frames per frame that advances no request and ends
+// the connection itself when none are left. It has no clock, so the owner
+// returns H2_RESET_REFILL tokens for every whole second that has passed.
+h2_refill :: proc(session: ^HTTP2_Session) {
+	elapsed := time.tick_diff(session.reset_refill, time.tick_now())
 
-	if elapsed >= time.Second {
-		seconds := i64(elapsed / time.Second)
-		session.reset_tokens = int(min(i64(H2_RESET_BURST), i64(session.reset_tokens) + seconds * H2_RESET_REFILL))
-		session.reset_refill = time.tick_add(session.reset_refill, time.Duration(seconds) * time.Second)
-	}
-
-	if session.reset_tokens > 0 {
-		session.reset_tokens -= 1
+	if elapsed < time.Second {
 		return
 	}
 
-	if !session.calm {
-		session.calm, session.failed = true, true
-		_ = h2.connection_abort(
-			&session.engine,
-			{kind = .Protocol_Violation, scope = .Connection, code = .Enhance_Your_Calm},
-		)
-		frame := &session.goaway
-		frame[2], frame[3] = 8, 7 // length 8, type GOAWAY, stream 0
-		last := session.last_stream
-		frame[9], frame[10], frame[11], frame[12] = u8(last >> 24) & 0x7f, u8(last >> 16), u8(last >> 8), u8(last)
-		frame[16] = u8(h2.Error_Code.Enhance_Your_Calm)
-	}
+	seconds := i64(elapsed / time.Second)
+	session.reset_refill = time.tick_add(session.reset_refill, time.Duration(seconds) * time.Second)
+	_ = h2.connection_unproductive_refill(&session.engine, int(min(seconds * H2_RESET_REFILL, H2_RESET_BURST)))
 }
 
 h2_earlier :: proc(deadline: ^time.Tick, candidate: time.Tick) {
@@ -516,7 +494,7 @@ h2_check_deadlines :: proc(task: ^Connection_Task) -> bool {
 
 	if session.close_deadline == (time.Tick{}) &&
 	   !streams &&
-	   (session.shutdown || session.failed || session.calm || deadline_expired(session.idle_deadline)) {
+	   (session.shutdown || session.failed || deadline_expired(session.idle_deadline)) {
 		session.close_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.response)
 		progress = true
 	}
@@ -587,6 +565,7 @@ h2_feed :: proc(task: ^Connection_Task) -> bool {
 	}
 	progress := false
 	source := session.ingress[:session.ingress_len] if !session.failed else nil
+	h2_refill(session)
 	fed := h2.connection_feed(&session.engine, source, u32(session.limits.work_per_feed))
 
 	if fed.consumed > 0 {
@@ -646,15 +625,6 @@ h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 		if error.kind == .Pending {
 			return false, true
 		}
-		if session.goaway_writing {
-			session.goaway_writing = false
-			if error.kind == .None && n > 0 {
-				session.goaway_sent += n
-			} else {
-				session.peer_gone = true
-			}
-			return n > 0, false
-		}
 		view, borrowed := h2.connection_output_front(&session.engine)
 
 		if borrowed {
@@ -674,19 +644,6 @@ h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 	}
 
 	if !h2_output_pending(session) {
-		if session.calm && session.goaway_sent < len(session.goaway) {
-			n, error := transport_write(task, session.goaway[session.goaway_sent:], task.deadline)
-			if error.kind == .Pending {
-				session.goaway_writing = true
-				return false, true
-			}
-			if error.kind != .None || n <= 0 {
-				session.peer_gone = true
-				return false, false
-			}
-			session.goaway_sent += n
-			return true, false
-		}
 		return false, false
 	}
 	view, borrowed := h2.connection_output_front(&session.engine)
@@ -762,7 +719,7 @@ h2_finished :: proc(task: ^Connection_Task) -> bool {
 	if session.peer_gone {
 		return true
 	}
-	if pending || (session.calm && session.goaway_sent < len(session.goaway)) {
+	if pending {
 		return false
 	}
 	if session.failed {

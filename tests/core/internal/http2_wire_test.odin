@@ -8,6 +8,7 @@ import "core:testing"
 import "core:thread"
 import "core:time"
 import async "shared:async"
+import h2 "shared:http/v2"
 
 // Loopback wire regressions for the HTTP/2 owner: one real TLS listener and a
 // hand-framed peer, so deadlines, flow control and resets are exercised end to end.
@@ -461,27 +462,72 @@ h2_rapid_reset_ends_the_connection_with_enhance_your_calm :: proc(t: ^testing.T)
 	})
 }
 
+// Ordinary cancellation stays inside the allowance: a burst is tolerated and
+// idle seconds restore it, never above the burst.
 @(test)
 h2_reset_allowance_refills_and_tolerates_ordinary_cancellation :: proc(t: ^testing.T) {
 	session: HTTP2_Session
-	task := Connection_Task {
-		http2 = &session,
+	limits := h2_make_limits(8)
+	testing.expect_value(t, limits.unproductive_frames, H2_RESET_BURST)
+	if !testing.expect(
+		t,
+		h2.connection_init(&session.engine, {role = .Server, limits = limits}, {max_stream_capacity = 16}, context.allocator).kind ==
+		.None,
+	) {
+		return
 	}
-	session.reset_tokens = H2_RESET_BURST
-	session.reset_refill = time.tick_now()
+	defer h2.connection_destroy(&session.engine)
+	left :: proc(session: ^HTTP2_Session) -> int {
+		stats, _ := h2.connection_stats(&session.engine)
+		return stats.unproductive_left
+	}
+
+	// Spend the whole burst with PRIORITY frames after the client preface.
+	wire: [dynamic]u8
+	defer delete(wire)
+	append(&wire, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+	h2w_frame(&wire, 4, 0, 0, nil)
 	for _ in 0 ..< H2_RESET_BURST {
-		h2_count_reset(&task)
+		h2w_frame(&wire, 2, 0, 1, []u8{0, 0, 0, 0, 0})
 	}
-	testing.expect(t, !session.calm)
-	testing.expect_value(t, session.reset_tokens, 0)
-	// Two idle seconds restore two refills; the bucket never exceeds its burst.
+	at := 0
+	for _ in 0 ..< 4096 {
+		fed := h2.connection_feed(&session.engine, wire[at:], 0)
+		if !testing.expect_value(t, fed.error.kind, h2.Error_Kind.None) {
+			return
+		}
+		at += fed.consumed
+		for {
+			view, borrowed := h2.connection_output_front(&session.engine)
+			if !borrowed {
+				break
+			}
+			_ = h2.connection_output_advance(&session.engine, view.token, len(view.bytes))
+		}
+		for {
+			event, polled := h2.connection_poll(&session.engine)
+			if !polled {
+				break
+			}
+			_ = h2.connection_event_release(&session.engine, event.token)
+		}
+		if at == len(wire) && fed.status != .Yield {
+			break
+		}
+	}
+	testing.expect_value(t, at, len(wire))
+	testing.expect_value(t, left(&session), 0)
+
+	// Less than a second restores nothing; two idle seconds restore two refills.
+	session.reset_refill = time.tick_now()
+	h2_refill(&session)
+	testing.expect_value(t, left(&session), 0)
 	session.reset_refill = time.tick_add(time.tick_now(), -2 * time.Second)
-	h2_count_reset(&task)
-	testing.expect(t, !session.calm)
-	testing.expect_value(t, session.reset_tokens, 2 * H2_RESET_REFILL - 1)
+	h2_refill(&session)
+	testing.expect_value(t, left(&session), 2 * H2_RESET_REFILL)
 	session.reset_refill = time.tick_add(time.tick_now(), -time.Hour)
-	h2_count_reset(&task)
-	testing.expect_value(t, session.reset_tokens, H2_RESET_BURST - 1)
+	h2_refill(&session)
+	testing.expect_value(t, left(&session), H2_RESET_BURST)
 }
 
 // Targets no handler expects are answered 400, an over-limit content-length

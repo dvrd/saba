@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Owned streaming wire/ownership, timer, slow-reader and SSE example tests."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse
 import contextlib
 import hashlib
@@ -45,6 +47,14 @@ class Server:
                 return values
             assert time.monotonic() < until, values
             time.sleep(.005)
+    def settled(self):
+        # idle() proves the producers are gone; their 'drop' lines can still be in
+        # the stdout pipe. Wait until every one of them has been read.
+        values = self.idle(); until = time.monotonic()+3
+        while len([line for line in self.lines if line.startswith('drop ')]) < values[4]:
+            assert time.monotonic() < until, values
+            time.sleep(.005)
+        return values
     def stop(self):
         if self.finished:
             return
@@ -100,14 +110,14 @@ def read_chunk(conn):
 
 
 def main():
-    parser = argparse.ArgumentParser(); parser.add_argument('--odin', required=True)
+    parser = argparse.ArgumentParser(); parser.add_argument('--odin', default=harness_env.odin())
     parser.add_argument('--sanitize', choices=['address', 'thread'])
     parser.add_argument('--workers',type=int,choices=[1,4],default=1);args = parser.parse_args()
     saba = Path(__file__).resolve().parents[1]; checks = []
     with tempfile.TemporaryDirectory(prefix='saba-streaming-') as work:
         binary = Path(work)/'server'; example = Path(work)/'sse'
         for source, output in [(saba/'testdata/stream', binary), (saba/'examples/sse', example)]:
-            command = [args.odin, 'build', str(source), '-warnings-as-errors', '-out:'+str(output)]
+            command = [args.odin, 'build', str(source), '-warnings-as-errors', harness_env.collection(), '-out:'+str(output)]
             if args.sanitize:
                 command.append('-sanitize:'+args.sanitize)
             subprocess.run(command, check=True, timeout=60)
@@ -131,6 +141,7 @@ def main():
                 assert len(chunks) == 3 and b''.join(chunks) == expected
                 assert response(conn)[2] == b'ok'
             checks.append('exact chunk framing/final terminator and serialized pipelined next request')
+            instance.settled()
             before = len([line for line in instance.lines if line.startswith('drop ')])
             for method, path in [('HEAD', '/known'), ('HEAD', '/chunked'), ('GET', '/nobody'), ('GET', '/empty')]:
                 with contextlib.closing(http.client.HTTPConnection('127.0.0.1', instance.port, timeout=4)) as conn:
@@ -138,7 +149,7 @@ def main():
                     if method == 'HEAD':
                         assert reply.getheader('Transfer-Encoding') is None
                         assert reply.getheader('Content-Length') == ('6144' if path == '/known' else None)
-            instance.idle()
+            instance.settled()
             last = [line.split() for line in instance.lines if line.startswith('drop ')][before:]
             assert len(last) == 4 and all(int(row[2]) == 0 for row in last[:3]), last
             checks.append('HEAD/body-forbidden responses never poll producer; known empty representation completes')
@@ -164,7 +175,9 @@ def main():
                 instance.idle()
             for path in ['/badhead', '/mix']:
                 with instance.connect() as conn:
-                    conn.sendall(request(path)); assert until_closed(conn) == b''
+                    conn.sendall(request(path)); reply = until_closed(conn)
+                    # A head the encoder rejects answers 500; a structurally invalid stream still closes.
+                    assert reply.startswith(b'HTTP/1.1 500 ') if path == '/badhead' else reply == b'', (path, reply)
                 instance.idle()
             checks.append('producer/length/admission/wait/metadata failures close without false completion and release all owners')
             with instance.connect() as conn:

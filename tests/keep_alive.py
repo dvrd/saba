@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Public bounded persistence regression; all sockets/processes are test-owned."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse,concurrent.futures,contextlib,json,os,queue,socket,subprocess,tempfile,threading,time
 from pathlib import Path
 SABA=Path(__file__).resolve().parents[1]
@@ -76,7 +78,7 @@ def closed(conn):
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--sanitize',choices=['address','thread']);parser.add_argument('--core',action='store_true',help='exercise identical corpus through lean core');args=parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='saba-keepalive-') as work:
-        binary=Path(work)/'fixture';command=[os.environ['ODIN'],'build',str(SABA/('tests/core/testdata/keepalive' if args.core else 'testdata/keepalive')),'-out:'+str(binary),'-thread-count:1','-warnings-as-errors']
+        binary=Path(work)/'fixture';command=[harness_env.odin(),'build',str(SABA/('tests/core/testdata/keepalive' if args.core else 'testdata/keepalive')),harness_env.collection(), '-out:'+str(binary),'-thread-count:1','-warnings-as-errors']
         if args.sanitize:command.append('-sanitize:'+args.sanitize)
         built=subprocess.run(command,capture_output=True,text=True,timeout=90);assert built.returncode==0,built.stdout+built.stderr
         # Disabled means the next already-buffered request is never admitted.

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Verify observer->snapshot->drain reentry on an actual finishing request."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse
 import os
 from pathlib import Path
@@ -19,12 +21,12 @@ def line(proc):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--odin', default=os.environ.get('ODIN','odin'))
+    parser.add_argument('--odin', default=harness_env.odin())
     args=parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='saba-observer-drain-') as tmp:
         binary=Path(tmp)/'fixture'
         subprocess.run([args.odin,'build',str(SABA/'testdata/drain_observer'),'-thread-count:1',
-                        '-warnings-as-errors','-sanitize:address','-out:'+str(binary)],check=True)
+                        '-warnings-as-errors',*harness_env.sanitize_flags(),harness_env.collection(), '-out:'+str(binary)],check=True)
         for workers in (1,4):
             proc=subprocess.Popen([str(binary)],env=dict(os.environ,DRAIN_WORKERS=str(workers)),
                                   stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)

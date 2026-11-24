@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Run only owned loopback fixtures; no live bot/provider traffic."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse,json,os,queue,socket,subprocess,tempfile,threading,time
 from pathlib import Path
 
@@ -7,10 +9,10 @@ SABA=Path(__file__).resolve().parents[1]
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--sanitize',choices=['address','thread']);args=parser.parse_args()
-    compiler=os.environ['ODIN']
+    compiler=harness_env.odin()
     with tempfile.TemporaryDirectory(prefix='saba-observability-') as work:
         binary=Path(work)/'fixture'
-        command=[compiler,'build',str(SABA/'testdata/observability'),'-out:'+str(binary),'-warnings-as-errors','-thread-count:1']
+        command=[compiler,'build',str(SABA/'testdata/observability'),harness_env.collection(), '-out:'+str(binary),'-warnings-as-errors','-thread-count:1']
         if args.sanitize:command.append('-sanitize:'+args.sanitize)
         subprocess.run(command,check=True,capture_output=True,timeout=60)
         proc=subprocess.Popen([str(binary)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True,text=True)
@@ -52,7 +54,7 @@ def main():
                 requests.append(('OTHER','Timeout',3,len(result)))
             with connect() as conn:
                 started=time.monotonic();result=conn.recv(8192);assert result.startswith(b'HTTP/1.1 408 ') and .04<time.monotonic()-started<1
-                remaining=conn.recv(8192);assert remaining==b'';requests.append(('OTHER','Timeout',0,len(result)))
+                remaining=conn.recv(8192);assert remaining==b''  # answered, but a connection that never sent a byte is not a request: no event
             partial=b'POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 3\r\n\r\na'
             started=time.monotonic();result=exchange(partial);assert result.startswith(b'HTTP/1.1 408 ') and .07<time.monotonic()-started<2;requests.append(('POST','Timeout',len(partial),len(result)))
             with connect() as conn:
@@ -61,7 +63,7 @@ def main():
                 time.sleep(.6)
                 data=bytearray()
                 while part:=conn.recv(65536):data.extend(part)
-                assert data.startswith(b'HTTP/1.1 200 ') and len(data)<64*1024*1024
+                assert data.startswith(b"HTTP/1.1 200 ") and len(data)<8*1024*1024,(bytes(data[:60]),len(data))
                 requests.append(('GET','Timeout',len(wire),len(data)))
             # Wait until every normal/timeout attempt is completed, not merely sent.
             seen=[]
@@ -86,7 +88,7 @@ def main():
             ids=[int(x.split()[1]) for x in every];assert len(set(ids))==len(ids) and all(ids)
             stats=next(x for x in all_lines if x.startswith('metrics ')).split()
             assert int(stats[1])==len(every) and int(stats[2])==len(requests) and int(stats[3])==1,stats
-            assert int(stats[4])==4,stats
+            assert int(stats[4])==3,stats  # header, body and write timeouts; the silent connection is not counted
             print(json.dumps({'valid':True,'sanitizer':args.sanitize or 'none','events':len(every),'checks':['unique generated IDs, no user ID reflection','bounded static routes, no path/query/header leaks','exact received/sent wire byte accounting','HEAD headers only','header total and first-byte idle deadlines','partial body deadline','backpressured write timeout','exactly-once cancelled completion','observer snapshots outside internal locks','snapshots unpublished after shutdown']},indent=2))
         finally:
             if proc.poll() is None:proc.kill();proc.wait(timeout=5)

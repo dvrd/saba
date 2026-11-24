@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the public Saba interface over owned loopback sockets."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse
 import concurrent.futures
 import contextlib
@@ -453,7 +455,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--sanitize', choices=['thread', 'address'])
     args = parser.parse_args()
-    compiler = os.environ.get('ODIN') or shutil.which('odin') or str(SABA.parents[1]/'odin')
+    compiler = harness_env.odin()
     with tempfile.TemporaryDirectory(prefix='saba-async-test-') as work:
         root = Path(work); web = root/'web'
         (web/'assets').mkdir(parents=True); (web/'pages').mkdir()
@@ -462,7 +464,7 @@ def main():
         (web/'pages/index.jsx').write_text('export const title="Home"; export default function Home(){ return <h1>Home</h1>; }')
         (web/'index.html').write_text('<html><head></head><body><!--saba:page--></body></html>')
         binary = root/'server'
-        command = [compiler, 'build', str(SABA/'testdata/async'), '-warnings-as-errors', '-out:'+str(binary)]
+        command = [compiler, 'build', str(SABA/'testdata/async'), '-warnings-as-errors', harness_env.collection(), '-out:'+str(binary)]
         if args.sanitize:
             command.append('-sanitize:'+args.sanitize)
         compiled = subprocess.run(command, capture_output=True, text=True, timeout=60)

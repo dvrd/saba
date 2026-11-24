@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Owned file range wire matrix; no public endpoints or live credentials."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse
 import concurrent.futures
 import contextlib
@@ -20,7 +22,7 @@ from keep_alive import request
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--odin', required=True)
+    parser.add_argument('--odin', default=harness_env.odin())
     parser.add_argument('--sanitize', choices=['address', 'thread'])
     parser.add_argument('--workers', type=int, choices=[1, 4], default=1)
     args = parser.parse_args()
@@ -39,7 +41,7 @@ def main():
         (root/'outside').symlink_to(work, target_is_directory=True)
         binary = work/'server'
         command = [args.odin, 'build', str(Path(__file__).resolve().parents[1]/'testdata/file_range'),
-                   '-warnings-as-errors', '-out:'+str(binary)]
+                   '-warnings-as-errors', harness_env.collection(), '-out:'+str(binary)]
         if args.sanitize:
             command.append('-sanitize:'+args.sanitize)
         subprocess.run(command, check=True, timeout=60)
@@ -136,7 +138,7 @@ def main():
                     conn.sendall(request('/slow.bin')); assert headers(conn).startswith(b'HTTP/1.1 200 ')
             assert idle() == baseline
             with socket.create_connection(('127.0.0.1', port), timeout=5) as conn:
-                conn.sendall(request('/badhead')); assert conn.recv(1) == b''
+                conn.sendall(request('/badhead')); assert headers(conn).startswith(b'HTTP/1.1 500 ')  # rejected head answers 500
             assert idle() == baseline
             checks.append('concurrent ranges, repeated disconnect and rejected head release all tracked bytes/descriptors')
             with socket.create_connection(('127.0.0.1', port), timeout=5) as slow:

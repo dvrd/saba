@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Exercise drain using only child-owned loopback servers and synthetic requests."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse
 import os
 from pathlib import Path
@@ -270,14 +272,14 @@ def immediate_override(binary, workers):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--odin', default=os.environ.get('ODIN', 'odin'))
+    parser.add_argument('--odin', default=harness_env.odin())
     parser.add_argument('--sanitize', action='store_true')
     args = parser.parse_args()
     checks = []
     with tempfile.TemporaryDirectory(prefix='saba-drain-') as directory:
         binary = Path(directory) / 'server'
         command = [args.odin, 'build', str(SABA/'testdata/drain'), '-thread-count:1',
-                   '-warnings-as-errors', '-out:'+str(binary)]
+                   '-warnings-as-errors', harness_env.collection(), '-out:'+str(binary)]
         if args.sanitize:
             command.append('-sanitize:address')
         subprocess.run(command, check=True)

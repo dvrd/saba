@@ -14,8 +14,15 @@ import tempfile
 import threading
 import time
 
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
+
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE/'websocket79'
+
+
+def go_root(go):
+    return Path(subprocess.run([str(go), 'env', 'GOROOT'], capture_output=True, text=True, timeout=30).stdout.strip())
 
 
 def digest(path):
@@ -167,20 +174,22 @@ def peer_held(process):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--odin', required=True, type=Path)
-    parser.add_argument('--go', required=True, type=Path)
-    parser.add_argument('--go-root', required=True, type=Path)
-    parser.add_argument('--shared', type=Path, default=HERE.parents[1])
+    parser.add_argument('--odin', type=Path, default=Path(harness_env.odin()))
+    parser.add_argument('--go', type=Path)
+    parser.add_argument('--go-root', type=Path)
+    parser.add_argument('--shared', type=Path, default=Path(harness_env.shared()))
     parser.add_argument('--sdk-root', type=Path)
-    parser.add_argument('--sanitize', choices=['address', 'thread'], default='address')
+    parser.add_argument('--sanitize', choices=['address', 'thread'], default=harness_env.sanitizer())
     parser.add_argument('--evidence-dir', type=Path)
-    parser.add_argument('--report', required=True, type=Path)
+    parser.add_argument('--report', type=Path)
     parser.add_argument('--case', help='Select case name prefix')
     args = parser.parse_args()
+    args.go = args.go or Path(harness_env.go())
+    args.go_root = args.go_root or go_root(args.go)
     compiler = args.odin.resolve()
     sdk = args.sdk_root.resolve() if args.sdk_root else Path(run([compiler, 'root'])['stdout'].strip())
     shared = args.shared.resolve()
-    fixtures = sdk/'tests/core/crypto/tls/credentials/testdata'
+    fixtures = harness_env.TLS
     cert, key = fixtures/'rsa2048-valid.pem', fixtures/'rsa2048.pem'
     initial = snapshot(shared, sdk)
     report = dict(passed=False, scope='Darwin/native Saba application WS/WSS; owned peers; no Mesa or performance certification',
@@ -200,7 +209,7 @@ def main():
             directory = Path(temporary)
             native, peer, surf = directory/'server', directory/'go-peer', directory/'surf-peer'
             flags = ['-collection:shared='+str(shared), '-thread-count:1',
-                     '-warnings-as-errors', '-vet', '-sanitize:'+args.sanitize]
+                     '-warnings-as-errors', '-vet', *(['-sanitize:'+args.sanitize] if args.sanitize else [])]
             report['builds'] = [run([compiler, 'build', SOURCE, *flags, '-out:'+str(native)]),
                                 run([compiler, 'build', SOURCE/'surf_client', *flags, '-out:'+str(surf)]),
                                 run([args.go, 'build', '-o', peer, SOURCE/'peer.go'], env=environment)]
@@ -312,8 +321,11 @@ def main():
             assert digest(compiler) == report['compiler_sha256'], 'Compiler changed during gate'
             report['passed'] = all(case['passed'] for case in report['cases'])
     finally:
-        args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text(json.dumps(report, indent=2)+'\n')
+        if args.report:
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(json.dumps(report, indent=2)+'\n')
+        elif not report['passed']:
+            print(json.dumps([case for case in report['cases'] if not case['passed']], indent=2)[-6000:])
     print(json.dumps(dict(passed=True, groups=len(report['cases']), report=str(args.report))))
 
 

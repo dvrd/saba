@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Owned loopback peer for the Saba HTTP/2 adapter. No public endpoints."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import os
+import shutil
 from pathlib import Path
 import queue
 import subprocess
@@ -9,12 +12,11 @@ import time
 
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / "http2"
-SHARED = HERE.parents[1]
-ODIN = SHARED.parent / "odin"
-CERT = SHARED.parent / "tests/core/crypto/tls/credentials/testdata/rsa2048-valid.pem"
-KEY = SHARED.parent / "tests/core/crypto/tls/credentials/testdata/rsa2048.pem"
+SHARED = harness_env.shared()
+ODIN = harness_env.odin()
+CERT = harness_env.TLS / "rsa2048-valid.pem"
+KEY = harness_env.TLS / "rsa2048.pem"
 ENV = os.environ.copy()
-ENV["PATH"] = "/opt/homebrew/opt/llvm@22/bin:" + ENV.get("PATH", "")
 ENV["GO111MODULE"] = "off"
 
 
@@ -75,7 +77,7 @@ class Server:
 
 
 def peer(mode, port):
-    result = subprocess.run(["go", "run", str(SOURCE / "peer.go"), mode, f"127.0.0.1:{port}"],
+    result = subprocess.run([harness_env.go(), "run", str(SOURCE / "peer.go"), mode, f"127.0.0.1:{port}"],
                             capture_output=True, text=True, timeout=20, env=ENV)
     if result.returncode != 0 or not result.stdout.strip().endswith(mode):
         raise SystemExit({"mode": mode, "code": result.returncode,
@@ -84,9 +86,11 @@ def peer(mode, port):
 
 
 def main():
-    binary = Path("/tmp/okami-81-http2")
+    harness_env.go()
+    work = harness_env.workdir("saba-http2-")
+    binary = work / "server"
     run([ODIN, "build", SOURCE, f"-collection:shared={SHARED}", "-warnings-as-errors",
-         "-sanitize:address", f"-out:{binary}"])
+         *harness_env.sanitize_flags(), f"-out:{binary}"])
     server = Server(binary)
     try:
         results = {}
@@ -100,6 +104,7 @@ def main():
         print("PASS", results)
     finally:
         server.stop()
+        shutil.rmtree(work, ignore_errors=True)
 
 
 if __name__ == "__main__":

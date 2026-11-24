@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Owned lifetime tests: server cancellation, retained tokens, late disposal."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse
 import contextlib
 import os
@@ -55,13 +57,13 @@ class Server:
 
 
 def main():
-    parser = argparse.ArgumentParser(); parser.add_argument('--odin', required=True)
+    parser = argparse.ArgumentParser(); parser.add_argument('--odin', default=harness_env.odin())
     parser.add_argument('--sanitize', choices=['address', 'thread']); args = parser.parse_args()
     checks = []
     with tempfile.TemporaryDirectory(prefix='saba-cancellation-') as work:
         binary = Path(work)/'server'
         source = Path(__file__).resolve().parents[1]/'testdata/cancellation'
-        command = [args.odin, 'build', str(source), '-warnings-as-errors', '-out:'+str(binary)]
+        command = [args.odin, 'build', str(source), '-warnings-as-errors', harness_env.collection(), '-out:'+str(binary)]
         if args.sanitize:
             command.append('-sanitize:'+args.sanitize)
         subprocess.run(command, check=True, timeout=60)
@@ -74,7 +76,8 @@ def main():
         checks.append('retained token survives repeated request-arena resets and runtime destruction')
         with Server(binary, budget=25) as instance:
             code, _, body = instance.exchange('/late')
-            assert code == 408 and not body
+            # A handler that finished late answers 504: 408 would invite a replay.
+            assert code == 504 and not body
             assert instance.exchange('/status')[2] == b'1 Deadline'
             assert instance.stop() == 'stopped 1 Deadline'
         checks.append('late handler response rejected and transferred continuation dropped exactly once')

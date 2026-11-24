@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Owned mixed-resource admission with snapshots outside the HTTP budget."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse
 import contextlib
 import json
@@ -49,7 +51,13 @@ def reset(conn):
 
 def partial_upload(conn, size):
     head = b'POST /upload HTTP/1.1\r\nHost: localhost\r\nContent-Length: '
-    conn.sendall(head + str(size).encode() + b'\r\n\r\nx')
+    # Storage follows the bytes received, not the declared length: send all but
+    # the last byte so the server really holds `size`, yet never dispatches.
+    conn.sendall(head + str(size).encode() + b'\r\n\r\n')
+    try:
+        conn.sendall(b'x' * (size - 1))
+    except OSError:
+        pass  # rejected mid-upload: the 503 is already on its way
 
 
 
@@ -161,8 +169,8 @@ def mixed(binary, checks):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--odin', required=True)
-    parser.add_argument('--shared', required=True)
+    parser.add_argument('--odin', default=harness_env.odin())
+    parser.add_argument('--shared', default=harness_env.shared())
     parser.add_argument('--sanitize', choices=['address', 'thread'])
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='saba-resources-') as work:

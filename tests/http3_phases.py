@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Qualify Saba's public phase mapping using HTTP's maintained independent peer."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse
 import hashlib
 import importlib.util
@@ -12,7 +14,7 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 SABA = HERE.parent
-SHARED = SABA.parent
+SHARED = Path(harness_env.shared())
 
 
 def digest(path):
@@ -20,18 +22,19 @@ def digest(path):
 
 
 def sources():
-    return {str(p.relative_to(SHARED)): digest(p)
-            for root in (SABA,) for p in root.rglob('*')
+    return {str(p.relative_to(SABA)): digest(p)
+            for root in (SABA / 'src', SABA / 'tests') for p in root.rglob('*')
             if p.is_file() and p.suffix in ('.odin', '.py', '.pem')}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--odin', type=Path, required=True)
-    parser.add_argument('--python', required=True)
+    parser.add_argument('--odin', type=Path, default=Path(harness_env.odin()))
+    parser.add_argument('--python')
     parser.add_argument('--sanitize', choices=('address', 'thread'))
-    parser.add_argument('--report', type=Path, required=True)
+    parser.add_argument('--report', type=Path)
     args = parser.parse_args()
+    args.python = args.python or harness_env.aioquic_python()
     # Imported fixtures belong to the validated source tree, never a bytecode cache.
     sys.dont_write_bytecode = True
     path = HERE / 'testdata/tls/request_phases/run.py'
@@ -63,8 +66,9 @@ def main():
         result['passed'] = (build.returncode == 0 and result['source_unchanged']
                             and len(result['profiles']) == 3
                             and all(r['passed'] for r in result['profiles']))
-        args.report.write_text(json.dumps(result, indent=2) + '\n')
-    assert result['passed'], str(args.report)
+        if args.report:
+            args.report.write_text(json.dumps(result, indent=2) + '\n')
+    assert result['passed'], json.dumps(result.get('profiles'), indent=2)[-6000:]
     print('public Saba facade phase isolation and small-window progress pass')
 
 

@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Owned RFC8441 peers. Only loopback sockets; no module downloads."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse
 import json
 import os
+import shutil
 from pathlib import Path
 import queue
 import subprocess
 import threading
 
 HERE = Path(__file__).resolve().parent
-SHARED = HERE.parents[1]
+SHARED = harness_env.shared()
 
 
 def run(command, env, timeout=120):
@@ -65,36 +68,45 @@ def exercise(binary, server_arguments, peers, env):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--odin", type=Path, required=True)
-    parser.add_argument("--sanitize", choices=("address", "thread"), default="address")
+    parser.add_argument("--odin", type=Path, default=Path(harness_env.odin()))
+    parser.add_argument("--sanitize", choices=("address", "thread"), default=harness_env.sanitizer())
     parser.add_argument("--mutual-tls", action="store_true")
-    parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     env = os.environ.copy()
-    env["PATH"] = "/opt/homebrew/opt/llvm@22/bin:" + env.get("PATH", "")
     env["GO111MODULE"] = "off"
-    prefix = Path(f"/tmp/webtools389-{args.sanitize}-{os.getpid()}")
-    binary, peer = prefix.with_suffix(".server"), prefix.with_suffix(".peer")
+    go = harness_env.go()
+    work = harness_env.workdir("saba-http2-connect-")
+    try:
+        exercise_all(args, env, go, work)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def exercise_all(args, env, go, work):
+    binary, peer = work / "server", work / "peer"
+    sanitize = [f"-sanitize:{args.sanitize}"] if args.sanitize else []
     cert = HERE / 'testdata/tls/localhost.pem'
     key = HERE / 'testdata/tls/rsa2048.pem'
-    records = [run(["/opt/homebrew/bin/go", "build", "-o", peer, HERE / "http2_connect/peer.go"], env),
+    records = [run([go, "build", "-o", peer, HERE / "http2_connect/peer.go"], env),
                run([args.odin, "build", HERE / "http2_connect", f"-collection:shared={SHARED}",
-                    "-warnings-as-errors", f"-sanitize:{args.sanitize}", f"-out:{binary}"], env)]
+                    "-warnings-as-errors", *sanitize, f"-out:{binary}"], env)]
     plain = exercise(binary, ["server", cert, key],
                      [lambda port: [peer, f"127.0.0.1:{port}"],
                       lambda port: [binary, "client", port, cert]], env)
     assert "opened=4 dropped=4" in plain[-1]["stdout"] and "resets=1" in plain[-1]["stdout"], plain
     records += plain
     if args.mutual_tls:
-        sdk = Path(env.get("ODIN_ROOT", args.odin.parent))
+        sdk = harness_env.sdk()
         mtls = sdk / "core/crypto/tls/testdata/mtls"
         records += exercise(binary, ["server-mtls", mtls / "server.pem", mtls / "server-key.pem", mtls / "root.pem"],
                             [lambda port: [binary, "client-mtls", port, mtls / "root.pem",
                                            mtls / "client.pem", mtls / "client-key.pem",
                                            mtls / "client-large.pem", mtls / "client-large-key.pem"]], env)
     result = dict(passed=True, sanitizer=args.sanitize, mutual_tls=args.mutual_tls, records=records)
-    args.report.write_text(json.dumps(result, indent=2) + "\n")
-    print(json.dumps(result))
+    if args.report:
+        args.report.write_text(json.dumps(result, indent=2) + "\n")
+    print(json.dumps(dict(passed=True, sanitizer=args.sanitize, mutual_tls=args.mutual_tls, records=len(records))))
 
 if __name__ == "__main__":
     main()

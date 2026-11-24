@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """Owned independent QUIC VN/coalescing/transport-parameter qualification."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse, hashlib, json, os, platform, subprocess, time
 from pathlib import Path
 HERE=Path(__file__).resolve().parent
-SHARED=HERE.parents[1]
+SHARED=Path(harness_env.shared())
 def sha(path):return hashlib.sha256(path.read_bytes()).hexdigest()
 def manifest(paths):
     files=[p for root in paths for p in ([root] if root.is_file() else sorted(root.rglob('*'))) if p.is_file() and p.suffix in ('.odin','.py','.pem','.c','.h','.s','.S','.so','.dylib') and '.git' not in p.parts and '__pycache__' not in p.parts]
     return {str(p):sha(p) for p in files}
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--odin',type=Path,required=True);p.add_argument('--python',default='/tmp/webtools397-peer/bin/python');p.add_argument('--sanitize',choices=['address','thread'],default='address');p.add_argument('--report',type=Path,required=True);p.add_argument('--cases',nargs='*',default=['vn-ignore','vn-abort','bad-first','coalesce','invalid-server','invalid-client','invalid-server-limit','invalid-client-limit','zero-server-cid','stateless-vn','head-semantics']);a=p.parse_args()
-    env=os.environ.copy();env['PYTHONDONTWRITEBYTECODE']='1';env['PATH']='/opt/homebrew/opt/llvm@22/bin:'+env.get('PATH','')
-    binary=Path(f'/tmp/webtools398-{a.sanitize}-{os.getpid()}');records=[]
+    p=argparse.ArgumentParser();p.add_argument('--odin',type=Path,default=Path(harness_env.odin()));p.add_argument('--python',default=None);p.add_argument('--sanitize',choices=['address','thread'],default=harness_env.sanitizer());p.add_argument('--report',type=Path);p.add_argument('--cases',nargs='*',default=['vn-ignore','vn-abort','bad-first','coalesce','invalid-server','invalid-client','invalid-server-limit','invalid-client-limit','zero-server-cid','stateless-vn','head-semantics']);a=p.parse_args();a.python=a.python or harness_env.aioquic_python()
+    env=os.environ.copy();env['PYTHONDONTWRITEBYTECODE']='1';env.setdefault('ODIN_ROOT',str(harness_env.sdk()))
+    binary=harness_env.workdir('saba-http3-conformance-')/'server';records=[]
     roots=[SHARED/'http',SHARED/'surf',SHARED/'async',SHARED/'saba/core',Path(env['ODIN_ROOT'])/'core',Path(env['ODIN_ROOT'])/'base',HERE/'http3_conformance',Path(__file__).resolve()]
     before=manifest(roots);report={'platform':platform.platform(),'architecture':platform.machine(),'odin_root':env['ODIN_ROOT'],'sanitizer':a.sanitize,'compiler_sha256':sha(a.odin),'source_before':before,'records':records}
     def run(command,timeout=120):
@@ -24,13 +26,13 @@ def main():
         report['compiler_version']=run([a.odin,'version']).strip()
         peer_root=Path(run([a.python,'-c','import aioquic,pathlib;print(pathlib.Path(aioquic.__file__).parent)']).strip())
         peer_before=manifest([peer_root]);report['peer_before']=peer_before
-        run([a.odin,'build',HERE/'http3_conformance',f'-collection:shared={SHARED}','-warnings-as-errors','-vet',f'-sanitize:{a.sanitize}',f'-out:{binary}'])
+        run([a.odin,'build',HERE/'http3_conformance',f'-collection:shared={SHARED}','-warnings-as-errors','-vet',*harness_env.sanitize_for(a.sanitize),f'-out:{binary}'])
         report['binary_sha256']=sha(binary)
         for case in a.cases:
             run([a.python,HERE/'http3_conformance/peer.py',case,'--binary',binary,'--cert',HERE / 'testdata/tls/localhost.pem','--key',HERE / 'testdata/tls/rsa2048.pem'],40)
         report['peer_after']=manifest([peer_root]);assert peer_before==report['peer_after'],'published peer sources changed'
         report['passed']=True
     finally:
-        report['source_after']=manifest(roots);report['source_unchanged']=before==report['source_after'];report['passed']=report.get('passed',False) and report['source_unchanged'];a.report.write_text(json.dumps(report,indent=2)+'\n')
+        report['source_after']=manifest(roots);report['source_unchanged']=before==report['source_after'];report['passed']=report.get('passed',False) and report['source_unchanged'];(a.report.write_text if a.report else (lambda text:None))(json.dumps(report,indent=2)+'\n')
     assert report['source_unchanged'],'source changed during qualification; refresh the source-bound run'
 if __name__=='__main__':main()

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Owned offload wire checks with one network worker and two fixed job workers."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse
 import contextlib
 import json
@@ -211,8 +213,8 @@ def run(binary):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--odin', required=True)
-    parser.add_argument('--shared', required=True)
+    parser.add_argument('--odin', default=harness_env.odin())
+    parser.add_argument('--shared', default=harness_env.shared())
     parser.add_argument('--sanitize', choices=['address', 'thread'])
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='saba-offload-') as work:

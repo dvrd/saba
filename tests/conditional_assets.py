@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """HEAD/cache validation through the public facade and owned loopback sockets."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse
 import hashlib
 import json
@@ -88,7 +90,7 @@ def check_development(binary, web):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--odin', default=os.environ.get('ODIN') or shutil.which('odin') or str(SABA.parents[1]/'odin'))
+    parser.add_argument('--odin', default=harness_env.odin())
     parser.add_argument('--sanitize', choices=['address'])
     args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='saba-cache-test-') as work:
@@ -96,14 +98,14 @@ def main():
         (web/'assets').mkdir(parents=True); (web/'pages').mkdir()
         (web/'assets/data.txt').write_bytes(b'abc')
         (web/'assets/empty.txt').write_bytes(b'')
-        (web/'assets/private.jsx').write_text('private')
+        (web/'assets/private.jsx').write_text('export const secret = 1;')
         (root/'outside.txt').write_text('secret')
         (web/'assets/escape.txt').symlink_to(root/'outside.txt')
         (web/'view.jsx').write_text('export default function View(){ return <div>hello</div>; }')
         (web/'pages/index.jsx').write_text('export default function Home(){ return <h1>Home</h1>; }')
         (web/'index.html').write_text('<html><head></head><body><!--saba:page--></body></html>')
         binary = root/'server'
-        command = [args.odin, 'build', str(SABA/'testdata/async'), '-warnings-as-errors', '-out:'+str(binary)]
+        command = [args.odin, 'build', str(SABA/'testdata/async'), '-warnings-as-errors', harness_env.collection(), '-out:'+str(binary)]
         if args.sanitize:
             command.append('-sanitize:'+args.sanitize)
         subprocess.run(command, check=True, timeout=60)

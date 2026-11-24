@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse,importlib.util,json,os,socket,subprocess,time,threading,queue
 from pathlib import Path
-HERE=Path(__file__).resolve().parent;SHARED=HERE.parents[1]
+HERE=Path(__file__).resolve().parent;SHARED=Path(harness_env.shared())
 spec=importlib.util.spec_from_file_location('harness',HERE/'http2_connect.py');h=importlib.util.module_from_spec(spec);spec.loader.exec_module(h)
 def main():
- p=argparse.ArgumentParser();p.add_argument('--odin',type=Path,required=True);p.add_argument('--sanitize',choices=['address','thread'],default='address');p.add_argument('--python',default='/tmp/webtools397-peer/bin/python');p.add_argument('--report',type=Path,required=True);a=p.parse_args()
- env=os.environ.copy();env['PATH']='/opt/homebrew/opt/llvm@22/bin:'+env['PATH'];env['PYTHONDONTWRITEBYTECODE']='1'
- binary=Path(f'/tmp/webtools396-{a.sanitize}-{os.getpid()}');cert=HERE / 'testdata/tls/localhost.pem';key=HERE / 'testdata/tls/rsa2048.pem';peer=HERE/'http3_shutdown/peer.py'
- records=[h.run([a.odin,'build',HERE/'http3_shutdown',f'-collection:shared={SHARED}','-warnings-as-errors',f'-sanitize:{a.sanitize}',f'-out:{binary}'],env)]
+ p=argparse.ArgumentParser();p.add_argument('--odin',type=Path,default=Path(harness_env.odin()));p.add_argument('--sanitize',choices=['address','thread'],default=harness_env.sanitizer());p.add_argument('--python',default=None);p.add_argument('--report',type=Path);a=p.parse_args();a.python=a.python or harness_env.aioquic_python()
+ env=os.environ.copy();env.setdefault('ODIN_ROOT',str(harness_env.sdk()));env['PYTHONDONTWRITEBYTECODE']='1'
+ binary=harness_env.workdir('saba-http3-shutdown-')/'server';cert=HERE / 'testdata/tls/localhost.pem';key=HERE / 'testdata/tls/rsa2048.pem';peer=HERE/'http3_shutdown/peer.py'
+ records=[h.run([a.odin,'build',HERE/'http3_shutdown',f'-collection:shared={SHARED}','-warnings-as-errors',*harness_env.sanitize_for(a.sanitize),f'-out:{binary}'],env)]
  records+=h.exercise(binary,['server',cert,key],[lambda port:[binary,'client',port,cert]],env)
  records+=h.exercise(binary,['server',cert,key],[lambda port:[a.python,peer,'observe',port]],env)
  for mode in ['reject','wrong-id','increasing','trailing','decreasing','graceful']:
@@ -36,5 +38,5 @@ def main():
    if mode=='trailing':assert 'CLOSE 262' in stdout,stdout
    if mode=='graceful':assert 'GOAWAY 0' in stdout and 'CLOSE 256' in stdout,stdout
    records.append(dict(mode=mode,stdout=stdout,stderr=stderr))
- result=dict(passed=True,sanitizer=a.sanitize,records=records);a.report.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result))
+ result=dict(passed=True,sanitizer=a.sanitize,records=records);(a.report.write_text if a.report else (lambda text:None))(json.dumps(result,indent=2)+'\n');print(json.dumps(result))
 if __name__=='__main__':main()

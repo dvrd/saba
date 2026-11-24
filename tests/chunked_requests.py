@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Owned HTTP/1 chunked upload, framing, deadline and persistence regressions."""
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
 import argparse
 import contextlib
 import http.client
@@ -20,14 +22,14 @@ def head(path='/echo', extra=b''):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--odin', required=True)
+    parser.add_argument('--odin', default=harness_env.odin())
     parser.add_argument('--sanitize', choices=['address'])
     args = parser.parse_args()
     checks = []
     source = Path(__file__).resolve().parents[1]/'testdata/keepalive'
     with tempfile.TemporaryDirectory(prefix='saba-chunked-') as work:
         binary = Path(work)/'server'
-        command = [args.odin, 'build', str(source), '-warnings-as-errors', '-out:'+str(binary)]
+        command = [args.odin, 'build', str(source), '-warnings-as-errors', harness_env.collection(), '-out:'+str(binary)]
         if args.sanitize:
             command.append('-sanitize:'+args.sanitize)
         subprocess.run(command, check=True, timeout=60)

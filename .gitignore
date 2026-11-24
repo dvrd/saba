@@ -6,7 +6,8 @@
 .DS_Store
 
 .cruft/
-.krs/
+.krs/*
+!.krs/packages.json
 
 # Python loopback harness imports
 __pycache__/

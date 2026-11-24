@@ -1,0 +1,54 @@
+{
+  "format": 1,
+  "packages": [
+    {
+      "name": "async",
+      "source": "local",
+      "tag": "v0.1.0",
+      "commit": "b92c05f45e552f07923abfb265360001e82d5471",
+      "hash": "22a007346c3fb4646c0f200ff5560dc85e534d236c2cbd93b2e74a7757edb5f8"
+    },
+    {
+      "name": "aws",
+      "source": "local",
+      "tag": "v0.1.0",
+      "commit": "36aee15d32c8f4319bb3a75f8be24d27dbb54a8c",
+      "hash": "e3ec355fdd31df1e8006012144aa333877392102b93f217d6b6af734efe4bfbf"
+    },
+    {
+      "name": "http",
+      "source": "local",
+      "tag": "v0.1.0",
+      "commit": "5899d6e2839cadd7d21943554dd22ecbe1932087",
+      "hash": "ec1318e05a853822eb30bb9350d14e5097ccf55783bb5872510f28489f8eedf3"
+    },
+    {
+      "name": "kakunou",
+      "source": "local",
+      "tag": "v0.2.0",
+      "commit": "afda0c3e59f497357447a4dbda04dbdfb4311c2b",
+      "hash": "30c0e6b8f7e566acab6b5fdff1776748a915e70e8a4d33c4e128655112fcaf4f"
+    },
+    {
+      "name": "kessel",
+      "source": "https://github.com/dvrd/kessel.git",
+      "tag": "v0.4.1",
+      "commit": "4fc1eaf42d9b000a53955de3d8e175d0ba34fb3f",
+      "hash": "cae24825a6d9ffebb523ead5543a7ef349d028e74df474314d53bd8b623172de"
+    },
+    {
+      "name": "surf",
+      "source": "local",
+      "tag": "v0.1.0",
+      "commit": "6d5c512ecbc33351e701bd79ed2fcc5670c0cc22",
+      "hash": "78077290d47ebb1d37d0e312a3c2205c8f360b9de33a27d4a5ef3d96a502d146"
+    },
+    {
+      "name": "websocket",
+      "source": "local",
+      "tag": "v0.1.0",
+      "commit": "4953c3a5fa99c57bbf66815e0fe96be3d8ff1e4f",
+      "hash": "0bd62223a0439926636f2fd314a96a46fb48cc2b79e128ec78b82481cded598f"
+    }
+  ]
+}

@@ -19,7 +19,8 @@ routes :: proc(_: ^server.Connection, request: ^server.Request) -> server.Respon
 	assert(request.request_id != 0)
 
 	if server.match_route(request, "GET", "/large") {
-		body := make([]u8, 64 * 1024 * 1024, request.allocator)
+		// Small enough that the body and its wire copy fit the default operation budget.
+		body := make([]u8, 8 * 1024 * 1024, request.allocator)
 		for &value in body {
 			value = 42
 		}

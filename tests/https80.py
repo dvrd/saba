@@ -15,8 +15,16 @@ import tempfile
 import threading
 import time
 
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))
+import harness_env
+import shutil
+
 HERE = Path(__file__).resolve().parent
 SOURCE = HERE / 'https80'
+
+
+def go_root(go):
+    return Path(subprocess.run([str(go), 'env', 'GOROOT'], capture_output=True, text=True, timeout=30).stdout.strip())
 
 
 def run(command, timeout=90, env=None):
@@ -187,21 +195,33 @@ def peer_wait(process, prefix):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--odin', required=True, type=Path)
-    parser.add_argument('--go', required=True, type=Path)
-    parser.add_argument('--go-root', required=True, type=Path)
-    parser.add_argument('--openssl', required=True, type=Path)
-    parser.add_argument('--shared', type=Path, default=HERE.parents[1])
+    parser.add_argument('--odin', type=Path, default=Path(harness_env.odin()))
+    parser.add_argument('--go', type=Path)
+    parser.add_argument('--go-root', type=Path)
+    parser.add_argument('--openssl', type=Path)
+    parser.add_argument('--shared', type=Path, default=Path(harness_env.shared()))
     parser.add_argument('--sdk-root', type=Path)
-    parser.add_argument('--sanitize', choices=['address', 'thread'], default='address')
-    parser.add_argument('--report', required=True, type=Path)
+    parser.add_argument('--sanitize', choices=['address', 'thread'], default=harness_env.sanitizer())
+    parser.add_argument('--report', type=Path)
     parser.add_argument('--evidence-dir', type=Path, help='Retain built peer/native binaries here')
     parser.add_argument('--case', help='Run only cases whose name starts with this value')
     args = parser.parse_args()
+    args.go = args.go or Path(harness_env.go())
+    args.go_root = args.go_root or go_root(args.go)
+    if not args.openssl:
+        located = shutil.which('openssl')
+        if not located:
+            harness_env.skip('openssl is not available')
+        args.openssl = Path(located)
+    for tool in ('pkg-config', 'clang'):
+        if not shutil.which(tool):
+            harness_env.skip(tool + ' is not available for the OpenSSL peer')
+    if subprocess.run(['pkg-config', '--exists', 'openssl']).returncode != 0:
+        harness_env.skip('pkg-config has no openssl package for the OpenSSL peer')
     compiler = args.odin.resolve()
     sdk = args.sdk_root.resolve() if args.sdk_root else Path(
         run([compiler, 'root'])['stdout'].strip())
-    fixtures = sdk / 'tests/core/crypto/tls/credentials/testdata'
+    fixtures = harness_env.TLS
     cert, key = fixtures/'rsa2048-valid.pem', fixtures/'rsa2048.pem'
     report = dict(passed=False, sanitizer=args.sanitize,
                   scope='Darwin/native HTTP1 Saba HTTPS correctness; owned peers; no Mesa integration or performance certification',
@@ -226,8 +246,9 @@ def main():
             native, go, openssl = temp/'server', temp/'go-peer', temp/'openssl-peer'
             report['builds'] = [run([compiler, 'build', SOURCE,
                                     '-collection:shared='+str(args.shared.resolve()),
-                                    '-thread-count:1', '-warnings-as-errors', '-vet',
-                                    '-sanitize:'+args.sanitize, '-out:'+str(native)]),
+                                    # No -vet: the facade pulls in shared:kessel, which does not pass it.
+                                    '-thread-count:1', '-warnings-as-errors',
+                                    *(['-sanitize:'+args.sanitize] if args.sanitize else []), '-out:'+str(native)]),
                                 run([args.go, 'build', '-o', go, SOURCE/'peer.go'], env=env)]
             flags = shlex.split(run(['pkg-config', '--cflags', '--libs', 'openssl'])['stdout'])
             report['builds'].append(run(['clang', '-Wall', '-Wextra', '-Werror',
@@ -351,8 +372,11 @@ def main():
             assert hashlib.sha256(compiler.read_bytes()).hexdigest() == report['compiler_sha256']
             report['passed'] = all(case['passed'] for case in report['cases'])
     finally:
-        args.report.parent.mkdir(parents=True, exist_ok=True)
-        args.report.write_text(json.dumps(report, indent=2)+'\n')
+        if args.report:
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(json.dumps(report, indent=2)+'\n')
+        elif not report['passed']:
+            print(json.dumps([case for case in report['cases'] if not case['passed']], indent=2)[-6000:])
     print(json.dumps(dict(passed=True, cases=len(report['cases']), report=str(args.report))))
 
 

@@ -1,0 +1,2006 @@
+{
+  "metadata": {
+    "date": "2026-11-20T21:20:28.038Z",
+    "cpu": "Apple M1 Max",
+    "os": "Darwin 27.2.0",
+    "rounds": 15,
+    "count": 1000000,
+    "positions": [
+      8,
+      16,
+      24,
+      32,
+      40,
+      48,
+      56,
+      64,
+      72,
+      80,
+      88,
+      96,
+      104,
+      112,
+      120,
+      128,
+      120,
+      112,
+      104,
+      96,
+      88,
+      80,
+      72,
+      64,
+      56,
+      48,
+      40,
+      32,
+      24,
+      16,
+      8,
+      0
+    ],
+    "flags": [
+      "--renderer-process-limit=1",
+      "--js-flags=--max-old-space-size=768"
+    ],
+    "viewport": [
+      1200,
+      900
+    ],
+    "armManifest": {
+      "saba-slot": {
+        "path": "/private/tmp/saba-keyed-disjoint-bypass.Bvwsdd/control.mjs",
+        "identity": "slots"
+      },
+      "same-order": {
+        "path": "/private/tmp/saba-keyed-disjoint-bypass.Bvwsdd/bypass.mjs",
+        "identity": "slots"
+      },
+      "direct-slot": {
+        "path": "/private/tmp/saba-speed-ceiling-recycle/recycled-cells.mjs",
+        "identity": "slots"
+      }
+    },
+    "hashes": {
+      "/": {
+        "path": "benchmarks/frameworks/rich/scale.html",
+        "sha256": "c1e8abdfcfde2a064e60d8652ef26f232dfc619053fbc8848e15c27eb6cb2341",
+        "bytes": 1473
+      },
+      "/scale.js": {
+        "path": "benchmarks/frameworks/rich/scale.js",
+        "sha256": "3c7da7d88336af86e38d4a8f33685d7e776b84e7f9e1636d1a272b4fb9ea9a28",
+        "bytes": 11397
+      },
+      "/sliding-window.js": {
+        "path": "src/modules/sliding-window.js",
+        "sha256": "94b867a8cb6c2fabb55d6bbe7be8d1b8705ae2d5fc8504ea86a040e950883f3f",
+        "bytes": 3332
+      },
+      "/arm/saba-slot.js": {
+        "path": "/private/tmp/saba-keyed-disjoint-bypass.Bvwsdd/control.mjs",
+        "sha256": "0a061debb0e1fe66ddef6a4b873e1f2e3af04d9fc0e7dddf5022d3f92d9fff84",
+        "bytes": 14388
+      },
+      "/arm/same-order.js": {
+        "path": "/private/tmp/saba-keyed-disjoint-bypass.Bvwsdd/bypass.mjs",
+        "sha256": "775273d679cb71493e20a326e8f3f11a70fc21c0e3a1a01028837591118d8324",
+        "bytes": 14771
+      },
+      "/arm/direct-slot.js": {
+        "path": "/private/tmp/saba-speed-ceiling-recycle/recycled-cells.mjs",
+        "sha256": "0d191dc980b1eb5f1c50719044d196adc97bc2959e8f61f11ab7fde34b6395ab",
+        "bytes": 3032
+      }
+    },
+    "driverSha256": "eb7afe82b23a875711d643d1abc9ddeac5462a231cfb1c57761c9d7dbe21bee6",
+    "wrapperSha256": "1a78edd840382978efe210964f29be05a11b5c371a989d1cc1b3ddc027cac2dd",
+    "rendererClock": "Inner performance.now clock around synchronous band.replace(records). Sparse and jump are single calls. This diagnostic measures only the jump. Excludes correctness checks, dispatch, and layout and paint after the call.",
+    "presentationClock": "Stock scale fixture Chromium Element Timing of visible status marker relative to trusted click handler entry. Final cell also hit-tested outside clock.",
+    "order": "Fresh Chromium per arm/round. Per round cyclic permutation of arms. Jump first via trusted sparse update and jump clicks; new process for each subsequent visit. This diagnostic measures only the jump."
+  },
+  "visits": [
+    {
+      "arm": "saba-slot",
+      "trial": 1,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25.199999928474426,
+        "mountPaintMs": 72.60000002384186,
+        "updatePaintMs": 40.90000009536743,
+        "seekPaintMs": 26.200000047683716,
+        "sparseReplaceMs": 0.8000000715255737,
+        "seekRendererMs": 0.7000000476837158,
+        "beforeWindowMs": 6.399999976158142,
+        "windowMs": 0.8000000715255737,
+        "outerRendererMs": 0.8000000715255737,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 1,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25,
+        "mountPaintMs": 80.10000002384186,
+        "updatePaintMs": 54.10000002384186,
+        "seekPaintMs": 29.299999952316284,
+        "sparseReplaceMs": 0.2999999523162842,
+        "seekRendererMs": 0.5999999046325684,
+        "beforeWindowMs": 5,
+        "windowMs": 0.6999999284744263,
+        "outerRendererMs": 0.5999999046325684,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 1,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 24.899999976158142,
+        "mountPaintMs": 54.60000002384186,
+        "updatePaintMs": 42.5,
+        "seekPaintMs": 27.700000047683716,
+        "sparseReplaceMs": 0.19999992847442627,
+        "seekRendererMs": 0.10000002384185791,
+        "beforeWindowMs": 6.800000071525574,
+        "windowMs": 0.19999992847442627,
+        "outerRendererMs": 0.19999992847442627,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 2,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 24.800000071525574,
+        "mountPaintMs": 65.80000007152557,
+        "updatePaintMs": 42.60000002384186,
+        "seekPaintMs": 29.399999976158142,
+        "sparseReplaceMs": 0.2999999523162842,
+        "seekRendererMs": 0.6000000238418579,
+        "beforeWindowMs": 6.599999904632568,
+        "windowMs": 0.7000000476837158,
+        "outerRendererMs": 0.7000000476837158,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 2,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 33.39999997615814,
+        "mountPaintMs": 70.59999990463257,
+        "updatePaintMs": 44,
+        "seekPaintMs": 29.799999952316284,
+        "sparseReplaceMs": 0.10000002384185791,
+        "seekRendererMs": 0.20000004768371582,
+        "beforeWindowMs": 6.299999952316284,
+        "windowMs": 0.20000004768371582,
+        "outerRendererMs": 0.20000004768371582,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "saba-slot",
+      "trial": 2,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 28,
+        "mountPaintMs": 71.79999995231628,
+        "updatePaintMs": 44.10000002384186,
+        "seekPaintMs": 26.5,
+        "sparseReplaceMs": 0.5,
+        "seekRendererMs": 0.8000000715255737,
+        "beforeWindowMs": 5.899999976158142,
+        "windowMs": 0.8000000715255737,
+        "outerRendererMs": 0.8000000715255737,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 3,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 26.59999990463257,
+        "mountPaintMs": 60.799999952316284,
+        "updatePaintMs": 43.60000002384186,
+        "seekPaintMs": 27.600000023841858,
+        "sparseReplaceMs": 0.09999990463256836,
+        "seekRendererMs": 0.20000004768371582,
+        "beforeWindowMs": 6.5,
+        "windowMs": 0.20000004768371582,
+        "outerRendererMs": 0.20000004768371582,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "saba-slot",
+      "trial": 3,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 27,
+        "mountPaintMs": 64.70000004768372,
+        "updatePaintMs": 42.10000002384186,
+        "seekPaintMs": 27.799999952316284,
+        "sparseReplaceMs": 0.3999999761581421,
+        "seekRendererMs": 0.8999999761581421,
+        "beforeWindowMs": 7.199999928474426,
+        "windowMs": 0.8999999761581421,
+        "outerRendererMs": 0.8999999761581421,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 3,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 28.300000071525574,
+        "mountPaintMs": 74.10000002384186,
+        "updatePaintMs": 42.199999928474426,
+        "seekPaintMs": 25.799999952316284,
+        "sparseReplaceMs": 0.3999999761581421,
+        "seekRendererMs": 0.7000000476837158,
+        "beforeWindowMs": 7.699999928474426,
+        "windowMs": 0.7000000476837158,
+        "outerRendererMs": 0.7000000476837158,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "saba-slot",
+      "trial": 4,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 27.199999928474426,
+        "mountPaintMs": 68,
+        "updatePaintMs": 41.90000009536743,
+        "seekPaintMs": 27.90000009536743,
+        "sparseReplaceMs": 0.2999999523162842,
+        "seekRendererMs": 0.8999999761581421,
+        "beforeWindowMs": 6.600000023841858,
+        "windowMs": 0.8999999761581421,
+        "outerRendererMs": 0.8999999761581421,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 4,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 28.09999990463257,
+        "mountPaintMs": 67.59999990463257,
+        "updatePaintMs": 42,
+        "seekPaintMs": 27.299999952316284,
+        "sparseReplaceMs": 0.5,
+        "seekRendererMs": 0.7000000476837158,
+        "beforeWindowMs": 6.899999976158142,
+        "windowMs": 0.7000000476837158,
+        "outerRendererMs": 0.7000000476837158,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 4,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 26.399999976158142,
+        "mountPaintMs": 63.299999952316284,
+        "updatePaintMs": 44.10000002384186,
+        "seekPaintMs": 21.600000023841858,
+        "sparseReplaceMs": 0.09999990463256836,
+        "seekRendererMs": 0.19999992847442627,
+        "beforeWindowMs": 0.30000007152557373,
+        "windowMs": 0.19999992847442627,
+        "outerRendererMs": 0.19999992847442627,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 5,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 27.09999990463257,
+        "mountPaintMs": 64.19999992847443,
+        "updatePaintMs": 41.5,
+        "seekPaintMs": 23.799999952316284,
+        "sparseReplaceMs": 0.40000009536743164,
+        "seekRendererMs": 0.7000000476837158,
+        "beforeWindowMs": 2.799999952316284,
+        "windowMs": 0.8000000715255737,
+        "outerRendererMs": 0.7000000476837158,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 5,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 27.399999976158142,
+        "mountPaintMs": 65.60000002384186,
+        "updatePaintMs": 44.700000047683716,
+        "seekPaintMs": 28.300000071525574,
+        "sparseReplaceMs": 0.09999990463256836,
+        "seekRendererMs": 0.20000004768371582,
+        "beforeWindowMs": 6.200000047683716,
+        "windowMs": 0.20000004768371582,
+        "outerRendererMs": 0.20000004768371582,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "saba-slot",
+      "trial": 5,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 28.699999928474426,
+        "mountPaintMs": 66.79999995231628,
+        "updatePaintMs": 41.699999928474426,
+        "seekPaintMs": 27.399999976158142,
+        "sparseReplaceMs": 0.3999999761581421,
+        "seekRendererMs": 0.7999999523162842,
+        "beforeWindowMs": 7.700000047683716,
+        "windowMs": 0.7999999523162842,
+        "outerRendererMs": 0.7999999523162842,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 6,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 28.300000071525574,
+        "mountPaintMs": 62.800000071525574,
+        "updatePaintMs": 42.60000002384186,
+        "seekPaintMs": 28.600000023841858,
+        "sparseReplaceMs": 0.10000002384185791,
+        "seekRendererMs": 0.20000004768371582,
+        "beforeWindowMs": 7.399999976158142,
+        "windowMs": 0.2999999523162842,
+        "outerRendererMs": 0.20000004768371582,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "saba-slot",
+      "trial": 6,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 28.100000023841858,
+        "mountPaintMs": 68.29999995231628,
+        "updatePaintMs": 46.299999952316284,
+        "seekPaintMs": 30.600000023841858,
+        "sparseReplaceMs": 0.5,
+        "seekRendererMs": 0.7999999523162842,
+        "beforeWindowMs": 6.400000095367432,
+        "windowMs": 0.8999999761581421,
+        "outerRendererMs": 0.8999999761581421,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 6,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 26.199999928474426,
+        "mountPaintMs": 67.10000002384186,
+        "updatePaintMs": 53.60000002384186,
+        "seekPaintMs": 26.5,
+        "sparseReplaceMs": 0.2999999523162842,
+        "seekRendererMs": 0.7999999523162842,
+        "beforeWindowMs": 6.399999976158142,
+        "windowMs": 0.8999999761581421,
+        "outerRendererMs": 0.7999999523162842,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "saba-slot",
+      "trial": 7,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25.699999928474426,
+        "mountPaintMs": 62,
+        "updatePaintMs": 44.300000071525574,
+        "seekPaintMs": 27.600000023841858,
+        "sparseReplaceMs": 0.3999999761581421,
+        "seekRendererMs": 0.7999999523162842,
+        "beforeWindowMs": 4.200000047683716,
+        "windowMs": 0.7999999523162842,
+        "outerRendererMs": 0.7999999523162842,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 7,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25.40000009536743,
+        "mountPaintMs": 63.10000002384186,
+        "updatePaintMs": 41.299999952316284,
+        "seekPaintMs": 27.600000023841858,
+        "sparseReplaceMs": 0.3999999761581421,
+        "seekRendererMs": 0.6000000238418579,
+        "beforeWindowMs": 6.600000023841858,
+        "windowMs": 0.8000000715255737,
+        "outerRendererMs": 0.6000000238418579,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 7,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25.5,
+        "mountPaintMs": 56.39999997615814,
+        "updatePaintMs": 41.39999997615814,
+        "seekPaintMs": 27.799999952316284,
+        "sparseReplaceMs": 0.10000002384185791,
+        "seekRendererMs": 0.10000002384185791,
+        "beforeWindowMs": 5.5,
+        "windowMs": 0.20000004768371582,
+        "outerRendererMs": 0.10000002384185791,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 8,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 24.90000009536743,
+        "mountPaintMs": 69.60000002384186,
+        "updatePaintMs": 41.799999952316284,
+        "seekPaintMs": 28.100000023841858,
+        "sparseReplaceMs": 0.3999999761581421,
+        "seekRendererMs": 0.7000000476837158,
+        "beforeWindowMs": 6.700000047683716,
+        "windowMs": 0.7000000476837158,
+        "outerRendererMs": 0.7000000476837158,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 8,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 26.800000071525574,
+        "mountPaintMs": 61.5,
+        "updatePaintMs": 45.39999997615814,
+        "seekPaintMs": 28.899999976158142,
+        "sparseReplaceMs": 0.10000002384185791,
+        "seekRendererMs": 0.19999992847442627,
+        "beforeWindowMs": 5.200000047683716,
+        "windowMs": 0.19999992847442627,
+        "outerRendererMs": 0.19999992847442627,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "saba-slot",
+      "trial": 8,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25.199999928474426,
+        "mountPaintMs": 61.5,
+        "updatePaintMs": 43.90000009536743,
+        "seekPaintMs": 26.100000023841858,
+        "sparseReplaceMs": 0.3999999761581421,
+        "seekRendererMs": 0.7000000476837158,
+        "beforeWindowMs": 3.899999976158142,
+        "windowMs": 0.7000000476837158,
+        "outerRendererMs": 0.7000000476837158,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 9,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 27.700000047683716,
+        "mountPaintMs": 64.89999997615814,
+        "updatePaintMs": 44.10000002384186,
+        "seekPaintMs": 28.100000023841858,
+        "sparseReplaceMs": 0.20000004768371582,
+        "seekRendererMs": 0.19999992847442627,
+        "beforeWindowMs": 5.900000095367432,
+        "windowMs": 0.19999992847442627,
+        "outerRendererMs": 0.19999992847442627,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "saba-slot",
+      "trial": 9,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25,
+        "mountPaintMs": 65.59999990463257,
+        "updatePaintMs": 45.5,
+        "seekPaintMs": 29.5,
+        "sparseReplaceMs": 0.3999999761581421,
+        "seekRendererMs": 0.7999999523162842,
+        "beforeWindowMs": 5.300000071525574,
+        "windowMs": 0.7999999523162842,
+        "outerRendererMs": 0.7999999523162842,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 9,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25.399999976158142,
+        "mountPaintMs": 63.299999952316284,
+        "updatePaintMs": 45.39999997615814,
+        "seekPaintMs": 26.600000023841858,
+        "sparseReplaceMs": 0.2999999523162842,
+        "seekRendererMs": 0.7000000476837158,
+        "beforeWindowMs": 6.100000023841858,
+        "windowMs": 0.7000000476837158,
+        "outerRendererMs": 0.7000000476837158,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "saba-slot",
+      "trial": 10,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 26.200000047683716,
+        "mountPaintMs": 60.700000047683716,
+        "updatePaintMs": 42.700000047683716,
+        "seekPaintMs": 27.5,
+        "sparseReplaceMs": 0.3999999761581421,
+        "seekRendererMs": 0.6000000238418579,
+        "beforeWindowMs": 6.399999976158142,
+        "windowMs": 0.7000000476837158,
+        "outerRendererMs": 0.6000000238418579,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 10,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25.59999990463257,
+        "mountPaintMs": 65.5,
+        "updatePaintMs": 44.60000002384186,
+        "seekPaintMs": 27.800000071525574,
+        "sparseReplaceMs": 0.2999999523162842,
+        "seekRendererMs": 0.6000000238418579,
+        "beforeWindowMs": 6,
+        "windowMs": 0.6000000238418579,
+        "outerRendererMs": 0.6000000238418579,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 10,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 24.199999928474426,
+        "mountPaintMs": 56.5,
+        "updatePaintMs": 43.5,
+        "seekPaintMs": 28,
+        "sparseReplaceMs": 0.10000002384185791,
+        "seekRendererMs": 0.19999992847442627,
+        "beforeWindowMs": 7.5,
+        "windowMs": 0.2999999523162842,
+        "outerRendererMs": 0.2999999523162842,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 11,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25.40000009536743,
+        "mountPaintMs": 64.10000002384186,
+        "updatePaintMs": 44.5,
+        "seekPaintMs": 29.399999976158142,
+        "sparseReplaceMs": 0.3999999761581421,
+        "seekRendererMs": 0.5,
+        "beforeWindowMs": 5.799999952316284,
+        "windowMs": 0.6000000238418579,
+        "outerRendererMs": 0.5,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 11,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 24.799999952316284,
+        "mountPaintMs": 56.09999990463257,
+        "updatePaintMs": 41.89999997615814,
+        "seekPaintMs": 29,
+        "sparseReplaceMs": 0.10000002384185791,
+        "seekRendererMs": 0.10000002384185791,
+        "beforeWindowMs": 6.600000023841858,
+        "windowMs": 0.10000002384185791,
+        "outerRendererMs": 0.10000002384185791,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "saba-slot",
+      "trial": 11,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25.600000023841858,
+        "mountPaintMs": 65,
+        "updatePaintMs": 41.39999997615814,
+        "seekPaintMs": 27.699999928474426,
+        "sparseReplaceMs": 0.2999999523162842,
+        "seekRendererMs": 0.6999999284744263,
+        "beforeWindowMs": 7,
+        "windowMs": 0.7999999523162842,
+        "outerRendererMs": 0.6999999284744263,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 12,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 24.5,
+        "mountPaintMs": 57.700000047683716,
+        "updatePaintMs": 43.5,
+        "seekPaintMs": 29,
+        "sparseReplaceMs": 0.19999992847442627,
+        "seekRendererMs": 0.20000004768371582,
+        "beforeWindowMs": 6,
+        "windowMs": 0.2999999523162842,
+        "outerRendererMs": 0.2999999523162842,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "saba-slot",
+      "trial": 12,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 26.5,
+        "mountPaintMs": 64.80000007152557,
+        "updatePaintMs": 44.89999997615814,
+        "seekPaintMs": 29.399999976158142,
+        "sparseReplaceMs": 0.2999999523162842,
+        "seekRendererMs": 0.8000000715255737,
+        "beforeWindowMs": 6.199999928474426,
+        "windowMs": 0.8999999761581421,
+        "outerRendererMs": 0.8000000715255737,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 12,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 24.200000047683716,
+        "mountPaintMs": 61.300000071525574,
+        "updatePaintMs": 50,
+        "seekPaintMs": 27.800000071525574,
+        "sparseReplaceMs": 0.30000007152557373,
+        "seekRendererMs": 0.5999999046325684,
+        "beforeWindowMs": 7.200000047683716,
+        "windowMs": 0.7999999523162842,
+        "outerRendererMs": 0.5999999046325684,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "saba-slot",
+      "trial": 13,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25.5,
+        "mountPaintMs": 65.20000004768372,
+        "updatePaintMs": 45.5,
+        "seekPaintMs": 29.5,
+        "sparseReplaceMs": 0.2999999523162842,
+        "seekRendererMs": 0.7000000476837158,
+        "beforeWindowMs": 6.299999952316284,
+        "windowMs": 0.7000000476837158,
+        "outerRendererMs": 0.7000000476837158,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 13,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25.5,
+        "mountPaintMs": 62,
+        "updatePaintMs": 42.299999952316284,
+        "seekPaintMs": 27.799999952316284,
+        "sparseReplaceMs": 0.30000007152557373,
+        "seekRendererMs": 0.6000000238418579,
+        "beforeWindowMs": 7.600000023841858,
+        "windowMs": 0.6999999284744263,
+        "outerRendererMs": 0.6000000238418579,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 13,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 28.700000047683716,
+        "mountPaintMs": 78.80000007152557,
+        "updatePaintMs": 43.700000047683716,
+        "seekPaintMs": 27.200000047683716,
+        "sparseReplaceMs": 0.20000004768371582,
+        "seekRendererMs": 0.20000004768371582,
+        "beforeWindowMs": 5.899999976158142,
+        "windowMs": 0.20000004768371582,
+        "outerRendererMs": 0.20000004768371582,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 14,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 27.299999952316284,
+        "mountPaintMs": 65.29999995231628,
+        "updatePaintMs": 44.299999952316284,
+        "seekPaintMs": 26.899999976158142,
+        "sparseReplaceMs": 0.40000009536743164,
+        "seekRendererMs": 0.6000000238418579,
+        "beforeWindowMs": 7.5,
+        "windowMs": 0.6000000238418579,
+        "outerRendererMs": 0.6000000238418579,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 14,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 26.100000023841858,
+        "mountPaintMs": 66.29999995231628,
+        "updatePaintMs": 46.10000002384186,
+        "seekPaintMs": 25.299999952316284,
+        "sparseReplaceMs": 0.20000004768371582,
+        "seekRendererMs": 0.20000004768371582,
+        "beforeWindowMs": 4.600000023841858,
+        "windowMs": 0.3999999761581421,
+        "outerRendererMs": 0.20000004768371582,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "saba-slot",
+      "trial": 14,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 27.59999990463257,
+        "mountPaintMs": 69.89999997615814,
+        "updatePaintMs": 44.89999997615814,
+        "seekPaintMs": 28.800000071525574,
+        "sparseReplaceMs": 0.5,
+        "seekRendererMs": 0.6000000238418579,
+        "beforeWindowMs": 7.100000023841858,
+        "windowMs": 0.7000000476837158,
+        "outerRendererMs": 0.6000000238418579,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "direct-slot",
+      "trial": 15,
+      "order": 1,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25.09999990463257,
+        "mountPaintMs": 58.299999952316284,
+        "updatePaintMs": 41.39999997615814,
+        "seekPaintMs": 27.5,
+        "sparseReplaceMs": 0.19999992847442627,
+        "seekRendererMs": 0.20000004768371582,
+        "beforeWindowMs": 6.799999952316284,
+        "windowMs": 0.30000007152557373,
+        "outerRendererMs": 0.20000004768371582,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "saba-slot",
+      "trial": 15,
+      "order": 2,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 26.59999990463257,
+        "mountPaintMs": 69.39999997615814,
+        "updatePaintMs": 50.5,
+        "seekPaintMs": 27.700000047683716,
+        "sparseReplaceMs": 0.2999999523162842,
+        "seekRendererMs": 0.6999999284744263,
+        "beforeWindowMs": 6.300000071525574,
+        "windowMs": 0.7999999523162842,
+        "outerRendererMs": 0.7999999523162842,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    },
+    {
+      "arm": "same-order",
+      "trial": 15,
+      "order": 3,
+      "chromium": "145.0.7632.6",
+      "jump": {
+        "dataMs": 25,
+        "mountPaintMs": 66.79999995231628,
+        "updatePaintMs": 46.799999952316284,
+        "seekPaintMs": 24,
+        "sparseReplaceMs": 0.7000000476837158,
+        "seekRendererMs": 0.6000000238418579,
+        "beforeWindowMs": 2,
+        "windowMs": 0.7000000476837158,
+        "outerRendererMs": 0.6000000238418579,
+        "changed": 10311,
+        "checksum": 499566514,
+        "mutateDom": {
+          "first": 0,
+          "end": 192,
+          "retainedKeys": 192,
+          "reusedKeys": 192,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "destinationDom": {
+          "first": 999808,
+          "end": 1000000,
+          "retainedKeys": 0,
+          "reusedKeys": 0,
+          "reusedNodes": 192,
+          "reusedTexts": 192
+        },
+        "finalCell": {
+          "mounted": 192,
+          "created": 192,
+          "lastId": 999999,
+          "lastText": "999999 · 35"
+        }
+      }
+    }
+  ],
+  "untimedCounters": {
+    "chromium": "145.0.7632.6",
+    "counters": {
+      "dependenciesObserved": 578,
+      "dirtyEnqueues": 385,
+      "readMaps": 385,
+      "flushWaves": 2,
+      "signalSetChanges": 193,
+      "newComputations": 0,
+      "textBindingRuns": 192,
+      "keyedListRuns": 1,
+      "validatedKeys": 192,
+      "existingRowLookups": 192,
+      "prepareRows": 0,
+      "removeRows": 0,
+      "placementChecks": 192,
+      "placementChanges": 0,
+      "rowRecordSets": 192,
+      "attributeBindingRuns": 192,
+      "keySnapshots": 1,
+      "newRowMaps": 1
+    },
+    "shapeOK": true,
+    "lastCell": "<div class=\"cell\" data-id=\"999999\">999999 · 35</div>",
+    "observedDOM": {
+      "attributeWrites": 192,
+      "textWrites": 192,
+      "added": 0,
+      "removed": 0
+    },
+    "hashes": {
+      "productionDom": "11152bc2cca153d8db445e9bd07efd05b9c41ee0a7552b4cb4f394ebc38d417b",
+      "generatedJS": "6572c06b2ff6037b7d2477e1fcffb3501fca06a08035fc7a3613ccf44a6e5478",
+      "pool": "3e56eb137bac8afdbfa22180e5e9cd67a6fbaa9f7233715bd321fed889552005",
+      "instrumentedDom": "6f50d12fa74c491336c1bfd2b33637b1d66df90542690969d308e344b3846512"
+    }
+  },
+  "experiment": {
+    "description": "The same-order control supplies the already-known order only on a fully disjoint, equal-size range whose slot allocator returns the identical array. It skips the general keyed reconciliation and placement pass for that snapshot, and updates the same production row signals in the same order.",
+    "build": {
+      "esbuild": "0.28.2",
+      "baselineSha256": "0a061debb0e1fe66ddef6a4b873e1f2e3af04d9fc0e7dddf5022d3f92d9fff84",
+      "shippedSha256": "0a061debb0e1fe66ddef6a4b873e1f2e3af04d9fc0e7dddf5022d3f92d9fff84",
+      "treatmentSha256": "775273d679cb71493e20a326e8f3f11a70fc21c0e3a1a01028837591118d8324",
+      "baselineRuntimeSha256": "11152bc2cca153d8db445e9bd07efd05b9c41ee0a7552b4cb4f394ebc38d417b",
+      "baselineGeneratedSha256": "6572c06b2ff6037b7d2477e1fcffb3501fca06a08035fc7a3613ccf44a6e5478",
+      "patchSha256": "f07d1f509ee36d25549a17a9954e9e69ba2ef12369100e901d0de89c4f01151d"
+    },
+    "sourceDiff": "--- scale-saba-slots.generated.mjs\n+++ scale-saba-slots.generated.mjs.experimental\n@@ -14,9 +14,22 @@\n   const rows = keyed(records, record => slots[record.id - first], Tile);\n   const dispose = mount(host, () => __saba_jsx(__saba_Fragment, null, (rows)));\n   function replace(next) {\n+    const previousFirst = first;\n+    const previousSlots = slots;\n     first = next[0]?.id ?? 0;\n     slots = assign(first, next.length);\n-    records.set(next);\n+    const unchangedOrder = slots === previousSlots && slots.length === next.length;\n+    const disjoint = first >= previousFirst + slots.length || previousFirst >= first + next.length;\n+    if (next.length && unchangedOrder && disjoint) {\n+      rows.confirmedSlotSnapshot = next;\n+      try {\n+        records.set(next);\n+      } finally {\n+        rows.confirmedSlotSnapshot = null;\n+      }\n+    } else {\n+      records.set(next);\n+    }\n   }\n   return { replace, dispose };\n }\n--- src/modules/dom.js\n+++ src/modules/dom.js.experimental\n@@ -579,8 +579,20 @@\n     first,\n   );\n   subscribe(() => {\n-    const { items, keyOf, renderRow } = configuration();\n-    const records = Array.from(typeof items === \"function\" ? items() : items);\n+    const config = configuration();\n+    const { items, keyOf, renderRow } = config;\n+    const snapshot = typeof items === \"function\" ? items() : items;\n+    if (snapshot === config.confirmedSlotSnapshot && rows.size === snapshot.length) {\n+      // The adapter has asserted physical keys and their order are unchanged.\n+      // Match the normal backward placement loop's signal-notification order.\n+      config.confirmedSlotSnapshot = null;\n+      untrack(() => batch(() => {\n+        const order = Array.from(rows.values());\n+        for (let i = order.length - 1; i >= 0; i--) order[i].current.set(snapshot[i]);\n+      }));\n+      return;\n+    }\n+    const records = Array.from(snapshot);\n     const keys = records.map(keyOf);\n     const seen = new Set();\n     for (const key of keys) {\n"
+  },
+  "replaySources": {
+    "jumpDriver": "'use strict';\nconst assert = require('node:assert/strict');\nconst {createHash} = require('node:crypto');\nconst fs = require('node:fs/promises');\nconst path = require('node:path');\nconst os = require('node:os');\nconst http = require('node:http');\nconst {chromium} = require(process.env.PLAYWRIGHT_PATH || 'playwright');\nconst [manifestPath, countArg, output] = process.argv.slice(2);\nconst rounds = Number(countArg);\nassert.ok(manifestPath && output && Number.isInteger(rounds) && rounds >= 1 && rounds <= 64,\n  'Usage: node ceiling.cjs MANIFEST.json ROUNDS OUT.json (run from Saba checkout)');\nconst sha = bytes => createHash('sha256').update(bytes).digest('hex');\nconst count = 1000000;\nconst positions = Array.from({length:16}, (_,i) => (i+1)*8);\npositions.push(...positions.slice(0,-1).reverse(), 0);\nconst wrapper = `\nconst name = new URLSearchParams(location.search).get('arm');\nconst {mountScaleBand: mount} = await import('/arm/' + name + '.js');\nwindow.replacements = [];\nexport function mountScaleBand(host, records) {\n  const band = mount(host, records);\n  return {\n    replace(records) {\n      const start = performance.now();\n      band.replace(records);\n      const ms = performance.now() - start;\n      window.replacements.push({first: records[0].id, end: records.at(-1).id+1, ms});\n    },\n    dispose: () => band.dispose()\n  };\n}`;\n\n// The checks run outside renderer and presentation stopwatches.\nfunction installChecks(identity) {\n  const requireTrue = (condition, message) => { if (!condition) throw Error(message); };\n  let previous = new Map(), previousText = new Map();\n  window.auditBand = (first, end, changed) => {\n    const host = document.querySelector('#space .band');\n    const stats = window.scale.windowStats();\n    requireTrue(stats.first === first && stats.end === end &&\n      host.childElementCount === end-first, 'Window bounds or child count differ');\n    const next = new Map(), nextText = new Map();\n    let retainedKeys = 0, reusedKeys = 0, reusedNodes = 0, reusedTexts = 0;\n    for (let i = 0; i < end-first; i++) {\n      const id = first+i, node = host.children[i];\n      const dirty = changed && (id % 97 === 0 || id === 999999);\n      const score = (id * 37 + (id % 23) * 13) % 1000 + (dirty ? 7 : 0);\n      requireTrue(node.isConnected && node.tagName === 'DIV' && node.className === 'cell' &&\n        node.dataset.id === String(id) && node.textContent === id + ' · ' + score, 'Incorrect DOM at ' + id);\n      const text = node.firstChild;\n      requireTrue(text && text.nodeType === Node.TEXT_NODE && text === node.lastChild,\n        'Cell does not contain exactly one Text node at ' + id);\n      const prior = previous.get(id);\n      if (prior) retainedKeys++;\n      if (prior === node) reusedKeys++;\n      if (previousText.has(node)) {\n        reusedNodes++;\n        requireTrue(previousText.get(node) === text, 'Reused cell replaced its Text at ' + id);\n        reusedTexts++;\n      }\n      next.set(id,node);\n      nextText.set(node,text);\n    }\n    requireTrue(retainedKeys === reusedKeys, 'Retained key lost DOM identity');\n    if (identity === 'keyed') {\n      for (const [id, node] of previous) if (!next.has(id)) {\n        requireTrue(!node.isConnected,'Old key remains connected ' + id);\n      }\n    } else {\n      requireTrue(reusedNodes === Math.min(previous.size, next.size), 'Slot pool remounted existing nodes');\n      const kept = new Set(next.values());\n      for (const node of previous.values()) if (!kept.has(node)) {\n        requireTrue(!node.isConnected, 'Outgoing slot still connected');\n      }\n    }\n    previous = next;\n    previousText = nextText;\n    return {first, end, retainedKeys, reusedKeys, reusedNodes, reusedTexts};\n  };\n}\nasync function marker(page, key, action) {\n  await page.waitForFunction(k => window.scale.paints[k] > 0, key, {timeout:10000});\n  const ms = await page.evaluate(([k,a]) => window.scale.paints[k]-window.scale.starts[a], [key,action]);\n  assert.ok(ms >= -4 && Number.isFinite(ms));\n  return ms;\n}\nasync function measureJump(page) {\n  const data = await page.evaluate(() => window.scale.start());\n  assert.equal(data.records, count);\n  const cp = await page.evaluate(() => window.scale.checkpoint());\n  assert.equal(cp.count, 192);\n  const mountPaintMs = await marker(page, cp.key,'mount');\n  await page.evaluate(() => { window.auditBand(0,192,false); window.scale.allowUpdates(); });\n  await page.locator('#mutate').click();\n  const updatePaintMs = await marker(page,'mutate','mutate');\n  const updated = await page.evaluate(() => {\n    const model = window.scale.verifyUpdate();\n    const dom = window.auditBand(0,192,true);\n    return {model, dom, measurements:window.replacements.slice()};\n  });\n  assert.equal(updated.model.changed, 10311);\n  assert.equal(updated.measurements.length,1);\n  await page.locator('#jump').click();\n  const seekPaintMs = await marker(page, 'jump', 'jump');\n  const end = await page.evaluate(() => {\n    const checked = window.scale.verifyEnd();\n    const dom = window.auditBand(1000000-192,1000000,true);\n    const {jump,jumpWindow,jumpRenderer,jumpRendererDone,jumpWindowDone} = window.scale.starts;\n    if (!(jump <= jumpWindow && jumpWindow <= jumpRenderer && jumpRenderer <= jumpRendererDone &&\n          jumpRendererDone <= jumpWindowDone)) throw Error('Destination timing order');\n    return {checked, dom, measurements:window.replacements, beforeWindowMs:jumpWindow-jump,\n      windowMs:jumpWindowDone-jumpWindow, outerRendererMs:jumpRendererDone-jumpRenderer};\n  });\n  assert.equal(end.checked.lastId, count-1);\n  assert.equal(end.measurements.length,2);\n  assert.equal(end.measurements[1].first,count-192);\n  assert.equal(end.measurements[1].end,count);\n  return {dataMs:data.dataMs,mountPaintMs,updatePaintMs,seekPaintMs,\n    sparseReplaceMs:updated.measurements[0].ms, seekRendererMs:end.measurements[1].ms,\n    beforeWindowMs:end.beforeWindowMs, windowMs:end.windowMs, outerRendererMs:end.outerRendererMs,\n    changed:updated.model.changed,checksum:updated.model.checksum,mutateDom:updated.dom,\n    destinationDom:end.dom,finalCell:end.checked};\n}\nasync function measureScroll(positions) {\n  const data = window.scale.start();\n  if (data.records !== 1000000) throw Error('Wrong model size');\n  const viewport = document.querySelector('#viewport');\n  if (viewport.clientHeight !== 416) throw Error('Wrong viewport height');\n  window.auditBand(0,192,false);\n  const steps = [];\n  for (const row of positions) {\n    const before = window.scale.windowStats();\n    const prev = window.replacements.length;\n    await new Promise(resolve => {\n      viewport.addEventListener('scroll',resolve,{once:true});\n      viewport.scrollTop = row * 26;\n    });\n    await new Promise(requestAnimationFrame);\n    await new Promise(requestAnimationFrame);\n    const stats = window.scale.windowStats();\n    const refills = window.replacements.length - prev;\n    if (viewport.scrollTop !== row*26 || refills !== (row === 0 ? 0 : 1) ||\n        stats.reconciles !== before.reconciles+refills) throw Error('Unexpected scroll/refill at ' + row);\n    const first = refills ? Math.max(0,row-8)*8 : before.first;\n    const end = refills ? (row+24)*8 : before.end;\n    if (first > row*8 || end < (row+16)*8) throw Error('Viewport uncovered');\n    const sample = window.replacements.at(-1);\n    if (refills && (sample.first !== first || sample.end !== end)) throw Error('Unexpected renderer slice');\n    const audited = window.auditBand(first,end,false);\n    if (audited.retainedKeys !== Math.min(end,before.end)-Math.max(first,before.first)) throw Error('Missing overlap');\n    steps.push({row, ...audited, replaceMs:refills ? sample.ms : null});\n  }\n  return {steps,refills:window.replacements.length,\n    totalReplaceMs:window.replacements.reduce((sum,sample) => sum+sample.ms,0)};\n}\nasync function main() {\n  const manifest = JSON.parse(await fs.readFile(manifestPath,'utf8'));\n  const names = Object.keys(manifest);\n  assert.ok(names.length && names.length <= 32);\n  const paths = {'/':'benchmarks/frameworks/rich/scale.html',\n    '/scale.js':'benchmarks/frameworks/rich/scale.js','/sliding-window.js':'src/modules/sliding-window.js'};\n  for (const name of names) {\n    assert.ok(/^[a-zA-Z0-9_\\-]+$/.test(name) && ['slots','keyed'].includes(manifest[name].identity));\n    paths['/arm/'+name+'.js'] = manifest[name].path;\n  }\n  const files = new Map(), hashes = {};\n  for (const [key,file] of Object.entries(paths)) {\n    const bytes = await fs.readFile(file);\n    files.set(key,bytes); hashes[key] = {path:file,sha256:sha(bytes),bytes:bytes.length};\n  }\n  files.set('/scale-saba-compiled.js',wrapper);\n  const server = http.createServer((req,res) => {\n    const key = req.url.split('?')[0];\n    if (!files.has(key)) { res.writeHead(404); res.end(); return; }\n    res.writeHead(200,{'Content-Type':key==='/'?'text/html':'text/javascript','Cache-Control':'no-store'});\n    res.end(files.get(key));\n  });\n  await new Promise((ok,fail) => {server.once('error',fail); server.listen(0,'127.0.0.1',ok);});\n  const flags = ['--renderer-process-limit=1','--js-flags=--max-old-space-size=768'];\n  const report = {metadata:{date:new Date().toISOString(),cpu:os.cpus()[0].model,os:os.type()+' '+os.release(),\n    rounds, count, positions, flags, viewport:[1200,900], armManifest:manifest, hashes,\n    driverSha256:sha(await fs.readFile(__filename)), wrapperSha256:sha(wrapper),\n    rendererClock:'Inner performance.now clock around synchronous band.replace(records). Sparse and jump are single calls. This diagnostic measures only the jump. Excludes correctness checks, dispatch, and layout and paint after the call.',\n    presentationClock:'Stock scale fixture Chromium Element Timing of visible status marker relative to trusted click handler entry. Final cell also hit-tested outside clock.',\n    order:'Fresh Chromium per arm/round. Per round cyclic permutation of arms. Jump first via trusted sparse update and jump clicks; new process for each subsequent visit. This diagnostic measures only the jump.'},visits:[]};\n  try {\n    for (let r=0;r<rounds;r++) for (let s=0;s<names.length;s++) {\n      const name = names[(s+r)%names.length], spec = manifest[name];\n      const browser = await chromium.launch({channel:'chromium',executablePath:process.env.SABA_CHROME,args:flags,timeout:20000});\n      try {\n        const errors = [];\n        const openPage = async () => {\n          const page = await browser.newPage({viewport:{width:1200,height:900}, serviceWorkers:'block'});\n          page.on('pageerror', e=>errors.push(e.message));\n          page.setDefaultTimeout(10000);\n          await page.goto('http://127.0.0.1:'+server.address().port+'/?scenario=buffered&count='+count+'&mode=saba-compiled&arm='+name);\n          await page.waitForFunction(() => Boolean(window.scale));\n          await page.evaluate(installChecks,spec.identity);\n          return page;\n        };\n        const journey = async () => {\n          let page = await openPage();\n          const jump = await measureJump(page);\n          await page.close();\n          assert.deepEqual(errors,[]);\n          return {arm:name,trial:r+1,order:s+1,chromium:browser.version(),jump};\n        };\n        let timeout;\n        try {\n          const visit = await Promise.race([journey(), new Promise((_,reject) => {\n            timeout = setTimeout(() => reject(Error('Timed out '+name+' trial '+(r+1))),55000);\n          })]);\n          report.visits.push(visit);\n          await fs.writeFile(output+'.tmp',JSON.stringify(report,null,2)+'\\n');\n          await fs.rename(output+'.tmp',output);\n          console.log(r+1,name,'jump',visit.jump.seekRendererMs.toFixed(2),\n            'paint',visit.jump.seekPaintMs.toFixed(2));\n        } finally { clearTimeout(timeout); }\n      } finally { await browser.close(); }\n    }\n  } finally { await new Promise(resolve=>server.close(resolve)); }\n}\nmain().catch(error=>{console.error(error);process.exitCode=1;});\n",
+    "treatmentBuilder": "'use strict';\nconst assert = require('node:assert/strict');\nconst crypto = require('node:crypto');\nconst fs = require('node:fs');\nconst path = require('node:path');\nconst {execFileSync} = require('node:child_process');\nconst cwd = process.cwd();\nconst adapterDir = process.argv[2] || '/private/tmp/saba-react-slot-comparison';\nconst framework = path.join(cwd, 'benchmarks/frameworks');\nconst esbuild = require(path.join(framework, 'node_modules/esbuild'));\nconst dir = __dirname;\nconst sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex');\nfunction substitute(input, old, replacement) {\n  assert.notEqual(input.indexOf(old), -1, 'Expected original input');\n  assert.equal(input.indexOf(old), input.lastIndexOf(old), 'Expected one match');\n  return input.replace(old, () => replacement);\n}\nconst entry = 'scale-saba-slots.generated.mjs', runtime = 'dom.js';\nfor (const name of [entry,'pool.mjs']) fs.copyFileSync(path.join(adapterDir,name),path.join(dir,name));\nfs.copyFileSync(path.join(cwd,'src/modules/dom.js'),path.join(dir,runtime));\nconst source = fs.readFileSync(path.join(dir,entry),'utf8');\nconst ordinary = fs.readFileSync(path.join(dir,runtime),'utf8');\nconst entryNew = substitute(source,`    first = next[0]?.id ?? 0;\n    slots = assign(first, next.length);\n    records.set(next);`,`    const previousFirst = first;\n    const previousSlots = slots;\n    first = next[0]?.id ?? 0;\n    slots = assign(first, next.length);\n    const unchangedOrder = slots === previousSlots && slots.length === next.length;\n    const disjoint = first >= previousFirst + slots.length || previousFirst >= first + next.length;\n    if (next.length && unchangedOrder && disjoint) {\n      rows.confirmedSlotSnapshot = next;\n      try {\n        records.set(next);\n      } finally {\n        rows.confirmedSlotSnapshot = null;\n      }\n    } else {\n      records.set(next);\n    }`);\nconst runtimeNew = substitute(ordinary,`    const { items, keyOf, renderRow } = configuration();\n    const records = Array.from(typeof items === \"function\" ? items() : items);`,`    const config = configuration();\n    const { items, keyOf, renderRow } = config;\n    const snapshot = typeof items === \"function\" ? items() : items;\n    if (snapshot === config.confirmedSlotSnapshot && rows.size === snapshot.length) {\n      // The adapter has asserted physical keys and their order are unchanged.\n      // Match the normal backward placement loop's signal-notification order.\n      config.confirmedSlotSnapshot = null;\n      untrack(() => batch(() => {\n        const order = Array.from(rows.values());\n        for (let i = order.length - 1; i >= 0; i--) order[i].current.set(snapshot[i]);\n      }));\n      return;\n    }\n    const records = Array.from(snapshot);`);\nasync function bundle(out, file, runtimePath) {\n  const settings = {\n    absWorkingDir:framework, entryPoints:[path.join(dir,file)], outfile:path.join(dir,out),\n    bundle:true, minify:true, format:'esm', platform:'browser', conditions:['browser','production'],\n    target:'es2022', jsx:'automatic', define:{'process.env.NODE_ENV':'\"production\"'}, metafile:true,\n    plugins:[{name:'saba-runtime',setup(builder) {\n      builder.onResolve({filter:/^\\/__saba\\/dom\\.js$/}, () => ({path:path.join(dir,runtimePath)}));\n    }}],\n  };\n  const meta=await esbuild.build(settings);\n  const outputs=Object.values(meta.metafile.outputs); assert.equal(outputs.length,1); assert.equal(outputs[0].imports.length,0);\n  return sha(fs.readFileSync(settings.outfile));\n}\nfunction diff(old, next, label) {\n  try { return execFileSync('diff',['-u','-L',label,'-L',label+'.experimental',path.join(dir,old),path.join(dir,next)],{encoding:'utf8'}); }\n  catch (e) { if (e.status===1) return e.stdout; throw e; }\n}\nasync function main() {\n  const baseline=await bundle('control.mjs',entry,runtime);\n  const shipped=sha(fs.readFileSync(path.join(adapterDir,'saba-slots.mjs')));\n  assert.equal(baseline,shipped,'Independent baseline build differs');\n  fs.writeFileSync(path.join(dir,'bypass-entry.mjs'),entryNew);\n  fs.writeFileSync(path.join(dir,'bypass-dom.js'),runtimeNew);\n  const treatment=await bundle('bypass.mjs','bypass-entry.mjs','bypass-dom.js');\n  fs.writeFileSync(path.join(dir,'source.diff'),diff(entry,'bypass-entry.mjs','scale-saba-slots.generated.mjs')+diff(runtime,'bypass-dom.js','src/modules/dom.js'));\n  const meta={esbuild:esbuild.version,baselineSha256:baseline,shippedSha256:shipped,treatmentSha256:treatment,\n    baselineRuntimeSha256:sha(ordinary),baselineGeneratedSha256:sha(source),patchSha256:sha(fs.readFileSync(path.join(dir,'source.diff')))};\n  fs.writeFileSync(path.join(dir,'build.json'),JSON.stringify(meta,null,2)+'\\n');\n  console.log(JSON.stringify(meta));\n}\nmain().catch(error=>{console.error(error);process.exitCode=1;});\n",
+    "counterBuilder": "const fs = require('node:fs');\nconst path = require('node:path');\nconst assert = require('node:assert/strict');\nconst sha = b => require('node:crypto').createHash('sha256').update(b).digest('hex');\nconst out = __dirname, repo = process.cwd(), input = '/private/tmp/saba-react-slot-comparison';\nconst read = f => fs.readFileSync(f,'utf8');\nconst lib = path.join(repo,'src/modules/dom.js'), original=read(lib);\nconst source=read(path.join(input,'scale-saba-slots.generated.mjs')), pool=read(path.join(input,'pool.mjs'));\nconst ins = {\n  dependenciesObserved:'tracking.reads.set(source, source.version);',\n  dirtyEnqueues:'node.state = level;',\n  readMaps:'node.reads = new Map();',\n  flushWaves:'const wave = [...pendingEffects];',\n  signalSetChanges:'source.version++;',\n  newComputations:'const node = {\\n    callback,',\n  textBindingRuns:'let staged, value;',\n  keyedListRuns:'const { items, keyOf, renderRow } = configuration();',\n  validatedKeys:'if (typeof key !== \"string\" && !Number.isFinite(key)) {',\n  existingRowLookups:'let row = rows.get(keys[i]);',\n  prepareRows:'const scope = createScope(owner);\\n  const current = signal(record);',\n  removeRows:'disposeScope(row.scope, errors);\\n  if (row.first',\n  placementChecks:'if (row.last.nextSibling === before) return;',\n  placementChanges:'const parent = before.parentNode;',\n  rowRecordSets:'row.current.set(records[i]);',\n  attributeBindingRuns:'const next = value.read();\\n      const write =',\n  keySnapshots:'const keys = records.map(keyOf);',\n  newRowMaps:'const next = new Map(), added = new Set(), errors = [];'\n};\nlet runtime=original;\nfor (const [name,needle] of Object.entries(ins)) {\n  assert.equal(runtime.split(needle).length,2,name);\n  runtime=runtime.replace(needle,'slotDiagnosticCount(\"'+name+'\"); '+needle);\n}\nruntime='function slotDiagnosticCount(name){if(globalThis.slotDiagnostic)globalThis.slotDiagnostic[name]++;}\\n'+runtime;\nfs.writeFileSync(path.join(out,'dom.counts.js'),runtime);\nfs.writeFileSync(path.join(out,'generated.mjs'),source);\nfs.writeFileSync(path.join(out,'pool.mjs'),pool);\nfs.writeFileSync(path.join(out,'counters.json'),JSON.stringify(Object.keys(ins)));\nconst runtimeHashes={productionDom:sha(original),generatedJS:sha(source),pool:sha(pool),instrumentedDom:sha(runtime)};\nfs.writeFileSync(path.join(out,'hashes.json'),JSON.stringify(runtimeHashes));\nrequire(path.join(repo,'benchmarks/frameworks/node_modules/esbuild')).build({\n absWorkingDir:out,entryPoints:['generated.mjs'],outfile:'counts.mjs',bundle:true,minify:true,format:'esm',platform:'browser',target:'es2022',plugins:[{name:'runtime',setup(b){b.onResolve({filter:/^\\/__saba\\/dom\\.js$/},()=>({path:path.join(out,'dom.counts.js')}))}}]\n}).catch(e=>{console.error(e); process.exitCode=1});\n",
+    "counterRunner": "const fs=require('node:fs'), path=require('node:path'), assert=require('node:assert/strict');\nconst {chromium}=require(process.env.PLAYWRIGHT_PATH || 'playwright');\nasync function main(){\n  const browser=await chromium.launch({channel:'chromium',executablePath:process.env.SABA_CHROME});\n  try {\n    const page=await browser.newPage();\n    await page.route('http://saba-counter.test/**', r=>new URL(r.request().url()).pathname==='/counts.mjs'\n      ?r.fulfill({contentType:'text/javascript',body:fs.readFileSync(path.join(__dirname,'counts.mjs'))})\n      :r.fulfill({contentType:'text/html',body:'<!doctype html><body><div class=\"band\"></div>'}));\n    await page.goto('http://saba-counter.test/');\n    const names=JSON.parse(fs.readFileSync(path.join(__dirname,'counters.json')));\n    const result=await page.evaluate(async names=>{\n      const {mountScaleBand}=await import('/counts.mjs');\n      const host=document.querySelector('.band');\n      const records=Array.from({length:1000000}, (_,id)=>({id,group:id%23,score:(id * 37 + (id % 23) * 13)%1000}));\n      const band=mountScaleBand(host,records.slice(0,192));\n      for(let i=0;i<records.length;i+=97)records[i]={...records[i],score:records[i].score+7};\n      if(999999%97!==0) records[999999]={...records[999999],score:records[999999].score+7};\n      band.replace(records.slice(0,192));\n      const cells=[...host.children], labels=cells.map(cell=>cell.firstChild);\n      const next=records.slice(-192);\n      const obs=new MutationObserver(()=>{});\n      obs.observe(host,{attributes:true,childList:true,characterData:true,subtree:true});\n      const counters=Object.fromEntries(names.map(n=>[n,0]));\n      globalThis.slotDiagnostic=counters;\n      try { band.replace(next); } finally {globalThis.slotDiagnostic=null;}\n      const mutations=obs.takeRecords(); obs.disconnect();\n      const added=mutations.filter(m=>m.type==='childList').reduce((s,m)=>s+m.addedNodes.length,0);\n      const removed=mutations.filter(m=>m.type==='childList').reduce((s,m)=>s+m.removedNodes.length,0);\n      const shapeOK=host.children.length===192&&next.every((r,i)=>host.children[i]===cells[i]&&cells[i].className==='cell'&&cells[i].dataset.id===String(r.id)&&cells[i].firstChild===labels[i]&&labels[i].data===r.id+' · '+r.score);\n      const lastCell=host.lastElementChild.outerHTML;\n      band.dispose();\n      return {counters,shapeOK,lastCell,observedDOM:{attributeWrites:mutations.filter(m=>m.type==='attributes'&&m.attributeName==='data-id').length,textWrites:mutations.filter(m=>m.type==='characterData').length,added,removed}};\n    },names);\n    assert.ok(result.shapeOK); assert.deepEqual(result.observedDOM,{attributeWrites:192,textWrites:192,added:0,removed:0});\n    const json=JSON.stringify({chromium:browser.version(),...result,hashes:JSON.parse(fs.readFileSync(path.join(__dirname,'hashes.json')))},null,2)+'\\n';\n    fs.writeFileSync(path.join(__dirname,'result.json'),json);\n    process.stdout.write(json);\n  } finally {await browser.close();}\n}\nmain().catch(err=>{console.error(err);process.exitCode=1;});\n",
+    "sourceInputs": "Use the Saba slot adapter, generated module, shared pool and direct-slot reference from renderer-grid-slot-keys.json and renderer-grid-speed-references.json. The archived builder/runner scripts contain the original temporary location of their inputs. Update paths when replaying."
+  }
+}

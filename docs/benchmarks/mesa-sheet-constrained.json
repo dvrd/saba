@@ -1,0 +1,1768 @@
+{
+  "browser": "145.0.7632.6",
+  "os": "Darwin Kernel Version 27.2.0: Thu Oct 15 00:02:46 PDT 2026; root:xnu-13432.41.4~25/RELEASE_ARM64_T6000",
+  "arch": "arm64",
+  "cpus": "Apple M1 Max",
+  "commit": "6587213d1b8717cdc8807bcbbc3816477db946e9",
+  "sha256": {
+    "sheetsJS": "7b459da6ff36cebf39c5873b343252b550abc9d5f2fe1bc7d3988b6b4f0eea36",
+    "sheetsCSS": "9922390d4d89befd208bd3c19db6af3be085395ea42cbf8cfca7d4db8de65e45"
+  },
+  "conditions": {
+    "profile": "constrained",
+    "viewport": {
+      "width": 1200,
+      "height": 850
+    },
+    "throttling": {
+      "latencyMs": 60,
+      "cpuRate": 4,
+      "downMbps": 10,
+      "upMbps": 2
+    },
+    "source": "Unmodified Mesa grid and stylesheet in a minimal shell; synthetic, in-memory loopback HTTP with a preselected editing user. Four columns. Five pages loaded and one visible sheet with 200 mounted rows. Successful save resets the snapshot to the first 200 rows.",
+    "warmups": 1,
+    "freshBrowserContexts": 20,
+    "definitions": "Editable = navigation start to the MutationObserver callback seeing the first authorized editable cell and status, before interaction or paint. Keys = traced trusted keydown EventTiming to Chromium presentation. Save fresh = trusted Tab timestamp to DOM delivery of authoritative cell and saved status after POST and GET, before the next paint."
+  },
+  "summary": {
+    "editableMs": {
+      "n": 20,
+      "p50": 436.2,
+      "p95": 451.3,
+      "min": 427.3,
+      "max": 459.9
+    },
+    "keydownToPresentationMs": {
+      "n": 180,
+      "p50": 31.352,
+      "p95": 36.364,
+      "min": 24.677,
+      "max": 40.34
+    },
+    "saveFreshMs": {
+      "n": 20,
+      "p50": 216,
+      "p95": 221.2,
+      "min": 209.1,
+      "max": 228.3
+    },
+    "saveRequests": [
+      2
+    ]
+  },
+  "enter": {
+    "witness": {
+      "status": "Celda A2 guardada · evento 1 · 1000 de 1000 filas · doble clic para editar",
+      "display": "",
+      "input": "Item 1",
+      "focused": true
+    },
+    "serverTitle": "Saved quicktype",
+    "saveRequests": [
+      "POST /api/sandbox/sheets/edit"
+    ]
+  },
+  "samples": [
+    {
+      "run": 0,
+      "frame": "51B5F5044F0B82ED0B9487CF5168B402",
+      "editableMs": 459.89999997615814,
+      "saveFreshMs": 228.29999995231628,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1557.1000000238419,
+          "presentedMs": 40.34,
+          "traceTimeStamp": 1557.168,
+          "commitFinish": 1577.86,
+          "interaction": 5853
+        },
+        {
+          "key": "u",
+          "ts": 1672.2999999523163,
+          "presentedMs": 33.465,
+          "traceTimeStamp": 1672.375,
+          "commitFinish": 1692.822,
+          "interaction": 5860
+        },
+        {
+          "key": "i",
+          "ts": 1762.3999999761581,
+          "presentedMs": 34.985,
+          "traceTimeStamp": 1762.523,
+          "commitFinish": 1781.308,
+          "interaction": 5867
+        },
+        {
+          "key": "c",
+          "ts": 1862,
+          "presentedMs": 35.403,
+          "traceTimeStamp": 1862.104,
+          "commitFinish": 1881.196,
+          "interaction": 5874
+        },
+        {
+          "key": "k",
+          "ts": 1972.1000000238419,
+          "presentedMs": 33.709,
+          "traceTimeStamp": 1972.131,
+          "commitFinish": 1992.234,
+          "interaction": 5881
+        },
+        {
+          "key": "t",
+          "ts": 2093.7999999523163,
+          "presentedMs": 36.881,
+          "traceTimeStamp": 2093.959,
+          "commitFinish": 2113.341,
+          "interaction": 5888
+        },
+        {
+          "key": "y",
+          "ts": 2190,
+          "presentedMs": 32.407,
+          "traceTimeStamp": 2190.101,
+          "commitFinish": 2209.161,
+          "interaction": 5895
+        },
+        {
+          "key": "p",
+          "ts": 2296.100000023842,
+          "presentedMs": 34.605,
+          "traceTimeStamp": 2296.236,
+          "commitFinish": 2315.651,
+          "interaction": 5902
+        },
+        {
+          "key": "e",
+          "ts": 2399.7999999523163,
+          "presentedMs": 31.007,
+          "traceTimeStamp": 2399.834,
+          "commitFinish": 2419.421,
+          "interaction": 5909
+        }
+      ]
+    },
+    {
+      "run": 1,
+      "frame": "6776AE500AFF94AA976AB1E3A4FFC113",
+      "editableMs": 439.2000000476837,
+      "saveFreshMs": 214.39999997615814,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1452.5,
+          "presentedMs": 29.537,
+          "traceTimeStamp": 1452.495,
+          "commitFinish": 1469.917,
+          "interaction": 4881
+        },
+        {
+          "key": "u",
+          "ts": 1572.3000000715256,
+          "presentedMs": 26.432,
+          "traceTimeStamp": 1572.265,
+          "commitFinish": 1587.333,
+          "interaction": 4888
+        },
+        {
+          "key": "i",
+          "ts": 1663.4000000953674,
+          "presentedMs": 27.002,
+          "traceTimeStamp": 1663.363,
+          "commitFinish": 1678.165,
+          "interaction": 4895
+        },
+        {
+          "key": "c",
+          "ts": 1765.7000000476837,
+          "presentedMs": 33.063,
+          "traceTimeStamp": 1765.635,
+          "commitFinish": 1780.572,
+          "interaction": 4902
+        },
+        {
+          "key": "k",
+          "ts": 1867.6000000238419,
+          "presentedMs": 31.119,
+          "traceTimeStamp": 1867.579,
+          "commitFinish": 1883.488,
+          "interaction": 4909
+        },
+        {
+          "key": "t",
+          "ts": 1955.5,
+          "presentedMs": 26.588,
+          "traceTimeStamp": 1955.444,
+          "commitFinish": 1969.333,
+          "interaction": 4916
+        },
+        {
+          "key": "y",
+          "ts": 2051.7000000476837,
+          "presentedMs": 30.417,
+          "traceTimeStamp": 2051.615,
+          "commitFinish": 2066.464,
+          "interaction": 4923
+        },
+        {
+          "key": "p",
+          "ts": 2160.100000023842,
+          "presentedMs": 30.253,
+          "traceTimeStamp": 2160.112,
+          "commitFinish": 2174.829,
+          "interaction": 4930
+        },
+        {
+          "key": "e",
+          "ts": 2244.100000023842,
+          "presentedMs": 29.61,
+          "traceTimeStamp": 2244.089,
+          "commitFinish": 2259.015,
+          "interaction": 4937
+        }
+      ]
+    },
+    {
+      "run": 2,
+      "frame": "D72ADB4E7EBF1ABCC993F28055403E80",
+      "editableMs": 451.2999999523163,
+      "saveFreshMs": 219.60000002384186,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1476.2999999523163,
+          "presentedMs": 35.523,
+          "traceTimeStamp": 1476.279,
+          "commitFinish": 1495.84,
+          "interaction": 3652
+        },
+        {
+          "key": "u",
+          "ts": 1553.8999999761581,
+          "presentedMs": 32.892,
+          "traceTimeStamp": 1553.91,
+          "commitFinish": 1570.516,
+          "interaction": 3659
+        },
+        {
+          "key": "i",
+          "ts": 1653.3999999761581,
+          "presentedMs": 33.407,
+          "traceTimeStamp": 1653.394,
+          "commitFinish": 1669.387,
+          "interaction": 3666
+        },
+        {
+          "key": "c",
+          "ts": 1763.8999999761581,
+          "presentedMs": 31.352,
+          "traceTimeStamp": 1763.782,
+          "commitFinish": 1779.152,
+          "interaction": 3673
+        },
+        {
+          "key": "k",
+          "ts": 1847.8999999761581,
+          "presentedMs": 30.624,
+          "traceTimeStamp": 1847.845,
+          "commitFinish": 1863.496,
+          "interaction": 3680
+        },
+        {
+          "key": "t",
+          "ts": 1930.2999999523163,
+          "presentedMs": 31.526,
+          "traceTimeStamp": 1930.276,
+          "commitFinish": 1945.732,
+          "interaction": 3687
+        },
+        {
+          "key": "y",
+          "ts": 2025,
+          "presentedMs": 28.579,
+          "traceTimeStamp": 2024.89,
+          "commitFinish": 2040.972,
+          "interaction": 3694
+        },
+        {
+          "key": "p",
+          "ts": 2130.0999999046326,
+          "presentedMs": 31.69,
+          "traceTimeStamp": 2130.112,
+          "commitFinish": 2145.215,
+          "interaction": 3701
+        },
+        {
+          "key": "e",
+          "ts": 2220.7999999523163,
+          "presentedMs": 32.708,
+          "traceTimeStamp": 2220.761,
+          "commitFinish": 2236.658,
+          "interaction": 3708
+        }
+      ]
+    },
+    {
+      "run": 3,
+      "frame": "9AE99B9B31C2EFFB1D446F835311AFBE",
+      "editableMs": 427.2999999523163,
+      "saveFreshMs": 219.10000002384186,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1436.6000000238419,
+          "presentedMs": 38.118,
+          "traceTimeStamp": 1436.611,
+          "commitFinish": 1455.256,
+          "interaction": 5688
+        },
+        {
+          "key": "u",
+          "ts": 1535.3999999761581,
+          "presentedMs": 30.915,
+          "traceTimeStamp": 1535.48,
+          "commitFinish": 1551.192,
+          "interaction": 5695
+        },
+        {
+          "key": "i",
+          "ts": 1640.3999999761581,
+          "presentedMs": 34.399,
+          "traceTimeStamp": 1640.329,
+          "commitFinish": 1657.564,
+          "interaction": 5702
+        },
+        {
+          "key": "c",
+          "ts": 1746.8999999761581,
+          "presentedMs": 36.206,
+          "traceTimeStamp": 1746.855,
+          "commitFinish": 1763.994,
+          "interaction": 5709
+        },
+        {
+          "key": "k",
+          "ts": 1838.7000000476837,
+          "presentedMs": 27.641,
+          "traceTimeStamp": 1838.755,
+          "commitFinish": 1855.203,
+          "interaction": 5716
+        },
+        {
+          "key": "t",
+          "ts": 1942.1000000238419,
+          "presentedMs": 32.617,
+          "traceTimeStamp": 1942.111,
+          "commitFinish": 1958.06,
+          "interaction": 5723
+        },
+        {
+          "key": "y",
+          "ts": 2055,
+          "presentedMs": 28.032,
+          "traceTimeStamp": 2055.03,
+          "commitFinish": 2071.734,
+          "interaction": 5730
+        },
+        {
+          "key": "p",
+          "ts": 2131.2999999523163,
+          "presentedMs": 35.157,
+          "traceTimeStamp": 2131.24,
+          "commitFinish": 2147.151,
+          "interaction": 5737
+        },
+        {
+          "key": "e",
+          "ts": 2229.7999999523163,
+          "presentedMs": 28.282,
+          "traceTimeStamp": 2229.781,
+          "commitFinish": 2246.022,
+          "interaction": 5744
+        }
+      ]
+    },
+    {
+      "run": 4,
+      "frame": "46A900EDC395718B66275E7FA8FD00CB",
+      "editableMs": 433.1999999284744,
+      "saveFreshMs": 220.39999997615814,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1441.3999999761581,
+          "presentedMs": 34.391,
+          "traceTimeStamp": 1441.368,
+          "commitFinish": 1460.786,
+          "interaction": 7278
+        },
+        {
+          "key": "u",
+          "ts": 1533.8999999761581,
+          "presentedMs": 33.541,
+          "traceTimeStamp": 1533.884,
+          "commitFinish": 1551.164,
+          "interaction": 7285
+        },
+        {
+          "key": "i",
+          "ts": 1648,
+          "presentedMs": 27.795,
+          "traceTimeStamp": 1647.963,
+          "commitFinish": 1664.594,
+          "interaction": 7292
+        },
+        {
+          "key": "c",
+          "ts": 1722.7999999523163,
+          "presentedMs": 36.247,
+          "traceTimeStamp": 1722.846,
+          "commitFinish": 1739.784,
+          "interaction": 7299
+        },
+        {
+          "key": "k",
+          "ts": 1823.2999999523163,
+          "presentedMs": 27.477,
+          "traceTimeStamp": 1823.282,
+          "commitFinish": 1839.316,
+          "interaction": 7306
+        },
+        {
+          "key": "t",
+          "ts": 1933.1999999284744,
+          "presentedMs": 34.279,
+          "traceTimeStamp": 1933.146,
+          "commitFinish": 1948.772,
+          "interaction": 7313
+        },
+        {
+          "key": "y",
+          "ts": 2004,
+          "presentedMs": 30.11,
+          "traceTimeStamp": 2003.983,
+          "commitFinish": 2019.624,
+          "interaction": 7320
+        },
+        {
+          "key": "p",
+          "ts": 2098.100000023842,
+          "presentedMs": 35.971,
+          "traceTimeStamp": 2098.121,
+          "commitFinish": 2114.944,
+          "interaction": 7327
+        },
+        {
+          "key": "e",
+          "ts": 2205,
+          "presentedMs": 29.143,
+          "traceTimeStamp": 2204.949,
+          "commitFinish": 2222.915,
+          "interaction": 7334
+        }
+      ]
+    },
+    {
+      "run": 5,
+      "frame": "6D1A009DEAC6B9AE92E4B2395820949A",
+      "editableMs": 436.2000000476837,
+      "saveFreshMs": 213.90000009536743,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1433.2000000476837,
+          "presentedMs": 35.264,
+          "traceTimeStamp": 1433.213,
+          "commitFinish": 1452.396,
+          "interaction": 6190
+        },
+        {
+          "key": "u",
+          "ts": 1532,
+          "presentedMs": 36.419,
+          "traceTimeStamp": 1532.057,
+          "commitFinish": 1549.478,
+          "interaction": 6197
+        },
+        {
+          "key": "i",
+          "ts": 1616,
+          "presentedMs": 27.398,
+          "traceTimeStamp": 1616.079,
+          "commitFinish": 1631.193,
+          "interaction": 6204
+        },
+        {
+          "key": "c",
+          "ts": 1698.5,
+          "presentedMs": 28.261,
+          "traceTimeStamp": 1698.549,
+          "commitFinish": 1714.617,
+          "interaction": 6211
+        },
+        {
+          "key": "k",
+          "ts": 1803.9000000953674,
+          "presentedMs": 31.206,
+          "traceTimeStamp": 1803.937,
+          "commitFinish": 1819.31,
+          "interaction": 6218
+        },
+        {
+          "key": "t",
+          "ts": 1908.6000000238419,
+          "presentedMs": 26.522,
+          "traceTimeStamp": 1908.621,
+          "commitFinish": 1923.005,
+          "interaction": 6225
+        },
+        {
+          "key": "y",
+          "ts": 1997.3000000715256,
+          "presentedMs": 29.505,
+          "traceTimeStamp": 1997.305,
+          "commitFinish": 2013.204,
+          "interaction": 6232
+        },
+        {
+          "key": "p",
+          "ts": 2097.9000000953674,
+          "presentedMs": 28.87,
+          "traceTimeStamp": 2097.94,
+          "commitFinish": 2113.718,
+          "interaction": 6239
+        },
+        {
+          "key": "e",
+          "ts": 2199,
+          "presentedMs": 27.767,
+          "traceTimeStamp": 2199.043,
+          "commitFinish": 2215.672,
+          "interaction": 6246
+        }
+      ]
+    },
+    {
+      "run": 6,
+      "frame": "B468F9C93A8CDCC13D1F13811D9B1958",
+      "editableMs": 442.5,
+      "saveFreshMs": 217.39999997615814,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1460.6000000238419,
+          "presentedMs": 31.608,
+          "traceTimeStamp": 1460.537,
+          "commitFinish": 1478.777,
+          "interaction": 5920
+        },
+        {
+          "key": "u",
+          "ts": 1578.3999999761581,
+          "presentedMs": 30.471,
+          "traceTimeStamp": 1578.338,
+          "commitFinish": 1595.359,
+          "interaction": 5927
+        },
+        {
+          "key": "i",
+          "ts": 1657.8000000715256,
+          "presentedMs": 34.431,
+          "traceTimeStamp": 1657.714,
+          "commitFinish": 1675.713,
+          "interaction": 5934
+        },
+        {
+          "key": "c",
+          "ts": 1760.3000000715256,
+          "presentedMs": 31.886,
+          "traceTimeStamp": 1760.258,
+          "commitFinish": 1776.298,
+          "interaction": 5941
+        },
+        {
+          "key": "k",
+          "ts": 1871.3999999761581,
+          "presentedMs": 29.067,
+          "traceTimeStamp": 1871.41,
+          "commitFinish": 1885.885,
+          "interaction": 5948
+        },
+        {
+          "key": "t",
+          "ts": 1956.3999999761581,
+          "presentedMs": 27.412,
+          "traceTimeStamp": 1956.399,
+          "commitFinish": 1971.236,
+          "interaction": 5955
+        },
+        {
+          "key": "y",
+          "ts": 2041.8999999761581,
+          "presentedMs": 33.604,
+          "traceTimeStamp": 2041.874,
+          "commitFinish": 2059.106,
+          "interaction": 5962
+        },
+        {
+          "key": "p",
+          "ts": 2151.399999976158,
+          "presentedMs": 32.465,
+          "traceTimeStamp": 2151.346,
+          "commitFinish": 2167.479,
+          "interaction": 5969
+        },
+        {
+          "key": "e",
+          "ts": 2234.5,
+          "presentedMs": 32.717,
+          "traceTimeStamp": 2234.428,
+          "commitFinish": 2249.172,
+          "interaction": 5976
+        }
+      ]
+    },
+    {
+      "run": 7,
+      "frame": "CC5DC1D1C8B4FA3617972050E2FFE902",
+      "editableMs": 436.2000000476837,
+      "saveFreshMs": 216.10000002384186,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1425.1000000238419,
+          "presentedMs": 33.364,
+          "traceTimeStamp": 1425.042,
+          "commitFinish": 1443.568,
+          "interaction": 2381
+        },
+        {
+          "key": "u",
+          "ts": 1513.1000000238419,
+          "presentedMs": 28.579,
+          "traceTimeStamp": 1513.16,
+          "commitFinish": 1528.73,
+          "interaction": 2388
+        },
+        {
+          "key": "i",
+          "ts": 1609.8999999761581,
+          "presentedMs": 31.852,
+          "traceTimeStamp": 1609.887,
+          "commitFinish": 1623.858,
+          "interaction": 2395
+        },
+        {
+          "key": "c",
+          "ts": 1716.2999999523163,
+          "presentedMs": 33.732,
+          "traceTimeStamp": 1716.34,
+          "commitFinish": 1732.541,
+          "interaction": 2402
+        },
+        {
+          "key": "k",
+          "ts": 1799.1000000238419,
+          "presentedMs": 25.945,
+          "traceTimeStamp": 1799.128,
+          "commitFinish": 1814.077,
+          "interaction": 2409
+        },
+        {
+          "key": "t",
+          "ts": 1890.5,
+          "presentedMs": 34.565,
+          "traceTimeStamp": 1890.508,
+          "commitFinish": 1906.917,
+          "interaction": 2416
+        },
+        {
+          "key": "y",
+          "ts": 1982.7999999523163,
+          "presentedMs": 33.952,
+          "traceTimeStamp": 1982.788,
+          "commitFinish": 1997.632,
+          "interaction": 2423
+        },
+        {
+          "key": "p",
+          "ts": 2097.7999999523163,
+          "presentedMs": 35.596,
+          "traceTimeStamp": 2097.809,
+          "commitFinish": 2115.007,
+          "interaction": 2430
+        },
+        {
+          "key": "e",
+          "ts": 2187.2000000476837,
+          "presentedMs": 29.535,
+          "traceTimeStamp": 2187.205,
+          "commitFinish": 2203.959,
+          "interaction": 2437
+        }
+      ]
+    },
+    {
+      "run": 8,
+      "frame": "5B2F17CD4846083185731845D1AF5500",
+      "editableMs": 442.7999999523163,
+      "saveFreshMs": 215.5,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1438.3999999761581,
+          "presentedMs": 37.446,
+          "traceTimeStamp": 1438.435,
+          "commitFinish": 1457.663,
+          "interaction": 2208
+        },
+        {
+          "key": "u",
+          "ts": 1535,
+          "presentedMs": 32.527,
+          "traceTimeStamp": 1535.02,
+          "commitFinish": 1551.539,
+          "interaction": 2215
+        },
+        {
+          "key": "i",
+          "ts": 1638.1999999284744,
+          "presentedMs": 29.265,
+          "traceTimeStamp": 1638.282,
+          "commitFinish": 1655.802,
+          "interaction": 2222
+        },
+        {
+          "key": "c",
+          "ts": 1742.0999999046326,
+          "presentedMs": 33.812,
+          "traceTimeStamp": 1742.068,
+          "commitFinish": 1757.839,
+          "interaction": 2229
+        },
+        {
+          "key": "k",
+          "ts": 1831.1999999284744,
+          "presentedMs": 27.999,
+          "traceTimeStamp": 1831.216,
+          "commitFinish": 1846.53,
+          "interaction": 2236
+        },
+        {
+          "key": "t",
+          "ts": 1929.0999999046326,
+          "presentedMs": 30.076,
+          "traceTimeStamp": 1929.139,
+          "commitFinish": 1945.561,
+          "interaction": 2243
+        },
+        {
+          "key": "y",
+          "ts": 2029.7999999523163,
+          "presentedMs": 29.333,
+          "traceTimeStamp": 2029.881,
+          "commitFinish": 2045.019,
+          "interaction": 2250
+        },
+        {
+          "key": "p",
+          "ts": 2113.7999999523163,
+          "presentedMs": 28.75,
+          "traceTimeStamp": 2113.799,
+          "commitFinish": 2128.911,
+          "interaction": 2257
+        },
+        {
+          "key": "e",
+          "ts": 2208.2999999523163,
+          "presentedMs": 34.304,
+          "traceTimeStamp": 2208.244,
+          "commitFinish": 2223.991,
+          "interaction": 2264
+        }
+      ]
+    },
+    {
+      "run": 9,
+      "frame": "DD1B3E4ECC3118561357B7B3A9EF3896",
+      "editableMs": 435.7999999523163,
+      "saveFreshMs": 209.10000002384186,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1448.7999999523163,
+          "presentedMs": 34.846,
+          "traceTimeStamp": 1448.852,
+          "commitFinish": 1466.359,
+          "interaction": 2693
+        },
+        {
+          "key": "u",
+          "ts": 1538.8999999761581,
+          "presentedMs": 28.1,
+          "traceTimeStamp": 1538.931,
+          "commitFinish": 1553.011,
+          "interaction": 2700
+        },
+        {
+          "key": "i",
+          "ts": 1637.1999999284744,
+          "presentedMs": 29.79,
+          "traceTimeStamp": 1637.241,
+          "commitFinish": 1651.923,
+          "interaction": 2707
+        },
+        {
+          "key": "c",
+          "ts": 1721.5,
+          "presentedMs": 28.803,
+          "traceTimeStamp": 1721.562,
+          "commitFinish": 1736.294,
+          "interaction": 2714
+        },
+        {
+          "key": "k",
+          "ts": 1817.2999999523163,
+          "presentedMs": 33.02,
+          "traceTimeStamp": 1817.344,
+          "commitFinish": 1832.579,
+          "interaction": 2721
+        },
+        {
+          "key": "t",
+          "ts": 1912.1999999284744,
+          "presentedMs": 29.772,
+          "traceTimeStamp": 1912.26,
+          "commitFinish": 1925.898,
+          "interaction": 2728
+        },
+        {
+          "key": "y",
+          "ts": 2028,
+          "presentedMs": 30.658,
+          "traceTimeStamp": 2028.039,
+          "commitFinish": 2042.546,
+          "interaction": 2735
+        },
+        {
+          "key": "p",
+          "ts": 2118.600000023842,
+          "presentedMs": 31.718,
+          "traceTimeStamp": 2118.647,
+          "commitFinish": 2134.439,
+          "interaction": 2742
+        },
+        {
+          "key": "e",
+          "ts": 2209.5,
+          "presentedMs": 32.516,
+          "traceTimeStamp": 2209.516,
+          "commitFinish": 2223.951,
+          "interaction": 2749
+        }
+      ]
+    },
+    {
+      "run": 10,
+      "frame": "079C47000920B4F5D56BF83048F8F8EC",
+      "editableMs": 433,
+      "saveFreshMs": 218.69999992847443,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1439.2999999523163,
+          "presentedMs": 30.173,
+          "traceTimeStamp": 1439.295,
+          "commitFinish": 1457.811,
+          "interaction": 3308
+        },
+        {
+          "key": "u",
+          "ts": 1549.3999999761581,
+          "presentedMs": 28.388,
+          "traceTimeStamp": 1549.412,
+          "commitFinish": 1565.089,
+          "interaction": 3315
+        },
+        {
+          "key": "i",
+          "ts": 1666.5,
+          "presentedMs": 27.984,
+          "traceTimeStamp": 1666.482,
+          "commitFinish": 1682.582,
+          "interaction": 3322
+        },
+        {
+          "key": "c",
+          "ts": 1746.2000000476837,
+          "presentedMs": 31.598,
+          "traceTimeStamp": 1746.203,
+          "commitFinish": 1763.287,
+          "interaction": 3329
+        },
+        {
+          "key": "k",
+          "ts": 1851,
+          "presentedMs": 26.761,
+          "traceTimeStamp": 1851.039,
+          "commitFinish": 1866.259,
+          "interaction": 3336
+        },
+        {
+          "key": "t",
+          "ts": 1965.1000000238419,
+          "presentedMs": 29.267,
+          "traceTimeStamp": 1965.2,
+          "commitFinish": 1981.505,
+          "interaction": 3343
+        },
+        {
+          "key": "y",
+          "ts": 2052.100000023842,
+          "presentedMs": 34.009,
+          "traceTimeStamp": 2052.125,
+          "commitFinish": 2069.146,
+          "interaction": 3350
+        },
+        {
+          "key": "p",
+          "ts": 2151.899999976158,
+          "presentedMs": 34.167,
+          "traceTimeStamp": 2151.967,
+          "commitFinish": 2169.202,
+          "interaction": 3357
+        },
+        {
+          "key": "e",
+          "ts": 2263,
+          "presentedMs": 31.483,
+          "traceTimeStamp": 2262.984,
+          "commitFinish": 2278.505,
+          "interaction": 3364
+        }
+      ]
+    },
+    {
+      "run": 11,
+      "frame": "EC686567D6E267C2FC14F6BAE4992968",
+      "editableMs": 433.40000009536743,
+      "saveFreshMs": 215.70000004768372,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1439.7000000476837,
+          "presentedMs": 30.658,
+          "traceTimeStamp": 1439.639,
+          "commitFinish": 1457.062,
+          "interaction": 9078
+        },
+        {
+          "key": "u",
+          "ts": 1555.3000000715256,
+          "presentedMs": 31.682,
+          "traceTimeStamp": 1555.28,
+          "commitFinish": 1572.324,
+          "interaction": 9085
+        },
+        {
+          "key": "i",
+          "ts": 1632.3000000715256,
+          "presentedMs": 29.694,
+          "traceTimeStamp": 1632.269,
+          "commitFinish": 1648.732,
+          "interaction": 9092
+        },
+        {
+          "key": "c",
+          "ts": 1720.6000000238419,
+          "presentedMs": 33.08,
+          "traceTimeStamp": 1720.55,
+          "commitFinish": 1736.239,
+          "interaction": 9099
+        },
+        {
+          "key": "k",
+          "ts": 1830.6000000238419,
+          "presentedMs": 31.329,
+          "traceTimeStamp": 1830.633,
+          "commitFinish": 1847.756,
+          "interaction": 9106
+        },
+        {
+          "key": "t",
+          "ts": 1915.2000000476837,
+          "presentedMs": 30.09,
+          "traceTimeStamp": 1915.207,
+          "commitFinish": 1930.637,
+          "interaction": 9113
+        },
+        {
+          "key": "y",
+          "ts": 2009.8000000715256,
+          "presentedMs": 27.153,
+          "traceTimeStamp": 2009.81,
+          "commitFinish": 2025.094,
+          "interaction": 9120
+        },
+        {
+          "key": "p",
+          "ts": 2114.600000023842,
+          "presentedMs": 30.669,
+          "traceTimeStamp": 2114.627,
+          "commitFinish": 2130.528,
+          "interaction": 9127
+        },
+        {
+          "key": "e",
+          "ts": 2230.5,
+          "presentedMs": 31.399,
+          "traceTimeStamp": 2230.564,
+          "commitFinish": 2245.833,
+          "interaction": 9134
+        }
+      ]
+    },
+    {
+      "run": 12,
+      "frame": "70C97D333440B9D81CDDA8933E6CB222",
+      "editableMs": 441.7999999523163,
+      "saveFreshMs": 218.39999997615814,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1462.3999999761581,
+          "presentedMs": 34.92,
+          "traceTimeStamp": 1462.36,
+          "commitFinish": 1481.256,
+          "interaction": 3003
+        },
+        {
+          "key": "u",
+          "ts": 1537,
+          "presentedMs": 35.224,
+          "traceTimeStamp": 1537.055,
+          "commitFinish": 1553.975,
+          "interaction": 3010
+        },
+        {
+          "key": "i",
+          "ts": 1632,
+          "presentedMs": 31.957,
+          "traceTimeStamp": 1631.989,
+          "commitFinish": 1647.469,
+          "interaction": 3017
+        },
+        {
+          "key": "c",
+          "ts": 1725.8999999761581,
+          "presentedMs": 29.747,
+          "traceTimeStamp": 1725.865,
+          "commitFinish": 1741.681,
+          "interaction": 3024
+        },
+        {
+          "key": "k",
+          "ts": 1842.1000000238419,
+          "presentedMs": 30.171,
+          "traceTimeStamp": 1842.108,
+          "commitFinish": 1858.338,
+          "interaction": 3031
+        },
+        {
+          "key": "t",
+          "ts": 1920.2000000476837,
+          "presentedMs": 27.041,
+          "traceTimeStamp": 1920.239,
+          "commitFinish": 1934.946,
+          "interaction": 3038
+        },
+        {
+          "key": "y",
+          "ts": 2021.2000000476837,
+          "presentedMs": 34.327,
+          "traceTimeStamp": 2021.286,
+          "commitFinish": 2039.625,
+          "interaction": 3045
+        },
+        {
+          "key": "p",
+          "ts": 2137.7000000476837,
+          "presentedMs": 34.496,
+          "traceTimeStamp": 2137.783,
+          "commitFinish": 2155.046,
+          "interaction": 3052
+        },
+        {
+          "key": "e",
+          "ts": 2226.5,
+          "presentedMs": 29.119,
+          "traceTimeStamp": 2226.495,
+          "commitFinish": 2243.273,
+          "interaction": 3059
+        }
+      ]
+    },
+    {
+      "run": 13,
+      "frame": "C4C28F38BFCC550BF9AC954FBC28D1CD",
+      "editableMs": 436.10000002384186,
+      "saveFreshMs": 221.20000004768372,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1442,
+          "presentedMs": 36.518,
+          "traceTimeStamp": 1441.989,
+          "commitFinish": 1462.775,
+          "interaction": 9141
+        },
+        {
+          "key": "u",
+          "ts": 1523.2999999523163,
+          "presentedMs": 30.166,
+          "traceTimeStamp": 1523.341,
+          "commitFinish": 1540.54,
+          "interaction": 9148
+        },
+        {
+          "key": "i",
+          "ts": 1626.6999999284744,
+          "presentedMs": 26.813,
+          "traceTimeStamp": 1626.694,
+          "commitFinish": 1641.475,
+          "interaction": 9155
+        },
+        {
+          "key": "c",
+          "ts": 1738.1999999284744,
+          "presentedMs": 32.025,
+          "traceTimeStamp": 1738.148,
+          "commitFinish": 1753.896,
+          "interaction": 9162
+        },
+        {
+          "key": "k",
+          "ts": 1824.3999999761581,
+          "presentedMs": 29.08,
+          "traceTimeStamp": 1824.427,
+          "commitFinish": 1840.792,
+          "interaction": 9169
+        },
+        {
+          "key": "t",
+          "ts": 1923.2999999523163,
+          "presentedMs": 30.192,
+          "traceTimeStamp": 1923.315,
+          "commitFinish": 1938.005,
+          "interaction": 9176
+        },
+        {
+          "key": "y",
+          "ts": 2030.8999999761581,
+          "presentedMs": 30.885,
+          "traceTimeStamp": 2030.955,
+          "commitFinish": 2047.16,
+          "interaction": 9183
+        },
+        {
+          "key": "p",
+          "ts": 2113,
+          "presentedMs": 32.195,
+          "traceTimeStamp": 2112.98,
+          "commitFinish": 2127.929,
+          "interaction": 9190
+        },
+        {
+          "key": "e",
+          "ts": 2194.600000023842,
+          "presentedMs": 33.908,
+          "traceTimeStamp": 2194.6,
+          "commitFinish": 2209.774,
+          "interaction": 9197
+        }
+      ]
+    },
+    {
+      "run": 14,
+      "frame": "CD54C5400BBA2CDBBB1A3E8686D0B44A",
+      "editableMs": 432,
+      "saveFreshMs": 219.60000002384186,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1441.1000000238419,
+          "presentedMs": 32.931,
+          "traceTimeStamp": 1441.015,
+          "commitFinish": 1460.029,
+          "interaction": 1730
+        },
+        {
+          "key": "u",
+          "ts": 1541.6000000238419,
+          "presentedMs": 32.362,
+          "traceTimeStamp": 1541.583,
+          "commitFinish": 1558.181,
+          "interaction": 1737
+        },
+        {
+          "key": "i",
+          "ts": 1651,
+          "presentedMs": 39.707,
+          "traceTimeStamp": 1650.904,
+          "commitFinish": 1671.695,
+          "interaction": 1744
+        },
+        {
+          "key": "c",
+          "ts": 1738.5,
+          "presentedMs": 35.477,
+          "traceTimeStamp": 1738.469,
+          "commitFinish": 1756.822,
+          "interaction": 1751
+        },
+        {
+          "key": "k",
+          "ts": 1835.9000000953674,
+          "presentedMs": 29.776,
+          "traceTimeStamp": 1835.837,
+          "commitFinish": 1854.245,
+          "interaction": 1758
+        },
+        {
+          "key": "t",
+          "ts": 1945.3000000715256,
+          "presentedMs": 37.004,
+          "traceTimeStamp": 1945.275,
+          "commitFinish": 1963.575,
+          "interaction": 1765
+        },
+        {
+          "key": "y",
+          "ts": 2064.4000000953674,
+          "presentedMs": 34.642,
+          "traceTimeStamp": 2064.304,
+          "commitFinish": 2083.038,
+          "interaction": 1772
+        },
+        {
+          "key": "p",
+          "ts": 2156.600000023842,
+          "presentedMs": 34.113,
+          "traceTimeStamp": 2156.5,
+          "commitFinish": 2174.613,
+          "interaction": 1779
+        },
+        {
+          "key": "e",
+          "ts": 2260,
+          "presentedMs": 30.664,
+          "traceTimeStamp": 2259.949,
+          "commitFinish": 2278.235,
+          "interaction": 1786
+        }
+      ]
+    },
+    {
+      "run": 15,
+      "frame": "CE0276C7AE22C10464CB919B654F31F3",
+      "editableMs": 437.5,
+      "saveFreshMs": 209.60000002384186,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1466,
+          "presentedMs": 29.748,
+          "traceTimeStamp": 1465.94,
+          "commitFinish": 1484.077,
+          "interaction": 6615
+        },
+        {
+          "key": "u",
+          "ts": 1574.3999999761581,
+          "presentedMs": 29.669,
+          "traceTimeStamp": 1574.351,
+          "commitFinish": 1590.594,
+          "interaction": 6622
+        },
+        {
+          "key": "i",
+          "ts": 1691.2999999523163,
+          "presentedMs": 29.53,
+          "traceTimeStamp": 1691.156,
+          "commitFinish": 1705.798,
+          "interaction": 6629
+        },
+        {
+          "key": "c",
+          "ts": 1779.3999999761581,
+          "presentedMs": 24.677,
+          "traceTimeStamp": 1779.344,
+          "commitFinish": 1793.06,
+          "interaction": 6636
+        },
+        {
+          "key": "k",
+          "ts": 1878.3999999761581,
+          "presentedMs": 25.75,
+          "traceTimeStamp": 1878.271,
+          "commitFinish": 1892.884,
+          "interaction": 6643
+        },
+        {
+          "key": "t",
+          "ts": 1978.5999999046326,
+          "presentedMs": 25.496,
+          "traceTimeStamp": 1978.525,
+          "commitFinish": 1991.754,
+          "interaction": 6650
+        },
+        {
+          "key": "y",
+          "ts": 2062.1999999284744,
+          "presentedMs": 25.276,
+          "traceTimeStamp": 2062.079,
+          "commitFinish": 2076.208,
+          "interaction": 6657
+        },
+        {
+          "key": "p",
+          "ts": 2157.0999999046326,
+          "presentedMs": 30.272,
+          "traceTimeStamp": 2157.083,
+          "commitFinish": 2171.668,
+          "interaction": 6664
+        },
+        {
+          "key": "e",
+          "ts": 2264.1999999284744,
+          "presentedMs": 31.63,
+          "traceTimeStamp": 2264.057,
+          "commitFinish": 2278.231,
+          "interaction": 6671
+        }
+      ]
+    },
+    {
+      "run": 16,
+      "frame": "3626BB9D96EBA7312EAF67EC72954C74",
+      "editableMs": 440.39999997615814,
+      "saveFreshMs": 216,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1437.2999999523163,
+          "presentedMs": 36.364,
+          "traceTimeStamp": 1437.176,
+          "commitFinish": 1457.054,
+          "interaction": 7395
+        },
+        {
+          "key": "u",
+          "ts": 1554.2000000476837,
+          "presentedMs": 36.034,
+          "traceTimeStamp": 1554.171,
+          "commitFinish": 1571.564,
+          "interaction": 7402
+        },
+        {
+          "key": "i",
+          "ts": 1642.3999999761581,
+          "presentedMs": 31.308,
+          "traceTimeStamp": 1642.231,
+          "commitFinish": 1659.041,
+          "interaction": 7409
+        },
+        {
+          "key": "c",
+          "ts": 1740.1000000238419,
+          "presentedMs": 33.53,
+          "traceTimeStamp": 1740.009,
+          "commitFinish": 1756.247,
+          "interaction": 7416
+        },
+        {
+          "key": "k",
+          "ts": 1847.7000000476837,
+          "presentedMs": 34.227,
+          "traceTimeStamp": 1847.645,
+          "commitFinish": 1864.478,
+          "interaction": 7423
+        },
+        {
+          "key": "t",
+          "ts": 1917.7000000476837,
+          "presentedMs": 30.971,
+          "traceTimeStamp": 1917.57,
+          "commitFinish": 1934.373,
+          "interaction": 7430
+        },
+        {
+          "key": "y",
+          "ts": 2011.1000000238419,
+          "presentedMs": 29.132,
+          "traceTimeStamp": 2011.074,
+          "commitFinish": 2028.132,
+          "interaction": 7437
+        },
+        {
+          "key": "p",
+          "ts": 2116.2999999523163,
+          "presentedMs": 32.339,
+          "traceTimeStamp": 2116.201,
+          "commitFinish": 2135.528,
+          "interaction": 7444
+        },
+        {
+          "key": "e",
+          "ts": 2220.399999976158,
+          "presentedMs": 28.238,
+          "traceTimeStamp": 2220.302,
+          "commitFinish": 2237.034,
+          "interaction": 7451
+        }
+      ]
+    },
+    {
+      "run": 17,
+      "frame": "ED6492A49FEEDD6A89047C6F67C97131",
+      "editableMs": 435.2000000476837,
+      "saveFreshMs": 213.80000007152557,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1429.2000000476837,
+          "presentedMs": 31.596,
+          "traceTimeStamp": 1429.109,
+          "commitFinish": 1447.46,
+          "interaction": 9800
+        },
+        {
+          "key": "u",
+          "ts": 1513.7000000476837,
+          "presentedMs": 30.36,
+          "traceTimeStamp": 1513.678,
+          "commitFinish": 1529.113,
+          "interaction": 9807
+        },
+        {
+          "key": "i",
+          "ts": 1606.5,
+          "presentedMs": 29.24,
+          "traceTimeStamp": 1606.464,
+          "commitFinish": 1622.214,
+          "interaction": 9814
+        },
+        {
+          "key": "c",
+          "ts": 1709,
+          "presentedMs": 26.693,
+          "traceTimeStamp": 1709.012,
+          "commitFinish": 1724.735,
+          "interaction": 9821
+        },
+        {
+          "key": "k",
+          "ts": 1823.1000000238419,
+          "presentedMs": 29.379,
+          "traceTimeStamp": 1822.992,
+          "commitFinish": 1837.821,
+          "interaction": 9828
+        },
+        {
+          "key": "t",
+          "ts": 1910.8999999761581,
+          "presentedMs": 33.176,
+          "traceTimeStamp": 1910.862,
+          "commitFinish": 1927.193,
+          "interaction": 9835
+        },
+        {
+          "key": "y",
+          "ts": 2010.6000000238419,
+          "presentedMs": 33.473,
+          "traceTimeStamp": 2010.565,
+          "commitFinish": 2026.432,
+          "interaction": 9842
+        },
+        {
+          "key": "p",
+          "ts": 2121,
+          "presentedMs": 31.39,
+          "traceTimeStamp": 2120.981,
+          "commitFinish": 2137.54,
+          "interaction": 9849
+        },
+        {
+          "key": "e",
+          "ts": 2207.3000000715256,
+          "presentedMs": 28.414,
+          "traceTimeStamp": 2207.292,
+          "commitFinish": 2222.573,
+          "interaction": 9856
+        }
+      ]
+    },
+    {
+      "run": 18,
+      "frame": "BCFAC46B17B4FBB4D317651F707C82A2",
+      "editableMs": 438.5,
+      "saveFreshMs": 213.60000002384186,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1490.8999999761581,
+          "presentedMs": 36.901,
+          "traceTimeStamp": 1490.913,
+          "commitFinish": 1511.134,
+          "interaction": 4498
+        },
+        {
+          "key": "u",
+          "ts": 1570.3999999761581,
+          "presentedMs": 32.35,
+          "traceTimeStamp": 1570.464,
+          "commitFinish": 1588.479,
+          "interaction": 4505
+        },
+        {
+          "key": "i",
+          "ts": 1672.7999999523163,
+          "presentedMs": 29.967,
+          "traceTimeStamp": 1672.846,
+          "commitFinish": 1688.829,
+          "interaction": 4512
+        },
+        {
+          "key": "c",
+          "ts": 1784.1999999284744,
+          "presentedMs": 35.164,
+          "traceTimeStamp": 1784.315,
+          "commitFinish": 1800.863,
+          "interaction": 4519
+        },
+        {
+          "key": "k",
+          "ts": 1870.5,
+          "presentedMs": 32.309,
+          "traceTimeStamp": 1870.505,
+          "commitFinish": 1885.768,
+          "interaction": 4526
+        },
+        {
+          "key": "t",
+          "ts": 1965.5999999046326,
+          "presentedMs": 28.902,
+          "traceTimeStamp": 1965.578,
+          "commitFinish": 1980.823,
+          "interaction": 4533
+        },
+        {
+          "key": "y",
+          "ts": 2061.2999999523163,
+          "presentedMs": 33.166,
+          "traceTimeStamp": 2061.314,
+          "commitFinish": 2076.99,
+          "interaction": 4540
+        },
+        {
+          "key": "p",
+          "ts": 2179.1999999284744,
+          "presentedMs": 31.923,
+          "traceTimeStamp": 2179.224,
+          "commitFinish": 2194.793,
+          "interaction": 4547
+        },
+        {
+          "key": "e",
+          "ts": 2271.7999999523163,
+          "presentedMs": 30.924,
+          "traceTimeStamp": 2271.89,
+          "commitFinish": 2286.956,
+          "interaction": 4554
+        }
+      ]
+    },
+    {
+      "run": 19,
+      "frame": "0D3D8AB1797AD1221BAF4897BF3B78E4",
+      "editableMs": 429.5,
+      "saveFreshMs": 212.29999995231628,
+      "readCount": 6,
+      "saveRequests": [
+        "POST /api/sandbox/sheets/edit",
+        "GET /api/sheets/bench/items"
+      ],
+      "keys": [
+        {
+          "key": "q",
+          "ts": 1417.8999999761581,
+          "presentedMs": 34.366,
+          "traceTimeStamp": 1417.975,
+          "commitFinish": 1436.393,
+          "interaction": 749
+        },
+        {
+          "key": "u",
+          "ts": 1517.1000000238419,
+          "presentedMs": 35.207,
+          "traceTimeStamp": 1517.132,
+          "commitFinish": 1533.644,
+          "interaction": 756
+        },
+        {
+          "key": "i",
+          "ts": 1623.7000000476837,
+          "presentedMs": 28.594,
+          "traceTimeStamp": 1623.746,
+          "commitFinish": 1639.286,
+          "interaction": 763
+        },
+        {
+          "key": "c",
+          "ts": 1741.1000000238419,
+          "presentedMs": 27.905,
+          "traceTimeStamp": 1741.101,
+          "commitFinish": 1757.05,
+          "interaction": 770
+        },
+        {
+          "key": "k",
+          "ts": 1833.2000000476837,
+          "presentedMs": 35.781,
+          "traceTimeStamp": 1833.226,
+          "commitFinish": 1850.046,
+          "interaction": 777
+        },
+        {
+          "key": "t",
+          "ts": 1936.6000000238419,
+          "presentedMs": 32.376,
+          "traceTimeStamp": 1936.631,
+          "commitFinish": 1952.626,
+          "interaction": 784
+        },
+        {
+          "key": "y",
+          "ts": 2038.8999999761581,
+          "presentedMs": 30.147,
+          "traceTimeStamp": 2038.86,
+          "commitFinish": 2053.52,
+          "interaction": 791
+        },
+        {
+          "key": "p",
+          "ts": 2123.7000000476837,
+          "presentedMs": 28.576,
+          "traceTimeStamp": 2123.765,
+          "commitFinish": 2139.284,
+          "interaction": 798
+        },
+        {
+          "key": "e",
+          "ts": 2223,
+          "presentedMs": 29.299,
+          "traceTimeStamp": 2223.042,
+          "commitFinish": 2239.284,
+          "interaction": 805
+        }
+      ]
+    }
+  ]
+}

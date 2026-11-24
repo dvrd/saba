@@ -1,0 +1,768 @@
+{
+  "metadata": {
+    "generatedAt": "2026-11-20T18:12:08.097Z",
+    "cpu": "Apple M1 Max",
+    "os": "Darwin 27.2.0",
+    "totalMemoryMiB": 32768,
+    "viewport": [
+      1200,
+      900
+    ],
+    "trials": 6,
+    "fullCapacityTrials": 1,
+    "sourceSha256": {
+      ".krs/packages.json": "e92bb23d7c9377643e6cf9213943aba559669558122bee9087935a231bb01b16",
+      "src/modules/dom.js": "9d390d65b19c919d2dd7ff62c2a9253172066c203442ec4b2f8e04b6a9e298e7",
+      "benchmarks/frameworks/operations/compile/main.odin": "09a642fb8d265174c34556e9b0519cff2dc9b2eb077bfce1a18b41fd96db0943",
+      "benchmarks/frameworks/rich/scale-saba.jsx": "51585a718ce2ddaa8d32ebb77fd6d74a6981829569bd14050d335a58389c43ef",
+      "src/jsx/advice.odin": "2d9768d37d516acc0807d4a4285b19915c0d53384770d66d9dc0ed34d10a17fa",
+      "src/jsx/jsx.odin": "92633a30990062e725f1ef6973291ed40bd4118e1ec026015aee4bf9e75c429e",
+      "src/jsx/jsx_text.odin": "28653d82eb364e70e0f253e321c0e378f4e9d7782aeeffa43cca81a26be73536",
+      "src/jsx/template.odin": "2ce8c916a49d5396f7a0a7328f97b586321870bf2cb86e1ad83ed1eff69464a2",
+      "benchmarks/frameworks/build.mjs": "24952e520c29feeaa6447903f35a9acb46e78688f441b01a33a2cee5c197a815",
+      "benchmarks/frameworks/package-lock.json": "0566fc286086eacd7ff53b228a043e7437f0ba7e1932aac3ea3d9f438cdc12ce",
+      "benchmarks/frameworks/dist/scale/manifest.json": "5ee3645825100b0fe980ad4aecc58244336b1561675945d9991b7ae4b9f2cd7e",
+      "benchmarks/frameworks/rich/scale-react.jsx": "baaf256bfe7f369d9f85565d3f2b6b6227233da2247f66bebcac2c87a655ad84",
+      "benchmarks/frameworks/rich/scale-solid.jsx": "a2d51c065ba8aaf2297d808c87847d2f145f0a7c9650e7b571604610afb5f479",
+      "benchmarks/frameworks/rich/scale-svelte.js": "e8c9712b949662ecbfde362ad6aad9b832d56530a2ae72df76e3ec062611f756",
+      "benchmarks/frameworks/rich/ScaleBand.svelte": "6a2a2142ee66d862f6487a2774fa06dc6a68856aa47e35cc364cb1fc9e909d2b",
+      "benchmarks/frameworks/rich/ScaleTile.svelte": "96df47f7e7e9a4c03deb64ee5aa64234414a16f19945e20d8b174bd13e4e621b",
+      "benchmarks/frameworks/rich/scale.html": "c1e8abdfcfde2a064e60d8652ef26f232dfc619053fbc8848e15c27eb6cb2341",
+      "benchmarks/frameworks/rich/scale.js": "3c7da7d88336af86e38d4a8f33685d7e776b84e7f9e1636d1a272b4fb9ea9a28",
+      "benchmarks/frameworks/rich/reactivity.js": "cfa46dbb650c3c66f79a60d998127d8df7981ed64f21dc404b083ae50b091469",
+      "src/modules/sliding-window.js": "94b867a8cb6c2fabb55d6bbe7be8d1b8705ae2d5fc8504ea86a040e950883f3f",
+      "benchmarks/frameworks/dist/scale/saba-compiled.js": "7de2eb1d75cb38a965fb44520eca574482327f8502f441c9362b2e5326947e47",
+      "benchmarks/frameworks/dist/scale/react.js": "1b174949646bbb1cd807b18a6189a3b259576da3300c70615642d28e0ddbdcae",
+      "benchmarks/frameworks/rich/scale-run.cjs": "341a3a89244dacee69ed6c5ceeebe3f8a805841497b2bfa6a66040268fe0778a"
+    },
+    "build": {
+      "versions": {
+        "@solidjs/compiler": "2.0.2",
+        "@solidjs/web": "2.0.3",
+        "esbuild": "0.28.2",
+        "htmx.org": "2.0.11",
+        "idiomorph": "0.8.0",
+        "react": "19.3.1",
+        "react-dom": "19.3.1",
+        "solid-js": "2.0.3",
+        "svelte": "5.58.0"
+      },
+      "lockSha256": "0566fc286086eacd7ff53b228a043e7437f0ba7e1932aac3ea3d9f438cdc12ce",
+      "bundles": {
+        "react": {
+          "file": "react.js",
+          "bytes": 223790,
+          "sha256": "1b174949646bbb1cd807b18a6189a3b259576da3300c70615642d28e0ddbdcae"
+        },
+        "solid": {
+          "file": "solid.js",
+          "bytes": 38623,
+          "sha256": "ef5d63258d552729a8df4e71259d5c467e1bc61ffc67807d5072bde02ad76e12"
+        },
+        "svelte": {
+          "file": "svelte.js",
+          "bytes": 52479,
+          "sha256": "20c7fb56362c6e860fe838c9b3e839dbe53a468d9897d9ac3ea275fdf9f15e48"
+        },
+        "saba-compiled": {
+          "file": "saba-compiled.js",
+          "bytes": 12552,
+          "sha256": "7de2eb1d75cb38a965fb44520eca574482327f8502f441c9362b2e5326947e47"
+        }
+      },
+      "sabaSourceSha256": {
+        ".krs/packages.json": "e92bb23d7c9377643e6cf9213943aba559669558122bee9087935a231bb01b16",
+        "src/modules/dom.js": "9d390d65b19c919d2dd7ff62c2a9253172066c203442ec4b2f8e04b6a9e298e7",
+        "benchmarks/frameworks/operations/compile/main.odin": "09a642fb8d265174c34556e9b0519cff2dc9b2eb077bfce1a18b41fd96db0943",
+        "benchmarks/frameworks/rich/scale-saba.jsx": "51585a718ce2ddaa8d32ebb77fd6d74a6981829569bd14050d335a58389c43ef",
+        "src/jsx/advice.odin": "2d9768d37d516acc0807d4a4285b19915c0d53384770d66d9dc0ed34d10a17fa",
+        "src/jsx/jsx.odin": "92633a30990062e725f1ef6973291ed40bd4118e1ec026015aee4bf9e75c429e",
+        "src/jsx/jsx_text.odin": "28653d82eb364e70e0f253e321c0e378f4e9d7782aeeffa43cca81a26be73536",
+        "src/jsx/template.odin": "2ce8c916a49d5396f7a0a7328f97b586321870bf2cb86e1ad83ed1eff69464a2"
+      }
+    },
+    "measurements": "Desktop Chromium, fresh browser per run, clocks begin at local data creation or trusted button handler. Mount/seek/update clocks end at visible Element Timing status marker. Complete visits also verify a visible tile by hit test.",
+    "windowTimings": "On the final-row jump, seekBeforeWindowMs ends at the first destination window commit. seekWindowMs covers that commit including slicing and verification. seekRendererMs covers only the synchronous band replacement inside that commit.",
+    "guard": {
+      "rendererRssMiB": 900,
+      "wallSeconds": 45,
+      "jsOldSpaceMiB": 768,
+      "pollMs": 200
+    },
+    "model": "One object per record (id, group, score). Full mode mounts one component and visible element per record in 4096-cell bands; native React, Solid and Svelte use a framework root per band. Planned Saba adds two binding comments. Every implementation receives the same immutable per-band record snapshots. Windowed grids have 8 columns and 16 visible rows. Virtual moves on each scroll with two extra rows per side. Buffered replenishes to eight extra rows when three remain.",
+    "checkpoints": "DOM count and last-cell layout confirmed for full chunks. Marker presentation sampled every >=32768 cells and at successful completion. Peak is sampled RSS of the isolated browser’s renderer processes, including baseline.",
+    "sabaBaseline": {
+      "url": "/scale-saba-baseline.js",
+      "bytes": 12824,
+      "sha256": "a457bbf8c4b01af94643642bdbaebad140718635c099381a2b0dfb27b87035d7"
+    }
+  },
+  "visits": [
+    {
+      "mode": "saba-baseline",
+      "scenario": "buffered",
+      "trial": 1,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 236.1875,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 805.3999999761581
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 136.03125,
+      "dataMs": 101.69999992847443,
+      "mountPaintMs": 805.3999999761581,
+      "updatePaintMs": 108.39999997615814,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 64.5,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 7.5,
+      "seekRendererMs": 27,
+      "seekWindowMs": 27.199999928474426,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 770
+      },
+      "elapsedMs": 4465.864291999998
+    },
+    {
+      "mode": "saba-compiled",
+      "scenario": "buffered",
+      "trial": 1,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 235.90625,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 181.89999997615814
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 136.140625,
+      "dataMs": 76,
+      "mountPaintMs": 181.89999997615814,
+      "updatePaintMs": 92.20000004768372,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 48,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 3.299999952316284,
+      "seekRendererMs": 13,
+      "seekWindowMs": 13.300000071525574,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 770
+      },
+      "elapsedMs": 1961.44225
+    },
+    {
+      "mode": "react",
+      "scenario": "buffered",
+      "trial": 1,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 239.40625,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 181.10000002384186
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 140.640625,
+      "dataMs": 83.70000004768372,
+      "mountPaintMs": 181.10000002384186,
+      "updatePaintMs": 87.10000002384186,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 43.60000002384186,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 3.5,
+      "seekRendererMs": 7.699999928474426,
+      "seekWindowMs": 8.200000047683716,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 0
+      },
+      "elapsedMs": 1338.701915999991
+    },
+    {
+      "mode": "saba-compiled",
+      "scenario": "buffered",
+      "trial": 2,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 234.59375,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 137.39999997615814
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 136.0625,
+      "dataMs": 59.89999997615814,
+      "mountPaintMs": 137.39999997615814,
+      "updatePaintMs": 99.70000004768372,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 41.299999952316284,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 3.5,
+      "seekRendererMs": 10,
+      "seekWindowMs": 10.299999952316284,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 770
+      },
+      "elapsedMs": 1289.6136249999981
+    },
+    {
+      "mode": "react",
+      "scenario": "buffered",
+      "trial": 2,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 240.671875,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 146
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 141.71875,
+      "dataMs": 56.10000002384186,
+      "mountPaintMs": 146,
+      "updatePaintMs": 101.29999995231628,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 32.89999997615814,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 0.6000000238418579,
+      "seekRendererMs": 5.799999952316284,
+      "seekWindowMs": 6,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 0
+      },
+      "elapsedMs": 1603.8438749999914
+    },
+    {
+      "mode": "saba-baseline",
+      "scenario": "buffered",
+      "trial": 2,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 235.265625,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 157.89999997615814
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 136.109375,
+      "dataMs": 67.10000002384186,
+      "mountPaintMs": 157.89999997615814,
+      "updatePaintMs": 66.79999995231628,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 46.200000047683716,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 2,
+      "seekRendererMs": 16.700000047683716,
+      "seekWindowMs": 16.800000071525574,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 770
+      },
+      "elapsedMs": 1243.1555000000226
+    },
+    {
+      "mode": "react",
+      "scenario": "buffered",
+      "trial": 3,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 240.140625,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 143.80000007152557
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 140.453125,
+      "dataMs": 69.90000009536743,
+      "mountPaintMs": 143.80000007152557,
+      "updatePaintMs": 84.30000007152557,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 34.700000047683716,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 0.5,
+      "seekRendererMs": 9.300000071525574,
+      "seekWindowMs": 9.5,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 0
+      },
+      "elapsedMs": 556.5957920000073
+    },
+    {
+      "mode": "saba-baseline",
+      "scenario": "buffered",
+      "trial": 3,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 235.96875,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 153
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 135.96875,
+      "dataMs": 66.5,
+      "mountPaintMs": 153,
+      "updatePaintMs": 92.60000002384186,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 47.39999997615814,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 2.799999952316284,
+      "seekRendererMs": 19.600000023841858,
+      "seekWindowMs": 19.899999976158142,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 770
+      },
+      "elapsedMs": 1251.6396249999816
+    },
+    {
+      "mode": "saba-compiled",
+      "scenario": "buffered",
+      "trial": 3,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 235.234375,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 124.30000007152557
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 135.9375,
+      "dataMs": 58.10000002384186,
+      "mountPaintMs": 124.30000007152557,
+      "updatePaintMs": 85,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 35.90000009536743,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 0.6000000238418579,
+      "seekRendererMs": 9.600000023841858,
+      "seekWindowMs": 9.700000047683716,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 770
+      },
+      "elapsedMs": 582.5970830000006
+    },
+    {
+      "mode": "saba-baseline",
+      "scenario": "buffered",
+      "trial": 4,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 236.546875,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 134.5
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 135.953125,
+      "dataMs": 57.89999997615814,
+      "mountPaintMs": 134.5,
+      "updatePaintMs": 82.39999997615814,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 60.200000047683716,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 4.200000047683716,
+      "seekRendererMs": 24.700000047683716,
+      "seekWindowMs": 25,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 770
+      },
+      "elapsedMs": 1123.4304169999668
+    },
+    {
+      "mode": "saba-compiled",
+      "scenario": "buffered",
+      "trial": 4,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 235.46875,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 131.10000002384186
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 137,
+      "dataMs": 61.60000002384186,
+      "mountPaintMs": 131.10000002384186,
+      "updatePaintMs": 77.70000004768372,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 42.200000047683716,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 4.100000023841858,
+      "seekRendererMs": 9.5,
+      "seekWindowMs": 9.799999952316284,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 770
+      },
+      "elapsedMs": 523.0741250000428
+    },
+    {
+      "mode": "react",
+      "scenario": "buffered",
+      "trial": 4,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 238.78125,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 134.80000007152557
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 141.703125,
+      "dataMs": 63.300000071525574,
+      "mountPaintMs": 134.80000007152557,
+      "updatePaintMs": 74.89999997615814,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 35.300000071525574,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 0.6000000238418579,
+      "seekRendererMs": 5.800000071525574,
+      "seekWindowMs": 5.899999976158142,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 0
+      },
+      "elapsedMs": 563.4861249999958
+    },
+    {
+      "mode": "saba-compiled",
+      "scenario": "buffered",
+      "trial": 5,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 235.703125,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 133
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 136.171875,
+      "dataMs": 57,
+      "mountPaintMs": 133,
+      "updatePaintMs": 75.20000004768372,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 44.700000047683716,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 3.8000000715255737,
+      "seekRendererMs": 9.199999928474426,
+      "seekWindowMs": 9.399999976158142,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 770
+      },
+      "elapsedMs": 697.1217079999624
+    },
+    {
+      "mode": "react",
+      "scenario": "buffered",
+      "trial": 5,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 237.4375,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 144.70000004768372
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 140.421875,
+      "dataMs": 62.10000002384186,
+      "mountPaintMs": 144.70000004768372,
+      "updatePaintMs": 78.90000009536743,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 41,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 2.0999999046325684,
+      "seekRendererMs": 5.600000023841858,
+      "seekWindowMs": 5.800000071525574,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 0
+      },
+      "elapsedMs": 591.057708999957
+    },
+    {
+      "mode": "saba-baseline",
+      "scenario": "buffered",
+      "trial": 5,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 236.0625,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 138
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 136.09375,
+      "dataMs": 61,
+      "mountPaintMs": 138,
+      "updatePaintMs": 88,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 47.799999952316284,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 5.399999976158142,
+      "seekRendererMs": 15.800000071525574,
+      "seekWindowMs": 16.100000023841858,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 770
+      },
+      "elapsedMs": 541.0637500000303
+    },
+    {
+      "mode": "react",
+      "scenario": "buffered",
+      "trial": 6,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 240.609375,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 143.89999997615814
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 140.453125,
+      "dataMs": 60.89999997615814,
+      "mountPaintMs": 143.89999997615814,
+      "updatePaintMs": 85.19999992847443,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 38.39999997615814,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 2.200000047683716,
+      "seekRendererMs": 5.599999904632568,
+      "seekWindowMs": 5.899999976158142,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 0
+      },
+      "elapsedMs": 534.593041999964
+    },
+    {
+      "mode": "saba-baseline",
+      "scenario": "buffered",
+      "trial": 6,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 235.8125,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 126.30000007152557
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 136.25,
+      "dataMs": 55.800000071525574,
+      "mountPaintMs": 126.30000007152557,
+      "updatePaintMs": 78.20000004768372,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 44,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 0.6999999284744263,
+      "seekRendererMs": 17,
+      "seekWindowMs": 17.200000047683716,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 770
+      },
+      "elapsedMs": 494.99166599998716
+    },
+    {
+      "mode": "saba-compiled",
+      "scenario": "buffered",
+      "trial": 6,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 235.625,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 139.10000002384186
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 136.09375,
+      "dataMs": 57.5,
+      "mountPaintMs": 139.10000002384186,
+      "updatePaintMs": 75.20000004768372,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 39.89999997615814,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "seekBeforeWindowMs": 4,
+      "seekRendererMs": 9.699999928474426,
+      "seekWindowMs": 9.899999976158142,
+      "destinationDom": {
+        "elements": 192,
+        "text": 192,
+        "comments": 770
+      },
+      "elapsedMs": 502.24258399999235
+    }
+  ]
+}

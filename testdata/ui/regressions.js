@@ -1,6 +1,6 @@
 // Behaviour that needs a real DOM: attachment to a document other software has
 // touched, physical row moves, attribute sinks and staged template writes.
-import {binding, effect, jsx, keyed, mount, onCleanup, signal, trusted} from "/__saba/dom.js";
+import {binding, effect, jsx, keyed, mount, onCleanup, run, signal, trusted} from "/__saba/dom.js";
 import * as template from "/template-test/attach.js";
 
 function check(condition, message) {
@@ -100,6 +100,27 @@ function stagedWrites() {
   const releaseThird = template.attach(third, manifest, setupOf(count, [], () => count.set(3)));
   check(third.querySelector("h1").title === "count 3" && third.querySelector("output").textContent === "3",
     "a write made during setup was applied out of order");
+  // A range the server rendered as text goes to an element and back to text
+  // before the activation commits; the last write no longer has that text node.
+  for (const initial of ["1", null]) {
+    const view = signal(initial);
+    const fourth = served(HTML.replace("<!--saba:3:start-->", "<!--saba:3:start-->1"));
+    const releaseFourth = template.attach(fourth, manifest, () => {
+      template.element(0, {});
+      template.element(1, {});
+      template.element(2, {});
+      template.range(3, binding(() => view() ?? jsx("i", null, "none")));
+      template.element(4, {});
+      if (initial !== null) view.set(jsx("b", null, "bold"));
+      view.set("again");
+    });
+    check(fourth.querySelector("output").textContent === "again" && !fourth.querySelector("output").firstElementChild,
+      "a text write staged after a structural one did not land");
+    view.set("later");
+    check(fourth.querySelector("output").textContent === "later", "the range stopped following its signal");
+    releaseFourth();
+    fourth.remove();
+  }
   const late = caught(() => template.element(0, {}));
   check(late && /only available while attach/.test(late.message), "a target lookup after attachment did not explain itself");
   release(); releaseThird();
@@ -167,6 +188,7 @@ function attributeSinks(host) {
     ["a", "href", "javascript:alert(1)"], ["a", "href", " \n\tJaVa\tScRiPt:alert(1)"], ["a", "HREF", "javascript:alert(1)"],
     ["iframe", "src", "javascript:alert(1)"], ["form", "action", "javascript:alert(1)"],
     ["button", "formAction", "javascript:alert(1)"], ["iframe", "srcdoc", "<script>alert(1)</script>"],
+    ["iframe", "srcdoc", ["<script>alert(1)</script>"]], ["iframe", "srcdoc", {toString: () => "<script>alert(1)</script>"}],
   ];
   for (const [tag, name, value] of refused) {
     check(caught(() => jsx(tag, {[name]: value})) instanceof TypeError, tag + " accepted " + name + "=" + value);
@@ -215,11 +237,45 @@ function effectOwnership(host) {
   check(cleanups === 5, "the last evaluation outlived its effect");
 }
 
-export function verifyRegressions(host) {
+// Startup declared where no root node exists yet (a helper called from a row's
+// child binding, one evaluation of an effect) begins with the nearest component.
+async function rootlessStartup(host) {
+  const seen = [], ticks = signal(0), items = signal([{id: 1}]);
+  const cell = label => {
+    effect(() => { seen.push(label + ":" + ticks()); });
+    run(() => { seen.push(label + ":run"); });
+    return jsx("span", null, label);
+  };
+  let inEffect = 0;
+  const release = mount(host, () => {
+    effect(() => { ticks(); run(() => { inEffect++; }); });
+    return jsx("ul", null, binding(() => keyed(items, record => record.id,
+      record => jsx("li", null, binding(() => cell("row" + record().id))))));
+  });
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+  try {
+    await settle();
+    check(seen.includes("row1:0") && seen.includes("row1:run"), "an effect or run declared inside a row never started: " + seen);
+    check(inEffect === 1, "run inside an effect never started");
+    items.set([{id: 1}, {id: 2}]);
+    await settle();
+    check(seen.includes("row2:0") && seen.includes("row2:run"), "a row added after mount did not start its effect: " + seen);
+    ticks.set(1);
+    await settle();
+    check(seen.includes("row1:1") && seen.includes("row2:1") && inEffect === 2, "row effects did not stay subscribed: " + seen);
+  } finally { release(); }
+  const before = seen.length;
+  ticks.set(2);
+  await settle();
+  check(seen.length === before, "a row effect outlived its mount");
+}
+
+export async function verifyRegressions(host) {
   foreignNodes();
   stagedWrites();
   minimalMoves(host);
   attributeSinks(host);
   effectOwnership(host);
+  await rootlessStartup(host);
   return true;
 }

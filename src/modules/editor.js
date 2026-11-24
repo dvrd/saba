@@ -37,6 +37,7 @@ export function createEditor({
   let formMessage = "";
   let visible = false, locked = true, needsReview = false, disposed = false, suspended = false;
   let attempt, submitting, restoring, recovering, recovery = [], refreshing = 0, reviewedAfterReceipt;
+  let settledDuringRecovery;
   let minimumReviewRevision, readOnly = false;
   const valid = token => !disposed && !suspended && token === generation;
   const dirty = () => !!base && names.some(name => !Object.is(draft[name], base[name]));
@@ -104,6 +105,10 @@ export function createEditor({
         recovery = recovery.filter(outcome => outcome.operationId !== attempt.id);
         locked = recovery.length > 0;
         applyOutcome(result, attempt).catch(report);
+      } else if (recovering && !unresolved.has(result.kind)) {
+        // Recovery already holds its receipt answers. It applies this one
+        // after its baseline read instead of losing it.
+        settledDuringRecovery = result;
       }
       return;
     }
@@ -216,7 +221,7 @@ export function createEditor({
   async function reconcileAndRead() {
     if (disposed || suspended) return false;
     const token = generation;
-    reviewedAfterReceipt = undefined;
+    reviewedAfterReceipt = settledDuringRecovery = undefined;
     locked = true; notify();
     try {
       const outcomes = await partition.reconcile(item);
@@ -235,6 +240,13 @@ export function createEditor({
       // pre-commit response can therefore never unlock this editor.
       const refreshed = await refresh();
       if (!valid(token)) return false;
+      const settled = settledDuringRecovery;
+      settledDuringRecovery = undefined;
+      if (settled && attempt && settled.operationId === attempt.id) {
+        recovery = recovery.filter(o => o.operationId !== attempt.id);
+        await applyOutcome(settled, attempt);
+        if (!valid(token)) return false;
+      }
       if (refreshed) reviewedAfterReceipt = latest.revision;
       locked = Boolean(recovery.length) || !refreshed || readOnly;
       if (recovery.length) status = recovery[0].kind;

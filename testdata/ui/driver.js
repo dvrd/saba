@@ -29,7 +29,7 @@ try {
   phase = "lowered lists and holes against the runtime";
   const lowered = await (await import("./lowered.js")).observeLowered(host);
   phase = "runtime regressions";
-  const regressions = (await import("./regressions.js")).verifyRegressions(host);
+  const regressions = await (await import("./regressions.js")).verifyRegressions(host);
   result.textContent = encodeURIComponent(JSON.stringify({forwarded, scheduler, dom, expressions, reads, keyed, windowed, slots, mutations, templates, detached, regressions, lowered}));
 } catch (error) {
   result.textContent = encodeURIComponent(JSON.stringify({error: phase + ": " + (error.stack || error)}));

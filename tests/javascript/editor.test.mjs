@@ -178,3 +178,37 @@ test('a recovered update-required receipt ends in that state, not in loading', a
   assert.equal(await setup.form.open(), false);
   assert.equal(setup.form.status(), 'update-required');
 });
+
+test('an operation settled by someone else during recovery ends saved, not stuck unknown', async () => {
+  const setup = rig({ options: { newId: () => 'op-race' } });
+  const { transport, partition } = setup;
+  const form = await opened(setup);
+  form.edit('title', 'Desk');
+  const saving = form.submit();
+  await tick();
+  transport.last('patch').reject(new Error('connection lost'));
+  await tick();
+  transport.last('receipt').resolve({ status: 200, body: { state: 'unknown' } });
+  await saving;
+  assert.equal(form.status(), 'unknown');
+
+  const recovering = form.refresh();
+  await tick();
+  transport.last('receipt').resolve({ status: 200, body: { state: 'unknown' } });
+  await tick();
+  // The baseline read is in flight when another view learns the save committed.
+  const other = partition.recheck('42', 'op-race');
+  await tick();
+  transport.last('receipt').resolve({ status: 200, body: { state: 'terminal', status: 200, body: record(8, 'Desk').body } });
+  assert.equal((await other).kind, 'saved');
+  transport.last('read').resolve(record(8, 'Desk'));
+  await recovering;
+  await tick();
+
+  assert.equal(form.status(), 'saved');
+  assert.equal(form.review(), null, 'the editor\'s own save is not a conflict');
+  assert.equal(form.field('title'), 'Desk');
+  form.edit('title', 'Table');
+  assert.equal(form.canSave(), true, 'the editor is unlocked');
+  assert.deepEqual(unhandled, []);
+});

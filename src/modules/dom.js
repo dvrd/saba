@@ -625,13 +625,21 @@ function appendRange(parent, read, start, end) {
     const write = () => {
       committed = true;
       if (!fragment) {
-        if (list) {
+        if (list && value?.type === keyedType) {
           list.set(value);
           return;
         }
-        const next = String(value);
-        if (text.data !== next) text.data = next;
-        return;
+        if (text && isText(value)) {
+          const next = String(value);
+          if (text.data !== next) text.data = next;
+          return;
+        }
+        // An earlier staged write replaced the text or list this one was
+        // planned against. Build the content it would have built.
+        withContext(stage, insertion, () => {
+          fragment = document.createDocumentFragment();
+          nextList = untrack(() => append(fragment, value));
+        });
       }
       if (branch) disposeScope(branch, errors);
       clearRange(start, end, errors);
@@ -928,7 +936,8 @@ function scriptURL(text) {
 function checkedAttribute(name, value) {
   if (value?.type === trustedType) return value.value;
   const key = name.toLowerCase();
-  if (key === "srcdoc" && typeof value === "string") {
+  // Anything but an absent or boolean value is written as its string.
+  if (key === "srcdoc" && value != null && typeof value !== "boolean") {
     throw new TypeError("srcdoc is markup. Pass trusted(markup) if its source is trusted.");
   }
   if (urlAttributes.has(key) && value != null && typeof value !== "boolean" && scriptURL(String(value))) {
@@ -1315,25 +1324,38 @@ function schedule(scope, callback) {
   enqueue(scope, () => callback(scopeLifetime(scope)));
 }
 
+// A scope without root nodes (a binding's branch, one evaluation of an effect)
+// starts with the nearest ancestor that has them.
+function startAnchor(scope) {
+  let anchor = scope;
+  while (anchor && !anchor.roots.length) anchor = anchor.parent;
+  return anchor;
+}
+
 function enqueue(scope, callback) {
   if (scope.disposed) return;
   scope.pending.push(callback);
 
-  if (scope.mounted) {
-    queueMicrotask(() => start(scope));
+  const anchor = startAnchor(scope);
+  if (anchor?.mounted) {
+    queueMicrotask(() => start(anchor));
   }
 }
 
 function start(scope) {
   if (scope.disposed || !scope.roots.some((node) => node.isConnected)) return;
 
+  startPending(scope, scope.roots[0]?.parentNode);
+}
+
+function startPending(scope, parent) {
   scope.mounted = true;
 
   for (const callback of scope.pending.splice(0)) {
     Promise.resolve()
       .then(() => {
         if (!scope.disposed) {
-          return withContext(scope, scope.roots[0]?.parentNode, () => untrack(callback));
+          return withContext(scope, parent, () => untrack(callback));
         }
       })
       .then((cleanup) => {
@@ -1344,6 +1366,10 @@ function start(scope) {
       .catch((error) => {
         if (!scope.disposed) reportError(error);
       });
+  }
+
+  for (const child of scope.children) {
+    if (!child.disposed && !child.roots.length) startPending(child, parent);
   }
 }
 

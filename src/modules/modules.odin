@@ -123,11 +123,18 @@ module_excluded :: proc(exclude: []string, relative: string) -> bool {
 		if name == "" {
 			continue
 		}
-		if relative == name || (len(relative) > len(name) && strings.has_prefix(relative, name) && relative[len(name)] == '/') {
+		// Case-insensitive volumes resolve `Server/x.js` to `server/x.js`, so names
+		// are compared without regard to case, as jsx_source does for suffixes.
+		if strings.equal_fold(relative, name) ||
+		   (len(relative) > len(name) && strings.equal_fold(relative[:len(name)], name) && relative[len(name)] == '/') {
 			return true
 		}
 		// A compiled component is addressed as .js and stored as .jsx.
-		if strings.has_suffix(name, ".jsx") && strings.has_suffix(relative, ".js") && relative[:len(relative) - 3] == name[:len(name) - 4] {
+		if len(name) >= 4 &&
+		   len(relative) >= 3 &&
+		   strings.equal_fold(name[len(name) - 4:], ".jsx") &&
+		   strings.equal_fold(relative[len(relative) - 3:], ".js") &&
+		   strings.equal_fold(relative[:len(relative) - 3], name[:len(name) - 4]) {
 			return true
 		}
 	}

@@ -319,10 +319,14 @@ environment_parse :: proc(source: string, allocator: mem.Allocator) -> (map[stri
 			key = strings.trim_space(line[:equal])
 		}
 
-		value: string
-		if valid := environment_key_ok(key); valid {
-			value, valid = environment_value(line[equal + 1:], allocator)
-		} else do return nil, line_number
+		if !environment_key_ok(key) {
+			return nil, line_number
+		}
+
+		value, valid := environment_value(line[equal + 1:], allocator)
+		if !valid {
+			return nil, line_number
+		}
 
 		values[key] = value
 	}

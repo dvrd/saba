@@ -226,7 +226,12 @@ accept_header :: proc(session: ^Session, io: ^IO) -> Step {
 		session.payload = session.control_input[:int(header.payload_length)]
 	} else {
 		if session.close_requested {
-			return .Done
+			// The peer may have sent messages before it saw the Close. They are
+			// read and dropped until its own Close arrives or close_deadline ends.
+			session.discarding, session.discard_left = true, header.payload_length
+			session.payload = session.control_input[:int(min(session.discard_left, u64(len(session.control_input))))]
+			session.reading_payload, session.payload_used = true, 0
+			return .Progress
 		}
 
 		if session.fragments == session.config.max_fragments {
@@ -270,6 +275,18 @@ accept_header :: proc(session: ^Session, io: ^IO) -> Step {
 }
 
 finish_frame :: proc(session: ^Session, io: ^IO) -> Step {
+	if session.discarding {
+		session.discard_left -= u64(len(session.payload))
+		if session.discard_left > 0 {
+			session.payload = session.control_input[:int(min(session.discard_left, u64(len(session.control_input))))]
+			session.payload_used = 0
+			return .Progress
+		}
+		session.discarding = false
+		reset_read(session, io)
+		return .Progress
+	}
+
 	session.metrics.frames_in += 1
 	opcode := session.header.opcode
 
@@ -801,6 +818,8 @@ Session :: struct {
 	control_used, control_sent:                                  int,
 	control_close:                                               bool,
 	close_requested, close_sent, peer_closed, abort_after_close: bool,
+	discarding:                                                  bool,
+	discard_left:                                                u64,
 	close_payload:                                               [125]u8,
 	close_size:                                                  int,
 	close_deadline, control_deadline:                            async.Deadline,

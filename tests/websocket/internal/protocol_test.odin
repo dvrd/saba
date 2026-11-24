@@ -416,3 +416,36 @@ disabled_keepalive_never_pings_and_a_closing_session_does_not_start_one :: proc(
 	testing.expect_value(t, write_step(session, &io), Step.Progress)
 	testing.expect_value(t, sink.bytes[0], u8(0x88))
 }
+
+@(test)
+data_frame_after_sent_close_is_dropped_and_the_peer_close_still_completes :: proc(t: ^testing.T) {
+	runtime: async.Runtime
+	conn: core.Connection
+	transport: core.Upgrade_IO
+	session, scope, io := ws79_frame_fixture(t, {}, &runtime, &transport, &conn)
+	defer assert(async.destroy(&runtime).kind == .None)
+	defer budget.release_scope(&scope)
+	defer drop_session(session)
+	assert(close(&io, 1000, "done").kind == .None)
+	session.close_sent = true
+	session.close_deadline = async.deadline_after(&runtime, session.config.close_timeout)
+
+	// A text frame the peer sent before it saw the Close.
+	ws79_header(session, 0x81, 5)
+	testing.expect_value(t, accept_header(session, &io), .Progress)
+	testing.expect(t, session.discarding && session.reading_payload)
+	testing.expect_value(t, len(session.payload), 5)
+	testing.expect_value(t, finish_frame(session, &io), .Progress)
+	testing.expect(t, !session.discarding && !session.reading_payload)
+	testing.expect_value(t, session.metrics.messages_in, 0)
+	testing.expect_value(t, session.fragments, 0)
+
+	// The peer's answering Close is then read as usual.
+	ws79_header(session, 0x88, 2)
+	testing.expect_value(t, accept_header(session, &io), .Progress)
+	copy(session.payload, []u8{0x03, 0xe8})
+	testing.expect_value(t, finish_frame(session, &io), .Progress)
+	testing.expect(t, session.peer_closed)
+	testing.expect_value(t, session.event.peer_code, u16(1000))
+	testing.expect_value(t, session.event.reason, .Application_Close)
+}

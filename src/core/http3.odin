@@ -396,11 +396,11 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 		return .Failed
 	}
 
-	// The wire layer treats an invalid response section as a connection error,
-	// which would take every other stream on this QUIC connection with it. Drop
-	// connection-specific fields as HTTP/2 does and turn anything the section
-	// cannot carry into an ordinary 500 on this stream only.
-	count, bytes := 0, 0
+	// The wire layer resets the stream of a response section it cannot send.
+	// Drop connection-specific fields as HTTP/2 does and turn what is known to
+	// be unrepresentable into an ordinary 500 instead. Encoded size is the wire
+	// layer's to judge: only it knows what the QPACK tables and Huffman save.
+	count := 0
 	representable := int(response.status) >= 200 && int(response.status) <= 599
 
 	for field in response.headers {
@@ -421,7 +421,6 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 			never_indexed = name == "set-cookie" || name == "authorization",
 		}
 		count += 1
-		bytes += len(name) + len(field.value) + HTTP3_FIELD_OVERHEAD
 	}
 
 	if representable && extra != 0 {
@@ -440,11 +439,10 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 				value = strconv.write_int(storage, length, 10),
 			}
 			count += 1
-			bytes += 32 + HTTP3_FIELD_OVERHEAD
 		}
 	}
 
-	if !representable || count > HTTP3_RESPONSE_FIELDS || bytes > HTTP3_RESPONSE_BYTES {
+	if !representable || count > HTTP3_RESPONSE_FIELDS {
 		discard_response(response)
 		response^ = {
 			status = .Internal_Server_Error,
@@ -499,12 +497,8 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 	return .Ready
 }
 
-// Limits of the HTTP/3 response field section: at most 63 fields and a 7000
-// byte encoded block. The byte estimate charges each field its worst-case
-// literal prefix so the encoded size stays under the block limit.
+// The HTTP/3 response field section carries at most 63 fields besides :status.
 HTTP3_RESPONSE_FIELDS :: 63
-HTTP3_RESPONSE_BYTES :: 6000
-HTTP3_FIELD_OVERHEAD :: 8
 
 http3_skip_response_header :: proc(lower: string) -> bool {
 	switch lower {

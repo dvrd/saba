@@ -1273,6 +1273,11 @@ keep_alive_idle_timeout :: proc(runtime: ^Server_Runtime) -> time.Duration {
 }
 
 request_wants_close :: proc(request: ^Request) -> bool {
+	// HTTP/1.0 closes after each exchange; its keep-alive extension is not offered.
+	if request.version == HTTP_VERSION_1_0 {
+		return true
+	}
+
 	for header in request.headers {
 		if !strings.equal_fold(header.name, "Connection") {
 			continue

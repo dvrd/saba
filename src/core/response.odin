@@ -10,7 +10,6 @@ import "core:mem"
 import budget "core:sync/budget"
 import owned "core:mem/owned"
 import "core:strconv"
-import "core:strings"
 import async "shared:async"
 
 RESPONSE_HEADER_LIMIT :: 8192
@@ -94,22 +93,9 @@ response_headers :: proc(response: Response, buffer: []u8, keep_alive: bool = fa
 		profile = .Keep_Alive
 	}
 
-	// The server writes the framing fields itself. A handler's own Content-Length
-	// that states the body's real length is redundant rather than wrong: drop it
-	// instead of failing the response. Any other value still rejects the head.
+	// The server writes the framing fields itself. The encoder accepts a
+	// handler's own Content-Length only when it states the body's real length.
 	fields := response.headers
-	kept: [http.MAX_HEADERS]Header
-
-	if len(fields) <= len(kept) && content_length_redundant(fields, len(response.body)) {
-		count := 0
-		for field in fields {
-			if !strings.equal_fold(field.name, "Content-Length") {
-				kept[count] = field
-				count += 1
-			}
-		}
-		fields = kept[:count]
-	}
 
 	written, error := http1.response_head_encode_profile(
 		buffer,
@@ -119,7 +105,7 @@ response_headers :: proc(response: Response, buffer: []u8, keep_alive: bool = fa
 	)
 
 	if error.kind != .None {
-		if name, reason := response_header_fault(fields, status); name != "" {
+		if name, reason := response_header_fault(fields, profile, i64(len(response.body))); name != "" {
 			log.errorf("Invalid HTTP response header %q: %s", name, reason)
 		} else {
 			log.error("Invalid HTTP response headers:", error.kind)
@@ -130,65 +116,39 @@ response_headers :: proc(response: Response, buffer: []u8, keep_alive: bool = fa
 	return buffer[:written], true
 }
 
-// True when every Content-Length the handler set is the decimal body length.
-content_length_redundant :: proc(fields: []Header, length: int) -> bool {
-	found := false
-
-	for field in fields {
-		if !strings.equal_fold(field.name, "Content-Length") {
-			continue
-		}
-		value, valid := strconv.parse_u64_of_base(field.value, 10)
-		if !valid || value != u64(length) {
-			return false
-		}
-		for character in transmute([]u8)field.value {
-			if character < '0' || character > '9' {
-				return false
-			}
-		}
-		found = true
-	}
-
-	return found
-}
-
 // Names the first field the head encoder refuses, for the log line a handler
 // author needs. Empty when the fault is not one field (for example total size).
-response_header_fault :: proc(fields: []Header, status: HTTP_Status) -> (name, reason: string) {
-	for field in fields {
-		if !http.header_name_valid(field.name) {
-			return field.name, "the name is not a valid token"
-		}
-		if !http.header_value_valid(field.value) {
-			return field.name, "the value contains a control character"
-		}
+response_header_fault :: proc(
+	fields: []Header,
+	profile: http1.Response_Profile,
+	content_length: i64,
+) -> (
+	name, reason: string,
+) {
+	index, fault := http1.response_fields_fault(fields, profile, content_length)
+	if index < 0 {
+		return "", ""
+	}
+	name = fields[index].name
 
-		for reserved in ([?]string {
-				"Content-Length",
-				"Transfer-Encoding",
-				"Connection",
-				"Keep-Alive",
-				"Proxy-Connection",
-				"Trailer",
-				"TE",
-			}) {
-			if strings.equal_fold(field.name, reserved) {
-				return field.name, "the server sets this field; handlers must not (a Content-Length must equal the body length)"
-			}
-		}
-
-		if strings.equal_fold(field.name, "Upgrade") {
-			if status != .Switching_Protocols {
-				return field.name, "only a 101 response may carry it"
-			}
-			if strings.trim_space(field.value) == "" {
-				return field.name, "the value is empty"
-			}
-		}
+	switch fault {
+	case .None:
+		return "", ""
+	case .Invalid_Name:
+		reason = "the name is not a valid token"
+	case .Invalid_Value:
+		reason = "the value contains a control character"
+	case .Reserved:
+		reason = "the server sets this field; handlers must not"
+	case .Content_Length_Mismatch:
+		reason = "a Content-Length must equal the body length, and a streamed body of unknown length has none"
+	case .Upgrade_Outside_101:
+		reason = "only a 101 response may carry it"
+	case .Upgrade_Empty:
+		reason = "the value is empty"
 	}
 
-	return "", ""
+	return
 }
 
 // Deprecated blocking send; see write_connection. A handler should return its
@@ -487,7 +447,7 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 			return resource_reject(task)
 		}
 
-		stream_head_fault(task, response.headers, status)
+		stream_head_fault(task, response.headers, content_length = producer.content_length)
 		return false
 	}
 
@@ -509,14 +469,24 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 	if task.reuse_after_write {
 		profile = .Keep_Alive
 	}
-	n, e := http1.response_stream_head_encode(buffer, stored, profile, method, max_bytes = RESPONSE_HEADER_LIMIT)
+	// An HTTP/1.0 peer cannot read chunked framing: a body of unknown length is
+	// delimited by closing the connection, which request_wants_close ensures.
+	legacy := task.request.version == HTTP_VERSION_1_0 && producer.content_length < 0
+	n: int
+	e: http.Error
+
+	if legacy {
+		n, e = http1.response_head_encode_profile(buffer, stored, .Close, method, max_bytes = RESPONSE_HEADER_LIMIT)
+	} else {
+		n, e = http1.response_stream_head_encode(buffer, stored, profile, method, max_bytes = RESPONSE_HEADER_LIMIT)
+	}
 
 	if e.kind != .None {
-		stream_head_fault(task, response.headers, status)
+		stream_head_fault(task, stored.headers, profile, stored.content_length)
 		return false
 	}
 
-	state.chunked = producer.content_length < 0
+	state.chunked = producer.content_length < 0 && !legacy
 
 	if !http.response_body_allowed(int(status), task.request.method) {
 		if exchange.finish(&state.exchange).kind != .None {
@@ -534,11 +504,16 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 	return stream_write_budget(task)
 }
 
-stream_head_fault :: proc(task: ^Connection_Task, fields: []Header, status: HTTP_Status) {
+stream_head_fault :: proc(
+	task: ^Connection_Task,
+	fields: []Header,
+	profile: http1.Response_Profile = .Close,
+	content_length: i64 = -1,
+) {
 	observe_failure(task, .Protocol_Error)
 	task.response_rejected = true
 
-	if name, reason := response_header_fault(fields, status); name != "" {
+	if name, reason := response_header_fault(fields, profile, content_length); name != "" {
 		log.errorf("Invalid HTTP response header %q: %s", name, reason)
 	} else {
 		log.error("Invalid HTTP stream response head")

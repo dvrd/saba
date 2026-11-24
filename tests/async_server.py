@@ -229,7 +229,7 @@ def production(binary, web, workers):
         for bad, expected in [
             (b'Content-Length: 1\r\nContent-Length: 1\r\n', 400),
             (b'Transfer-Encoding: gzip\r\n', 501),
-            (b'Expect: 100-continue\r\n', 417),
+            (b'Expect: 200-ok\r\n', 417),
             (b'Content-Length: 16385\r\n', 413),
         ]:
             with s.connect() as conn:
@@ -240,6 +240,46 @@ def production(binary, web, workers):
             conn.shutdown(socket.SHUT_WR)
             assert response(conn)[0] == 400
         CHECKS.append('header growth/limits, duplicate length, unsupported framing/expectations, body limits and truncated bodies retain their statuses')
+        with s.connect() as conn:
+            conn.sendall(b'POST /echo HTTP/1.1\r\nHost: localhost\r\nExpect: 100-continue\r\nContent-Length: 5\r\n\r\n')
+            assert headers(conn) == b'HTTP/1.1 100 Continue\r\n\r\n'
+            conn.sendall(b'hello')
+            status, _, body = response(conn)
+            assert status == 200 and body == b'hello'
+        with s.connect() as conn:
+            # A body sent without waiting needs no interim response.
+            conn.sendall(b'POST /echo HTTP/1.1\r\nHost: localhost\r\nExpect: 100-continue\r\nContent-Length: 2\r\n\r\nhi')
+            status, _, body = response(conn)
+            assert status == 200 and body == b'hi'
+        with s.connect() as conn:
+            conn.sendall(b'POST /echo HTTP/1.1\r\nHost: localhost\r\nExpect: 100-continue\r\nContent-Length: 16385\r\n\r\n')
+            assert response(conn)[0] == 413
+        CHECKS.append('Expect: 100-continue gets the interim response after the body limit check, and a refused body gets only its final status')
+        with s.connect() as conn:
+            conn.sendall(b'GET /ok HTTP/1.0\r\n\r\n')
+            status, fields, body = response(conn)
+            assert status == 200 and body == b'ok' and b'Connection: close' in fields and b'chunked' not in fields.lower()
+            assert conn.recv(1) == b''
+        with s.connect() as conn:
+            conn.sendall(b'POST /echo HTTP/1.0\r\nHost: localhost\r\nConnection: keep-alive\r\nExpect: 100-continue\r\nContent-Length: 3\r\n\r\n')
+            time.sleep(.05)
+            conn.sendall(b'abc')
+            status, fields, body = response(conn)
+            assert status == 200 and body == b'abc' and b'Connection: close' in fields
+            assert conn.recv(1) == b''
+        with s.connect() as conn:
+            conn.sendall(b'GET /ok HTTP/2.0\r\nHost: localhost\r\n\r\n')
+            assert response(conn)[0] == 505
+        CHECKS.append('HTTP/1.0 requests are served without Host, interim responses or persistence; other versions get 505')
+        with s.connect() as conn:
+            conn.sendall(b'\r\n\r\n')
+            time.sleep(.05)
+            conn.sendall(b'GET /ok HTTP/1.1\r\nHost: localhost\r\n\r\n')
+            assert response(conn)[2] == b'ok'
+        with s.connect() as conn:
+            conn.sendall(b'\r\nPOST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Length: 3\r\n\r\nabc')
+            assert response(conn)[2] == b'abc'
+        CHECKS.append('empty lines before a request line are ignored, whether they arrive alone or with the request')
         slow = s.connect()
         slow.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 16384)
         slow.sendall(b'GET /large HTTP/1.1\r\nHost: localhost\r\n\r\n')

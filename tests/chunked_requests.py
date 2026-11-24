@@ -95,7 +95,7 @@ def main():
             checks.append('decoded-size exact/cumulative caps, oversized declaration, line/trailer caps and malformed framing fail closed')
             for fields, wanted in [(b'Content-Length: 0\r\n',400),
                                    (b'Transfer-Encoding: chunked\r\n',400),
-                                   (b'Expect: 100-continue\r\n',417)]:
+                                   (b'Expect: 200-ok\r\n',417)]:
                 with instance.connect() as conn:
                     conn.sendall(head(extra=fields))
                     assert response(conn)[0] == wanted

@@ -110,6 +110,9 @@ Connection_Task :: struct {
 	body_owned:                                        []u8,
 	body_allocator:                                    mem.Allocator,
 	body_target:                                       int,
+	// "100 Continue" owed before the body is read, and how much of it is written.
+	continue_pending:                                  bool,
+	continue_sent:                                     int,
 	// Progress budget of the current body read or response write: when it
 	// started, its stall window and the bytes moved so far. A zero start keeps
 	// the armed deadline fixed.
@@ -182,7 +185,7 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 				continue
 			}
 
-			if strings.contains(string(task.header[:task.header_used]), HTTP_HEADERS_END) {
+			if http1.request_head_length(string(task.header[:task.header_used])) >= 0 {
 				if !prepare_request(task) {
 					return .Done
 				}
@@ -253,6 +256,14 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 
 			task.header_used += n
 		case .Body:
+			if task.continue_pending {
+				if waiting, failed := continue_write(task); failed {
+					return .Done
+				} else if waiting {
+					return .Waiting
+				}
+			}
+
 			if task.body_used == len(task.request.body) && task.body_used < task.body_target {
 				// Storage follows the bytes that arrived, never the declared length.
 				if !request_body_grow(task) {
@@ -314,6 +325,14 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 			}
 
 		case .Chunked_Body:
+			if task.continue_pending {
+				if waiting, failed := continue_write(task); failed {
+					return .Done
+				} else if waiting {
+					return .Waiting
+				}
+			}
+
 			if deadline_expired(conn.read_deadline) {
 				if !queue_response(task, {status = .Request_Timeout, close_connection = true}) {
 					return .Done
@@ -510,16 +529,45 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 	return .Yield
 }
 
+// Writes the "100 Continue" interim response a request asked for before its
+// body is read. The body read deadline bounds a peer that will not take it.
+continue_write :: proc(task: ^Connection_Task) -> (waiting, failed: bool) {
+	interim := http1.RESPONSE_CONTINUE
+
+	for task.continue_sent < len(interim) {
+		if deadline_expired(task.connection.read_deadline) {
+			observe_io_error(task, {kind = .Timeout})
+			return false, true
+		}
+
+		n, error := transport_write(task, transmute([]u8)interim[task.continue_sent:], task.deadline)
+		if error.kind == .Pending {
+			return true, false
+		}
+		if error.kind != .None || n == 0 {
+			observe_io_error(task, error)
+			return false, true
+		}
+
+		task.continue_sent += n
+	}
+
+	task.continue_pending = false
+
+	return false, false
+}
+
 prepare_request :: proc(task: ^Connection_Task) -> bool {
 	allocator := mem.dynamic_arena_allocator(&task.arena)
 	raw := string(task.header[:task.header_used])
-	end := strings.index(raw, HTTP_HEADERS_END)
+	// The head's length counts any empty lines a peer sent before the request line.
+	head_length := http1.request_head_length(raw)
 	if task.observed {
-		task.event.bytes_received = u64(end + len(HTTP_HEADERS_END))
+		task.event.bytes_received = u64(head_length)
 	}
 	// Allocate header entries only after a request arrives, rather than
 	// retaining the maximum table for every idle connection.
-	count := min(strings.count(raw[:end], CRLF), REQUEST_HEADER_COUNT_LIMIT)
+	count := min(strings.count(raw[:head_length], CRLF), REQUEST_HEADER_COUNT_LIMIT)
 	headers, header_error := make([]Header, count, allocator)
 
 	if header_error != nil {
@@ -543,7 +591,7 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 		return queue_response(task, {status = status})
 	}
 
-	task.connection.read_buffer = task.header[end + len(HTTP_HEADERS_END):task.header_used]
+	task.connection.read_buffer = task.header[head_length:task.header_used]
 	limit := REQUEST_BODY_LIMIT
 
 	if task.runtime.config.request_body_limit != nil {
@@ -572,6 +620,11 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 	}
 
 	task.request.body = body
+	// The body limit has passed, so a peer waiting on "Expect: 100-continue" is
+	// told to send. Body bytes that already arrived make the interim moot.
+	task.continue_sent = 0
+	task.continue_pending =
+		request._expect_continue && (request.content_length > 0 || request.chunked) && len(task.connection.read_buffer) == 0
 	arm_read_deadline(task, transfer_begin(task, task.runtime.timeouts.body))
 	task.phase = .Body
 

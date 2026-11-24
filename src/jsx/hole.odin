@@ -279,10 +279,29 @@ direct_attr_name :: proc(name: string) -> (string, bool) {
 	     "innerHTML", "outerHTML", "textContent", "xmlns":
 		return "", false
 	}
-	if len(name) > 2 && strings.has_prefix(name, "on") {
+	// HTML attribute names are case-insensitive: the runtime takes every
+	// spelling of on* as an event and refuses a string for srcdoc.
+	if len(name) > 2 && strings.equal_fold(name[:2], "on") || strings.equal_fold(name, "srcdoc") {
 		return "", false
 	}
 	return name, true
+}
+
+// The runtime refuses a javascript: URL in these. A quoted value is written
+// directly only when it plainly is not one: it names no scheme and holds no
+// entity, or it starts with http:// or https://.
+direct_url_ok :: proc(name, raw: string) -> bool {
+	url := false
+	for known in ([]string{"href", "src", "action", "formaction"}) {
+		url ||= strings.equal_fold(name, known)
+	}
+	if !url {
+		return true
+	}
+	if strings.has_prefix(raw, "http://") || strings.has_prefix(raw, "https://") {
+		return !strings.contains_rune(raw, '&')
+	}
+	return !strings.contains_any(raw, ":&")
 }
 
 direct_static_attrs :: proc(p: ^Emitter, el: ^k.JSXElement, out: ^[dynamic]Closed_Static) -> bool {
@@ -304,7 +323,11 @@ direct_static_attrs :: proc(p: ^Emitter, el: ^k.JSXElement, out: ^[dynamic]Close
 		if !is_lit || !closed_static_ok(p, lit) {
 			return false
 		}
-		append(out, Closed_Static{name, p.source[lit.loc.start + 1:lit.loc.end - 1]})
+		raw := p.source[lit.loc.start + 1:lit.loc.end - 1]
+		if !direct_url_ok(name, raw) {
+			return false
+		}
+		append(out, Closed_Static{name, raw})
 	}
 	return true
 }

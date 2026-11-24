@@ -40,6 +40,7 @@ helper_exports := [Helper]string {
 }
 
 Emitter :: struct {
+	component_children: int,
 	source, file:    string,
 	position, depth: int,
 	output:          strings.Builder,
@@ -70,8 +71,8 @@ Visit_Guard :: struct {
 	at:       k.Loc,
 }
 
-// An estimate that never needs a tokenizer. Quoted strings are skipped to the
-// end of their line. A line that starts with a letter in column zero is taken
+// An estimate that never needs a tokenizer. Quoted strings that close on their
+// own line are skipped. A line that starts with a letter in column zero is taken
 // as a new top-level statement and resets the count, so stray brackets in
 // comments, regular expressions or JSX text cannot accumulate across a file.
 bracket_depth_exceeded :: proc(source: string) -> (at: int, exceeded: bool) {
@@ -86,14 +87,16 @@ bracket_depth_exceeded :: proc(source: string) -> (at: int, exceeded: bool) {
 		case ')', ']', '}':
 			depth = max(depth - 1, 0)
 		case '\'', '"':
-			quote := source[i]
+			quote, opened := source[i], i
 			for i += 1; i < len(source) && source[i] != quote && source[i] != '\n'; i += 1 {
 				if source[i] == '\\' {
 					i += 1
 				}
 			}
-			if i < len(source) && source[i] == '\n' {
-				i -= 1
+			// No closing quote on this line: an apostrophe in JSX text or a
+			// template literal. The brackets after it still count.
+			if i >= len(source) || source[i] == '\n' {
+				i = opened
 			}
 		case '\n':
 			if i + 1 < len(source) {
@@ -409,6 +412,10 @@ emit_span :: proc(p: ^Emitter, loc: k.Loc, nodes: []Syntax) {
 			continue
 		}
 		emit_source(p, cursor, item.loc.start)
+		// JSX inside an expression is built when that expression runs, whatever
+		// encloses the expression.
+		below := p.component_children
+		p.component_children = 0
 		switch node in item.node {
 		case ^k.JSXElement:
 			emit_element(p, node, false)
@@ -420,6 +427,7 @@ emit_span :: proc(p: ^Emitter, loc: k.Loc, nodes: []Syntax) {
 			}
 			jsx_emit(p, node)
 		}
+		p.component_children = below
 		cursor = item.loc.end
 	}
 	emit_source(p, cursor, loc.end)
@@ -509,7 +517,9 @@ emit_element :: proc(p: ^Emitter, el: ^k.JSXElement, deferred: bool) {
 	defer p.depth -= 1
 	p.position = int(el.loc.start)
 	note_origin(p, el.loc)
-	if emit_direct_hole(p, el) {
+	// A component decides whether and when its children are built, so an
+	// element below one is never built ahead of that decision.
+	if p.component_children == 0 && emit_direct_hole(p, el) {
 		return
 	}
 	if p.depth > 128 {
@@ -537,8 +547,14 @@ emit_element :: proc(p: ^Emitter, el: ^k.JSXElement, deferred: bool) {
 		jsx_quoted(p, tag)
 	}
 	jsx_emit(p, ", ")
+	if component {
+		p.component_children += 1
+	}
 	emit_attributes(p, opening, component)
 	emit_children(p, el.children[:], !component && emits_one_child(p, el.children[:]))
+	if component {
+		p.component_children -= 1
+	}
 	jsx_emit(p, ")")
 }
 
@@ -669,11 +685,12 @@ emit_attributes :: proc(p: ^Emitter, opening: ^k.JSXOpeningElement, component: b
 						jsx_fail(p, "JSX attribute expressions cannot be empty")
 						return
 					}
+					// The runtime treats every spelling of on* on an element as an
+					// event. A component prop is one only in the onName form.
 					event :=
 						len(attr.name) > 2 &&
-						strings.has_prefix(attr.name, "on") &&
-						attr.name[2] >= 'A' &&
-						attr.name[2] <= 'Z'
+						strings.equal_fold(attr.name[:2], "on") &&
+						(!component || attr.name[:2] == "on" && attr.name[2] >= 'A' && attr.name[2] <= 'Z')
 					attr.hole = prepare_hole(p, value.expression, event || attr.name == "ref")
 				case ^k.JSXElement, ^k.JSXFragment:
 					attr.hole = prepare_hole(p, expr)

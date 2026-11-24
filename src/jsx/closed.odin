@@ -129,10 +129,13 @@ lower_closed :: proc(p: ^Emitter, program: ^k.Program, nodes: ^[dynamic]Syntax) 
 			continue
 		}
 		// The authored signature is copied verbatim, so its parameter names,
-		// defaults and extra parameters keep their meaning.
-		body := strings.concatenate(
-			{helpers, p.source[loc.start:fn.body.loc.start], "{\n  return ", call, ";\n}"},
-		)
+		// defaults and extra parameters keep their meaning. JSX in a default
+		// would be copied uncompiled, so such a mount stays on the runtime.
+		signature := p.source[loc.start:fn.body.loc.start]
+		if strings.contains_rune(signature, '<') {
+			continue
+		}
+		body := strings.concatenate({helpers, signature, "{\n  return ", call, ";\n}"})
 		append(nodes, Syntax{loc, body, row_origin(rows[:], row)})
 		append(&lowered, loc)
 		used[row] = true

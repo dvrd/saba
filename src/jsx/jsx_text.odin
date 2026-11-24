@@ -135,19 +135,24 @@ jsx_text_child :: proc(p: ^Emitter, text: string, span: k.Loc = {}) {
 
 jsx_clean_text :: proc(text: string) -> string {
 	b := strings.builder_make()
-	lines := strings.split_lines(text)
+	// JSX ends a line at LF, CRLF or a lone CR, and only spaces and tabs are
+	// insignificant: a no-break space is content.
+	unix, unix_owned := strings.replace_all(text, "\r\n", "\n")
+	defer if unix_owned do delete(unix)
+	normal, normal_owned := strings.replace_all(unix, "\r", "\n")
+	defer if normal_owned do delete(normal)
+	lines := strings.split(normal, "\n")
 	defer delete(lines)
 	last := -1
 
 	for line, i in lines {
-		if strings.trim_space(line) != "" {
+		if strings.trim(line, " \t") != "" {
 			last = i
 		}
 	}
 
 	for raw_line, i in lines {
 		line := raw_line
-		line = strings.trim_right(line, "\r")
 		if i > 0 {
 			line = strings.trim_left(line, " \t")
 		}

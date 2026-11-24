@@ -960,6 +960,12 @@ jsx_swaps_a_proved_hole_with_a_tracked_synchronous_write :: proc(t: ^testing.T) 
 			// Attributes the runtime does not write with setAttribute.
 			`function Field(on) { return <div style="color: red">{on() ? <b>x</b> : null}</div>; }`,
 			`function Field(on) { return <div onclick="go()">{on() ? <b>x</b> : null}</div>; }`,
+			`function Field(on) { return <div>{on() ? <button ONCLICK="go()">y</button> : null}</div>; }`,
+			`function Field(on) { return <div>{on() ? <button formaction="javascript:go()">y</button> : null}</div>; }`,
+			`function Field(on) { return <div>{on() ? <a href="&#106;avascript:go()">y</a> : null}</div>; }`,
+			`function Field(on) { return <div>{on() ? <iframe srcdoc="x"></iframe> : null}</div>; }`,
+			// A component decides whether its children are built at all.
+			`function Field(on) { return <Guard when={on}><p>{on().admin ? <b>x</b> : null}</p></Guard>; }`,
 			`function Field(on) { return <div>{on() ? <input value="x"/> : null}</div>; }`,
 			// A call the compiler cannot see through.
 			`function Field(on) { return <div>{other() ? <b>x</b> : null}</div>; }`,
@@ -1373,4 +1379,70 @@ page_generation_gives_different_bytes_different_hashes :: proc(t: ^testing.T) {
 		}
 	}
 	testing.expect(t, differed)
+}
+
+@(test)
+jsx_direct_holes_keep_plain_links :: proc(t: ^testing.T) {
+	for source in ([]string{
+			`function Field(on) { return <div>{on() ? <button formaction="/items/7">y</button> : null}</div>; }`,
+			`function Field(on) { return <div>{on() ? <button formaction="https://example.test/a?b=1">y</button> : null}</div>; }`,
+			// An expression inside a component child is built when it runs.
+			`function Field(on) { return <Guard>{() => <div>{on() ? <b>x</b> : null}</div>}</Guard>; }`,
+		}) {
+		output := jsx_compiled(t, source, "hole-kept.jsx")
+		testing.expectf(t, strings.contains(output, "__saba_paint"), "no direct hole for %s", source)
+	}
+}
+
+@(test)
+jsx_takes_every_spelling_of_an_element_event_as_a_handler :: proc(t: ^testing.T) {
+	element := jsx_compiled(
+		t,
+		`function B(props) { return <button onclick={props.onSelect} ONKEYDOWN={pick(1)} onClick={props.go} title={props.title}/>; }`,
+		"events.jsx",
+	)
+	testing.expect(t, strings.contains(element, `"onclick": (props.onSelect)`))
+	testing.expect(t, strings.contains(element, `"ONKEYDOWN": (pick(1))`))
+	testing.expect(t, strings.contains(element, `"onClick": (props.go)`))
+	testing.expect(t, strings.contains(element, `"title": __saba_binding(() => (props.title))`))
+
+	// A component prop is an event only in the onName form.
+	component := jsx_compiled(t, `function P(props) { return <Status online={props.up()} onChange={props.change}/>; }`, "props.jsx")
+	testing.expect(t, strings.contains(component, `__saba_liveProp("online", () => (props.up()))`))
+	testing.expect(t, strings.contains(component, `"onChange": (props.change)`))
+}
+
+@(test)
+jsx_counts_brackets_after_an_apostrophe :: proc(t: ^testing.T) {
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, "function List(props) {\n  return <ul>\n")
+	for _ in 0 ..< 300 {
+		strings.write_string(&b, "    {props.items.map(item => <li>Don't stop {item}</li>)}\n")
+	}
+	strings.write_string(&b, "  </ul>;\n}\n")
+	_, err := transform_jsx(strings.to_string(b), "apostrophes.jsx", context.temp_allocator)
+	testing.expect_value(t, err.message, "")
+}
+
+@(test)
+jsx_keeps_a_mount_with_jsx_in_its_signature_on_the_runtime :: proc(t: ^testing.T) {
+	row := "import { keyed, mount, signal } from '/__saba/dom.js';\nfunction Row(record) {\n  return <div class=\"card\" data-id={record().id}>{record().a ? <b>x</b> : null}<span>mid {`${record().t}`}</span></div>;\n}\n"
+	body := " {\n  const rows = signal(records);\n  const list = keyed(rows, row => row.id, Row);\n  const dispose = mount(host, () => <>{list}</>);\n  return { replace: rows.set, dispose };\n}\n"
+	plain := jsx_compiled(t, strings.concatenate({row, "export function mountBand(host, records)", body}, context.temp_allocator), "mount.jsx")
+	testing.expect(t, jsx_lowered(plain))
+	defaulted := jsx_compiled(
+		t,
+		strings.concatenate({row, "export function mountBand(host, records, extra = <b/>)", body}, context.temp_allocator),
+		"mount-default.jsx",
+	)
+	testing.expect(t, !jsx_lowered(defaulted))
+}
+
+@(test)
+jsx_text_lines_end_at_any_newline_and_keep_no_break_spaces :: proc(t: ^testing.T) {
+	testing.expect_value(t, jsx.jsx_clean_text("a\rb"), "a b")
+	testing.expect_value(t, jsx.jsx_clean_text("\r\n  Hello\r\n  world\r\n"), "Hello world")
+	testing.expect_value(t, jsx.jsx_clean_text("\n  Hello\n  \u00a0\n"), "Hello \u00a0")
+	testing.expect_value(t, jsx.jsx_clean_text("  one line  "), "  one line  ")
+	testing.expect_value(t, jsx.jsx_clean_text("\n\t \n"), "")
 }

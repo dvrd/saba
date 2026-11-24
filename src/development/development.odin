@@ -28,7 +28,14 @@ Development :: struct {
 development_stopping: bool
 DEVELOPMENT_CHILD :: "SABA_DEVELOPMENT_CHILD"
 
+// Set when the terminal interrupted the whole process group: the child received
+// the same SIGINT and is already draining.
+development_interrupted: bool
+
 development_signal :: proc "c" (signal: posix.Signal) {
+	if signal == .SIGINT {
+		sync.atomic_store(&development_interrupted, true)
+	}
 	sync.atomic_store(&development_stopping, true)
 }
 
@@ -101,6 +108,7 @@ develop :: proc(config: Development) -> (handled, success: bool) {
 		development_stop(child)
 	}
 	sync.atomic_store(&development_stopping, false)
+	sync.atomic_store(&development_interrupted, false)
 	old_int := posix.signal(.SIGINT, development_signal)
 	old_term := posix.signal(.SIGTERM, development_signal)
 	defer {
@@ -229,6 +237,7 @@ development_supervise :: proc(
 		if current == published {
 			continue
 		}
+		before := published
 		published = current
 		generation += 1
 		// Scratch output never overwrites the executable that is still serving.
@@ -239,6 +248,11 @@ development_supervise :: proc(
 		if !built || !checked || latest != current || sync.atomic_load(&development_stopping) {
 			_ = os.remove(next)
 			delete(next)
+			// The sources could not be read back, so nothing says this build is
+			// stale or current. Build them again rather than wait for an edit.
+			if built && !checked {
+				published = before
+			}
 
 			if !sync.atomic_load(&development_stopping) {
 				if !built {
@@ -331,6 +345,13 @@ development_build :: proc(config: Development, compiler, next: string) -> (bool,
 }
 
 development_stop :: proc(process: os.Process) {
+	// A second signal makes a draining server stop at once. After Ctrl-C the
+	// child has its own SIGINT, so it gets the same two seconds before that.
+	if sync.atomic_load(&development_interrupted) {
+		if state, err := os.process_wait(process, 2 * time.Second); err == nil && state.exited {
+			return
+		}
+	}
 	_ = os.process_terminate(process)
 	state, err := os.process_wait(process, 2 * time.Second)
 
@@ -728,6 +749,7 @@ Session_Phase :: enum {
 }
 Reload_Session :: struct {
 	state:                      ^Reload_State,
+	request_context:            core.Request_Context,
 	phase:                      Session_Phase,
 	initialized:                bool,
 	version:                    u64,
@@ -745,27 +767,36 @@ handle :: proc(state: ^Reload_State, request: ^Request) -> (Response, bool) {
 	if core.match_route(request, "GET", "/__reload/client.js") {
 		return reload_client_response(request), true
 	}
-	if !core.match_route(request, "GET", "/__reload") {
+	// A browser that already holds an HTTP/2 or HTTP/3 connection opens the
+	// socket as Extended CONNECT (RFC 8441, RFC 9220): no Upgrade handshake
+	// fields, and a 200 instead of a 101.
+	extended := request.method == "CONNECT" && request.protocol == "websocket" && request.path == "/__reload"
+	if !extended && !core.match_route(request, "GET", "/__reload") {
 		return {}, false
 	}
 	if !reload_origin_allowed(header_value(request, "Origin"), header_value(request, "Host")) {
 		return {status = .Forbidden}, true
 	}
-	accept_storage, allocation_error := make([]u8, 28, request.allocator)
-	if allocation_error != nil {
-		return {status = .Internal_Server_Error}, true
-	}
-	accept, status := websocket_accept(request, accept_storage)
-	if status != .None {
-		return {status = status}, true
-	}
-	response := make_response(
-		request,
-		.Switching_Protocols,
-		{{"Upgrade", "websocket"}, {"Sec-WebSocket-Accept", accept}},
-	)
-	if response.status != .Switching_Protocols {
-		return response, true
+	response: Response
+	if extended {
+		response = {status = .OK}
+	} else {
+		accept_storage, allocation_error := make([]u8, 28, request.allocator)
+		if allocation_error != nil {
+			return {status = .Internal_Server_Error}, true
+		}
+		accept, status := websocket_accept(request, accept_storage)
+		if status != .None {
+			return {status = status}, true
+		}
+		response = make_response(
+			request,
+			.Switching_Protocols,
+			{{"Upgrade", "websocket"}, {"Sec-WebSocket-Accept", accept}},
+		)
+		if response.status != .Switching_Protocols {
+			return response, true
+		}
 	}
 	session, error := new(Reload_Session, rt.heap_allocator())
 	if error != nil {
@@ -773,6 +804,9 @@ handle :: proc(state: ^Reload_State, request: ^Request) -> (Response, bool) {
 	}
 	session.state = state
 	session.version = sync.atomic_load(&state.version)
+	// Lets the session end when the server drains instead of holding it open
+	// for the whole drain timeout. Without a context it ends on state.stopped.
+	session.request_context, _ = core.retain_request_context(request.cancellation)
 	response.upgrade = {
 		data   = session,
 		resume = resume_session,
@@ -783,7 +817,9 @@ handle :: proc(state: ^Reload_State, request: ^Request) -> (Response, bool) {
 }
 
 drop_session :: proc(data: rawptr) {
-	free(cast(^Reload_Session)data, rt.heap_allocator())
+	session := cast(^Reload_Session)data
+	core.release_request_context(&session.request_context)
+	free(session, rt.heap_allocator())
 }
 
 reset_session_read :: proc(session: ^Reload_Session, io: ^core.Upgrade_IO) {
@@ -849,7 +885,7 @@ resume_session :: proc(data: rawptr, io: ^core.Upgrade_IO) -> async.Resume_Resul
 	used := session.used
 
 	if session.phase == .Header && used == 0 {
-		if sync.atomic_load(&session.state.stopped) {
+		if sync.atomic_load(&session.state.stopped) || core.request_server_stopping(session.request_context) {
 			return .Done
 		}
 

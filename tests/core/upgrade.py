@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import sys; sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parents[1]))
+import harness_env
 import argparse,json,os,queue,socket,struct,subprocess,tempfile,threading
 from pathlib import Path
 CORE=Path(__file__).resolve().parent
@@ -6,7 +8,7 @@ CORE=Path(__file__).resolve().parent
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--sanitize',choices=['address','thread']);args=parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='saba-core-upgrade-') as work:
-        binary=Path(work)/'fixture';cmd=[os.environ['ODIN'],'build',str(CORE/'testdata/upgrade'),'-out:'+str(binary),'-warnings-as-errors','-thread-count:1']
+        binary=Path(work)/'fixture';cmd=[harness_env.odin(),'build',str(CORE/'testdata/upgrade'),harness_env.collection(), '-out:'+str(binary),'-warnings-as-errors','-thread-count:1']
         if args.sanitize:cmd.append('-sanitize:'+args.sanitize)
         built=subprocess.run(cmd,capture_output=True,text=True,timeout=60);assert built.returncode==0,built.stdout+built.stderr
         proc=subprocess.Popen([str(binary)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
@@ -42,7 +44,13 @@ def main():
                 conn.sendall(request('/stateless'));headers(conn);assert conn.recv(1)==b''
             for path in ['/reject','/badheader','/missingprotocol','/emptyprotocol']:
                 with connect() as conn:
-                    conn.sendall(request(path));wait('created ');assert conn.recv(1)==b''
+                    conn.sendall(request(path));wait('created ')
+                    # A head the encoder rejects answers 500; a non-101 upgrade still just closes.
+                    if path=='/reject':assert conn.recv(1)==b''
+                    else:
+                        reply=bytearray()
+                        while part:=conn.recv(4096):reply.extend(part)
+                        assert reply.startswith(b'HTTP/1.1 500 '),reply
                     assert wait('dropped ').endswith(' 0')
             conn=connect();conn.sendall(request('/writefail'));wait('created ')
             conn.setsockopt(socket.SOL_SOCKET,socket.SO_LINGER,struct.pack('ii',1,0));conn.close()

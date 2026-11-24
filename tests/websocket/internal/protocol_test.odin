@@ -332,3 +332,87 @@ inbound_budget_expiry_preempts_longer_outbound_write_and_keeps_borrowed_frame_st
 		assert(async.destroy(&runtime).kind == .None)
 	}
 }
+
+WS_Ping_Sink :: struct {
+	bytes: [32]u8,
+	size:  int,
+}
+
+ws_ping_capture :: proc(data: rawptr, source: []u8, _: async.Deadline) -> (int, async.Error) {
+	sink := cast(^WS_Ping_Sink)data
+	sink.size += copy(sink.bytes[sink.size:], source)
+	return len(source), {}
+}
+
+// A browser that only receives cannot originate pings, so without a server
+// ping its session was closed at every idle_timeout.
+@(test)
+quiet_receive_only_peer_is_pinged_before_idle_timeout_and_pong_rearms_both_timers :: proc(t: ^testing.T) {
+	resolved, valid := config_normalize({})
+	testing.expect_value(t, valid.kind, Error_Kind.None)
+	testing.expect_value(t, resolved.ping_interval, resolved.idle_timeout / 2)
+	disabled, disabled_valid := config_normalize({ping_interval = -1})
+	testing.expect_value(t, disabled_valid.kind, Error_Kind.None)
+	testing.expect(t, disabled.ping_interval < 0)
+
+	runtime: async.Runtime
+	conn: core.Connection
+	transport: core.Upgrade_IO
+	session, scope, io := ws79_frame_fixture(t, {}, &runtime, &transport, &conn)
+	defer assert(async.destroy(&runtime).kind == .None)
+	defer budget.release_scope(&scope)
+	defer drop_session(session)
+	sink: WS_Ping_Sink
+	transport.stream_data = &sink
+	transport.stream_write = ws_ping_capture
+
+	// Armed below the idle cutoff, and a session that is not yet quiet sends nothing.
+	testing.expect(t, session.ping_deadline.epoch != 0)
+	testing.expect(t, session.ping_deadline.at < session.read_deadline.at)
+	testing.expect_value(t, write_step(session, &io), Step.Idle)
+	testing.expect_value(t, sink.size, 0)
+
+	// The quiet interval elapses: exactly one unmasked empty Ping goes out.
+	session.ping_deadline = async.deadline_after(&runtime, 0)
+	testing.expect_value(t, write_step(session, &io), Step.Progress)
+	testing.expect_value(t, sink.size, 2)
+	testing.expect_value(t, sink.bytes[0], u8(0x89))
+	testing.expect_value(t, sink.bytes[1], u8(0))
+	testing.expect(t, !session.close_requested && !session.close_sent)
+	testing.expect_value(t, write_step(session, &io), Step.Idle)
+	testing.expect_value(t, sink.size, 2)
+
+	// The peer's Pong counts as inbound traffic and re-arms idle and ping timers.
+	session.read_deadline = async.deadline_after(&runtime, 0)
+	ws79_header(session, 0x8a, 0)
+	testing.expect_value(t, accept_header(session, &io), Step.Progress)
+	testing.expect_value(t, finish_frame(session, &io), Step.Progress)
+	now := async.deadline_after(&runtime, 0)
+	testing.expect(t, session.read_deadline.at > now.at)
+	testing.expect(t, session.ping_deadline.at > now.at && session.ping_deadline.at < session.read_deadline.at)
+	testing.expect(t, !session_budget_expired(session, &runtime))
+}
+
+@(test)
+disabled_keepalive_never_pings_and_a_closing_session_does_not_start_one :: proc(t: ^testing.T) {
+	runtime: async.Runtime
+	conn: core.Connection
+	transport: core.Upgrade_IO
+	session, scope, io := ws79_frame_fixture(t, {ping_interval = -1}, &runtime, &transport, &conn)
+	defer assert(async.destroy(&runtime).kind == .None)
+	defer budget.release_scope(&scope)
+	defer drop_session(session)
+	sink: WS_Ping_Sink
+	transport.stream_data = &sink
+	transport.stream_write = ws_ping_capture
+	testing.expect_value(t, session.ping_deadline, async.Deadline{})
+	testing.expect_value(t, write_step(session, &io), Step.Idle)
+	testing.expect_value(t, sink.size, 0)
+
+	session.config.ping_interval = session.config.idle_timeout / 2
+	session.ping_deadline = async.deadline_after(&runtime, 0)
+	session.close_deadline = async.deadline_after(&runtime, session.config.close_timeout)
+	request_close(session, []u8{0x03, 0xe8}, .Application_Close, false)
+	testing.expect_value(t, write_step(session, &io), Step.Progress)
+	testing.expect_value(t, sink.bytes[0], u8(0x88))
+}

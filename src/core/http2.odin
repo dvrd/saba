@@ -25,8 +25,15 @@ H2_BODY_CHUNKS :: 8
 H2_EVENTS :: 16
 H2_CONTROL_FRAMES :: 8
 H2_INGRESS :: 16 * 1024
-H2_NAME_SCRATCH :: 2048
-H2_FIELD_CAP :: 64
+// Response field tables cover the request-side header count limit plus the
+// generated :status and content-length. Larger responses become a 500.
+H2_NAME_SCRATCH :: 8192
+H2_FIELD_CAP :: REQUEST_HEADER_COUNT_LIMIT + 8
+// Peer RST_STREAM allowance: a burst, refilled per second. A peer that keeps
+// cancelling its own streams faster than this is closed with ENHANCE_YOUR_CALM.
+H2_RESET_BURST :: 200
+H2_RESET_REFILL :: 50
+H2_BODY_INITIAL :: 4096
 
 Http2_Config :: struct {
 	// Zero selects 32; values through 256 bound ordinary and WebSocket streams.
@@ -42,6 +49,20 @@ HTTP2_Session :: struct {
 	requests:                                  []^H2_Request,
 	cursor:                                    int,
 	idle_deadline, read_expires:               time.Tick,
+	// Set once the connection is closing with no streams left: bounds the GOAWAY
+	// flush and the peer's acknowledgement. wake_deadline is a periodic owner
+	// wake used when no stream or connection deadline is pending.
+	close_deadline, wake_deadline:             time.Tick,
+	reset_tokens:                              int,
+	reset_refill:                              time.Tick,
+	calm, goaway_writing, holding:             bool,
+	// The engine has no GOAWAY-with-code call, so the ENHANCE_YOUR_CALM frame is
+	// written by the owner after the aborted engine's output has drained.
+	goaway:                                    [h2.FRAME_HEADER_SIZE + 8]u8,
+	goaway_sent:                               int,
+	last_stream:                               u32,
+	// One polled DATA event kept borrowed while its tunnel's input queue is full.
+	held:                                      h2.Event_View,
 	read_deadline:                             async.Deadline,
 	ingress:                                   [H2_INGRESS]u8,
 	ingress_len:                               int,
@@ -154,6 +175,8 @@ h2_begin :: proc(task: ^Connection_Task) -> bool {
 	}
 
 	session.engine_ready = true
+	session.reset_tokens = H2_RESET_BURST
+	session.reset_refill = time.tick_now()
 	session.idle_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.header)
 	task.http2 = session
 
@@ -191,6 +214,11 @@ h2_destroy :: proc(task: ^Connection_Task) {
 	if session.engine_ready {
 		if view, borrowed := h2.connection_output_front(&session.engine); borrowed {
 			_ = h2.connection_output_advance(&session.engine, view.token, 0)
+		}
+
+		if session.holding {
+			_ = h2.connection_event_release(&session.engine, session.held.token)
+			session.holding = false
 		}
 
 		for _ in 0 ..< H2_EVENTS {
@@ -296,12 +324,28 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 	progress := false
 
 	for _ in 0 ..< H2_EVENTS {
-		event, ok := h2.connection_poll(&session.engine)
+		event, ok := session.held, session.holding
+		session.held, session.holding = {}, false
+		if !ok {
+			event, ok = h2.connection_poll(&session.engine)
+		}
 		if !ok {
 			break
 		}
-		progress = true
 		taken := false
+
+		// A WebSocket tunnel whose input queue is full keeps this DATA event
+		// borrowed at the head of the engine queue. Its flow-control credit stays
+		// withheld, so the peer is back-pressured instead of losing the stream.
+		if data, is_data := event.payload.(h2.Data_Event); is_data {
+			if stream := h2_upgrade_find(task, data.stream);
+			   stream != nil && stream.accepted && stream.input_count == len(stream.inputs) {
+				session.held, session.holding = event, true
+				break
+			}
+		}
+
+		progress = true
 
 		switch value in event.payload {
 		case h2.Ready_Event, h2.Peer_Settings_Event, h2.Ping_Ack_Event:
@@ -315,6 +359,7 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 				}
 			} else if value.kind == .Request {
 				opened: bool
+				session.last_stream = max(session.last_stream, value.stream.stream_id)
 
 				if value.summary.protocol != "" {
 					opened = h2_upgrade_open(task, value)
@@ -329,11 +374,14 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 			}
 		case h2.Data_Event:
 			if stream := h2_upgrade_find(task, value.stream); stream != nil {
-				taken = h2_upgrade_data(stream, event, value)
+				// A refused tunnel has no reader: drop the bytes and return their credit.
+				if stream.accepted {
+					taken = h2_upgrade_data(stream, event, value)
 
-				if !taken {
-					_ = h2.connection_reset(&session.engine, value.stream, .Cancel)
-					h2_upgrade_release(stream)
+					if !taken {
+						_ = h2.connection_reset(&session.engine, value.stream, .Cancel)
+						h2_upgrade_release(stream)
+					}
 				}
 			} else if request := h2_request_find(task, value.stream); request != nil {
 				taken = h2_request_data(request, event, value)
@@ -356,6 +404,7 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 			}
 
 			h2_remember(session, value.stream)
+			h2_count_reset(task)
 		case h2.Promise_Event:
 		// promise_policy is Decline. Releasing the event is enough.
 		case h2.Goaway_Event:
@@ -375,40 +424,115 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 	return progress
 }
 
+// Rapid reset (CVE-2023-44487): every peer RST_STREAM spends one token. The
+// handler already ran for that stream, so an empty bucket ends the connection.
+h2_count_reset :: proc(task: ^Connection_Task) {
+	session := task.http2
+	now := time.tick_now()
+	elapsed := time.tick_diff(session.reset_refill, now)
+
+	if elapsed >= time.Second {
+		seconds := i64(elapsed / time.Second)
+		session.reset_tokens = int(min(i64(H2_RESET_BURST), i64(session.reset_tokens) + seconds * H2_RESET_REFILL))
+		session.reset_refill = time.tick_add(session.reset_refill, time.Duration(seconds) * time.Second)
+	}
+
+	if session.reset_tokens > 0 {
+		session.reset_tokens -= 1
+		return
+	}
+
+	if !session.calm {
+		session.calm, session.failed = true, true
+		_ = h2.connection_abort(
+			&session.engine,
+			{kind = .Protocol_Violation, scope = .Connection, code = .Enhance_Your_Calm},
+		)
+		frame := &session.goaway
+		frame[2], frame[3] = 8, 7 // length 8, type GOAWAY, stream 0
+		last := session.last_stream
+		frame[9], frame[10], frame[11], frame[12] = u8(last >> 24) & 0x7f, u8(last >> 16), u8(last >> 8), u8(last)
+		frame[16] = u8(h2.Error_Code.Enhance_Your_Calm)
+	}
+}
+
+h2_earlier :: proc(deadline: ^time.Tick, candidate: time.Tick) {
+	if candidate != (time.Tick{}) && (deadline^ == (time.Tick{}) || time.tick_diff(candidate, deadline^) > 0) {
+		deadline^ = candidate
+	}
+}
+
+// The earliest pending stream or connection deadline. The idle deadline counts
+// only while no stream is open, and the close deadline replaces it once the
+// connection is closing. An already expired deadline is never returned: the
+// owner retires it in this same turn, and a zero transport budget would make
+// every read and write time out before it could run.
 h2_next_deadline :: proc(task: ^Connection_Task) -> time.Tick {
 	session := task.http2
-	deadline := session.idle_deadline
+	deadline: time.Tick
+	streams := false
 
 	for request in session.requests {
 		if request != nil {
-			candidate := request.body_deadline if request.receiving else request.response_deadline
-
-			if candidate != (time.Tick{}) && (deadline == (time.Tick{}) || time.tick_diff(candidate, deadline) > 0) {
-				deadline = candidate
-			}
+			streams = true
+			h2_earlier(&deadline, request.body_deadline if request.receiving else request.response_deadline)
 		}
 	}
 
-	if deadline == {} {
-		return time.tick_add(time.tick_now(), task.runtime.timeouts.header)
+	for stream in session.upgrades {
+		if stream != nil {
+			streams = true
+			h2_earlier(&deadline, stream.deadline)
+		}
+	}
+
+	if session.close_deadline != (time.Tick{}) {
+		h2_earlier(&deadline, session.close_deadline)
+	} else if !streams {
+		h2_earlier(&deadline, session.idle_deadline)
+	}
+
+	if deadline == (time.Tick{}) || deadline_expired(deadline) {
+		if session.wake_deadline == (time.Tick{}) || deadline_expired(session.wake_deadline) {
+			session.wake_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.idle)
+		}
+
+		return session.wake_deadline
 	}
 
 	return deadline
 }
 
+// Starts the bounded close of an idle or failed connection. True only on a
+// state change, so an expired deadline cannot keep the owner turn busy.
 h2_check_deadlines :: proc(task: ^Connection_Task) -> bool {
 	session := task.http2
-
-	if !h2_has_streams(task) && deadline_expired(session.idle_deadline) {
-		h2_shutdown(task)
-		return true
-	}
+	streams := h2_has_streams(task)
+	progress := false
 
 	if server_is_draining(task.runtime) {
 		h2_shutdown(task)
 	}
 
-	return false
+	if session.close_deadline == (time.Tick{}) &&
+	   !streams &&
+	   (session.shutdown || session.failed || session.calm || deadline_expired(session.idle_deadline)) {
+		session.close_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.response)
+		progress = true
+	}
+
+	if session.close_deadline != (time.Tick{}) {
+		// SETTINGS still awaiting acknowledgement can defer GOAWAY; keep trying.
+		h2_shutdown(task)
+
+		if !session.peer_gone && deadline_expired(session.close_deadline) {
+			// The peer neither read the GOAWAY nor closed. Stop waiting for it.
+			session.peer_gone = true
+			progress = true
+		}
+	}
+
+	return progress
 }
 
 h2_read :: proc(task: ^Connection_Task) -> (bool, bool) {
@@ -508,6 +632,10 @@ h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 	if state == nil {
 		return false, false
 	}
+	// A transport that already failed or timed out a write cannot carry more.
+	if session.peer_gone && !state.write_started {
+		return false, false
+	}
 	task.deadline = async.deadline_after(
 		&task.runtime.executor,
 		max(0, time.tick_diff(time.tick_now(), h2_next_deadline(task))),
@@ -517,6 +645,15 @@ h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 		n, error := transport_write(task, nil, task.deadline)
 		if error.kind == .Pending {
 			return false, true
+		}
+		if session.goaway_writing {
+			session.goaway_writing = false
+			if error.kind == .None && n > 0 {
+				session.goaway_sent += n
+			} else {
+				session.peer_gone = true
+			}
+			return n > 0, false
 		}
 		view, borrowed := h2.connection_output_front(&session.engine)
 
@@ -537,6 +674,19 @@ h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 	}
 
 	if !h2_output_pending(session) {
+		if session.calm && session.goaway_sent < len(session.goaway) {
+			n, error := transport_write(task, session.goaway[session.goaway_sent:], task.deadline)
+			if error.kind == .Pending {
+				session.goaway_writing = true
+				return false, true
+			}
+			if error.kind != .None || n <= 0 {
+				session.peer_gone = true
+				return false, false
+			}
+			session.goaway_sent += n
+			return true, false
+		}
 		return false, false
 	}
 	view, borrowed := h2.connection_output_front(&session.engine)
@@ -605,10 +755,17 @@ h2_finished :: proc(task: ^Connection_Task) -> bool {
 	}
 	pending := h2_output_pending(session)
 	writing := task.tls_state != nil && task.tls_state.write_started
-	if pending || writing {
+	if writing {
 		return false
 	}
-	if session.failed || session.peer_gone {
+	// Queued frames cannot outlive the transport that would have carried them.
+	if session.peer_gone {
+		return true
+	}
+	if pending || (session.calm && session.goaway_sent < len(session.goaway)) {
+		return false
+	}
+	if session.failed {
 		return true
 	}
 
@@ -731,6 +888,10 @@ H2_Upgrade :: struct {
 	response:                                                                     Response,
 	accepted, headers_sent, remote_end, remote_reset, app_done, fin_sent, failed: bool,
 	body_sent:                                                                    int,
+	// Bounds every phase the h2 owner drives: the handshake response, a refused
+	// tunnel's ordinary response and the final FIN. Zero while an accepted
+	// tunnel runs, where the upgraded protocol owns its own timers.
+	deadline:                                                                     time.Tick,
 	inputs:                                                                       [H2_BODY_CHUNKS]H2_Upgrade_Input,
 	input_head, input_count:                                                      int,
 }
@@ -789,6 +950,7 @@ h2_upgrade_release :: proc(stream: ^H2_Upgrade) {
 	}
 
 	h2_remember(session, stream.handle)
+	session.idle_deadline = time.tick_add(time.tick_now(), parent.runtime.timeouts.idle)
 	free(stream, session.allocator)
 }
 
@@ -803,7 +965,12 @@ h2_upgrade_open :: proc(parent: ^Connection_Task, event: h2.Headers_Event) -> bo
 		}
 	}
 
-	if slot < 0 || event.end_stream || server_is_draining(parent.runtime) {
+	if slot < 0 ||
+	   event.end_stream ||
+	   session.shutdown ||
+	   session.close_deadline != (time.Tick{}) ||
+	   server_is_draining(parent.runtime) ||
+	   !h2_target_valid(event.summary.path) {
 		return false
 	}
 
@@ -815,6 +982,7 @@ h2_upgrade_open :: proc(parent: ^Connection_Task, event: h2.Headers_Event) -> bo
 
 	stream.parent = parent
 	stream.handle = event.stream
+	stream.deadline = time.tick_add(time.tick_now(), parent.runtime.timeouts.response)
 	task := &stream.connection
 	task.runtime = parent.runtime
 	task.connection = {
@@ -1085,6 +1253,12 @@ h2_upgrade_io :: proc(stream: ^H2_Upgrade) -> Upgrade_IO {
 	}
 }
 
+// origin-form or the OPTIONS asterisk. The engine also admits an empty path
+// for non-HTTP schemes and plain CONNECT, which no handler expects.
+h2_target_valid :: proc(path: string) -> bool {
+	return path == "*" || (len(path) > 0 && path[0] == '/')
+}
+
 h2_status_digits :: proc(status: HTTP_Status) -> [3]u8 {
 	code := int(status)
 
@@ -1151,7 +1325,16 @@ h2_upgrade_headers :: proc(stream: ^H2_Upgrade) -> bool {
 	fields[0] = {":status", string(status[:]), false}
 
 	if !h2_append_response_fields(fields[:], &count, names[:], &used, stream.response.headers, true) {
-		return false
+		// The response cannot be represented: answer 500 and never start the tunnel.
+		drop_upgrade(&stream.connection)
+		discard_response(&stream.response)
+		stream.response = {
+			status = .Internal_Server_Error,
+		}
+		stream.accepted = false
+		count = 1
+		status = h2_status_digits(stream.response.status)
+		fields[0] = {":status", string(status[:]), false}
 	}
 
 	end := !stream.accepted && len(stream.response.body) == 0
@@ -1171,6 +1354,10 @@ h2_upgrade_headers :: proc(stream: ^H2_Upgrade) -> bool {
 	stream.headers_sent = true
 	stream.fin_sent = end
 
+	if stream.accepted {
+		stream.deadline = {}
+	}
+
 	return true
 }
 h2_upgrade_pump :: proc(parent: ^Connection_Task) -> bool {
@@ -1178,6 +1365,15 @@ h2_upgrade_pump :: proc(parent: ^Connection_Task) -> bool {
 
 	for stream in parent.http2.upgrades {
 		if stream == nil {
+			continue
+		}
+
+		// A peer that withholds flow-control credit or never reads cannot pin the
+		// stream: the owner-driven phases share one response budget.
+		if deadline_expired(stream.deadline) {
+			_ = h2.connection_reset(&parent.http2.engine, stream.handle, .Cancel)
+			h2_upgrade_release(stream)
+			progress = true
 			continue
 		}
 
@@ -1223,6 +1419,7 @@ h2_upgrade_pump :: proc(parent: ^Connection_Task) -> bool {
 
 			if result == .Done {
 				stream.app_done = true
+				stream.deadline = time.tick_add(time.tick_now(), parent.runtime.timeouts.response)
 				drop_upgrade(&stream.connection)
 				progress = true
 			}
@@ -1353,7 +1550,10 @@ h2_request_open :: proc(parent: ^Connection_Task, event: h2.Headers_Event) -> bo
 		}
 	}
 
-	if slot < 0 || session.shutdown || server_is_draining(parent.runtime) {
+	if slot < 0 ||
+	   session.shutdown ||
+	   session.close_deadline != (time.Tick{}) ||
+	   server_is_draining(parent.runtime) {
 		return false
 	}
 
@@ -1486,13 +1686,12 @@ h2_queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 	}
 
 	if deferred_present(response.deferred) {
-		if !queue_deferred(task, response) {
+		if !start_deferred(task, response, &request.parent.task) {
 			return false
 		}
 
-		created := rebind_deferred_signal(task, &request.parent.task)
 		request.response_deadline = task.deferred_expires
-		return created
+		return true
 	}
 
 	prepared := response
@@ -1575,6 +1774,8 @@ h2_request_data :: proc(request: ^H2_Request, event: h2.Event_View, value: h2.Da
 	if ok && request.receiving && !request.failed {
 		if len(bytes) > request.limit - request.body_len {
 			_ = h2_request_emergency(&request.task, .Content_Too_Large)
+		} else if !h2_request_body_reserve(request, request.body_len + len(bytes)) {
+			request.failed = true
 		} else {
 			copy(request.task.request.body[request.body_len:], bytes)
 			request.body_len += len(bytes)
@@ -1594,6 +1795,28 @@ h2_request_data :: proc(request: ^H2_Request, event: h2.Event_View, value: h2.Da
 
 	return true
 }
+// The body buffer follows the bytes actually received. A HEADERS frame alone
+// never commits the whole limit, however large the application sets it.
+h2_request_body_reserve :: proc(request: ^H2_Request, need: int) -> bool {
+	body := request.task.request.body
+
+	if need <= len(body) {
+		return true
+	}
+
+	capacity := max(need, min(request.limit, max(2 * len(body), H2_BODY_INITIAL)))
+	grown, error := mem.alloc_bytes_non_zeroed(capacity, 1, mem.dynamic_arena_allocator(&request.task.arena))
+
+	if error != nil {
+		return false
+	}
+
+	copy(grown, body[:request.body_len])
+	request.task.request.body = grown
+
+	return true
+}
+
 // Headers are copied by the engine before these bounded stack buffers expire.
 h2_request_headers :: proc(request: ^H2_Request, trailers: bool) -> h2.Error {
 	fields: [H2_FIELD_CAP]hpack.Field
@@ -1615,7 +1838,18 @@ h2_request_headers :: proc(request: ^H2_Request, trailers: bool) -> h2.Error {
 	}
 
 	if !h2_append_response_fields(fields[:], &count, names[:], &used, headers, false) {
-		return {kind = .Invalid_Input}
+		if trailers {
+			// Unrepresentable trailers are dropped; the caller then ends with DATA.
+			request.response.trailers = nil
+			return {kind = .Limit_Exceeded}
+		}
+
+		// Too many or too long header names for one field section. The peer gets
+		// an ordinary 500 rather than a reset stream.
+		_ = h2_request_emergency(&request.task, .Internal_Server_Error)
+		status = h2_status_digits(request.response.status)
+		fields[0] = {":status", string(status[:]), false}
+		count, used = 1, 0
 	}
 
 	code := int(request.response.status)
@@ -1801,51 +2035,26 @@ h2_requests_pump :: proc(parent: ^Connection_Task) -> bool {
 
 		task := &request.task
 		context.temp_allocator = mem.dynamic_arena_allocator(&task.arena)
-		deadline := request.body_deadline if request.receiving else request.response_deadline
-
-		if deadline != (time.Tick{}) && deadline_expired(deadline) {
-			cancel_request_context(task.request.cancellation, .Deadline)
-			request.failed = true
-		}
-
-		if request_cancelled(task.request.cancellation) {
-			request.failed = true
-		}
-
-		if !request.failed && task.deferred.poll != nil {
-			if deadline_expired(task.deferred_expires) {
-				request.failed = true
-				cancel_request_context(task.request.cancellation, .Deadline)
-			} else {
-				response, step := task.deferred.poll(
-					task.deferred.data,
-					&Deferred_IO {
-						resources = task.resource_operation,
-						backing_allocator = task.request.backing_allocator,
-						allocator = task.request.allocator,
-						cancellation = task.request.cancellation,
-						wake = task.deferred_signal,
-					},
-				)
-
-				if step == .Ready {
-					drop_deferred(task)
-
-					if deferred_present(response.deferred) {
-						discard_response(&response)
-						request.failed = true
-					} else if !h2_queue_response(task, response) {
-						request.failed = true
-					}
-
-					progress = true
-				} else {
-					discard_response(&response)
-
-					if step == .Failed {
-						request.failed = true
-					}
+		if task.deferred.poll != nil && !request.failed {
+			response, result := poll_deferred(task)
+			switch result {
+			case .Waiting:
+			case .Ready:
+				if !h2_queue_response(task, response) {
+					request.failed = true
 				}
+				progress = true
+			case .Cancelled, .Failed, .Invalid:
+				request.failed = true
+			}
+		} else {
+			deadline := request.body_deadline if request.receiving else request.response_deadline
+			if deadline_expired(deadline) {
+				cancel_request_context(task.request.cancellation, .Deadline)
+				request.failed = true
+			}
+			if request_cancelled(task.request.cancellation) {
+				request.failed = true
 			}
 		}
 
@@ -1973,10 +2182,15 @@ h2_request_decode :: proc(task: ^Connection_Task, summary: h2.Header_Summary, en
 	expected := 0
 	have_length := false
 
+	if !h2_target_valid(path) {
+		observe_failure(task, .Protocol_Error)
+		return h2_request_emergency(task, .Bad_Request)
+	}
+
 	if length, present := summary.content_length.?; present {
 		if length > u64(max(int)) || int(length) > limit {
 			observe_failure(task, .Protocol_Error)
-			return false
+			return h2_request_emergency(task, .Content_Too_Large)
 		}
 
 		expected = int(length)
@@ -1984,17 +2198,6 @@ h2_request_decode :: proc(task: ^Connection_Task, summary: h2.Header_Summary, en
 	}
 
 	capacity := expected if have_length else limit
-
-	if !end_stream || (have_length && expected > 0) {
-		body, body_error := make([]u8, capacity, allocator)
-
-		if body_error != nil {
-			session.failed = true
-			return false
-		}
-
-		task.request.body = body
-	}
 
 	task.request.has_content_length = have_length
 	task.request.content_length = expected

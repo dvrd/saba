@@ -49,6 +49,15 @@ config_normalize :: proc(config: Config) -> (Config, Error) {
 	if result.close_timeout == 0 {
 		result.close_timeout = time.Second
 	}
+	// A peer that only receives never resets the idle timer by itself, and a
+	// browser cannot originate pings. The server pings at half the idle timeout
+	// so the peer's pong keeps a healthy receive-only session open.
+	if result.ping_interval == 0 {
+		result.ping_interval = result.idle_timeout / 2
+	}
+	if result.ping_interval > 24 * time.Hour {
+		return {}, {kind = .Invalid_Config}
+	}
 	if result.max_frame_bytes < 1 ||
 	   result.max_frame_bytes > MAX_MESSAGE_BYTES ||
 	   result.max_message_bytes < 1 ||
@@ -182,6 +191,10 @@ reset_read :: proc(session: ^Session, io: ^IO) {
 	session.header_used, session.header_expected, session.payload_used = 0, 2, 0
 	session.reading_payload, session.payload = false, nil
 	session.read_deadline = async.deadline_after(io._transport.runtime, session.config.idle_timeout)
+	session.ping_deadline = {}
+	if session.config.ping_interval > 0 {
+		session.ping_deadline = async.deadline_after(io._transport.runtime, session.config.ping_interval)
+	}
 
 	if session.message_deadline.epoch != 0 && session.message_deadline.at < session.read_deadline.at {
 		session.read_deadline = session.message_deadline
@@ -555,6 +568,15 @@ wait_session :: proc(session: ^Session, io: ^IO, read, write: bool) -> async.Res
 	transport := io._transport
 	deadline := semantic_deadline(session)
 
+	// Wake for the keepalive ping as well; unlike the semantic deadlines its
+	// expiry sends a frame instead of ending the session.
+	if !session.close_requested &&
+	   session.control_used == 0 &&
+	   session.ping_deadline.epoch != 0 &&
+	   (deadline.epoch == 0 || session.ping_deadline.at < deadline.at) {
+		deadline = session.ping_deadline
+	}
+
 	if transport.stream_wait != nil {
 		error := transport.stream_wait(transport.stream_data, read, write, deadline)
 		if error.kind == .None || error.kind == .Timeout {
@@ -667,6 +689,9 @@ Config :: struct {
 	max_frame_bytes, max_message_bytes, max_output_bytes, output_capacity:      int,
 	max_fragments:                                                              int,
 	idle_timeout, frame_timeout, message_timeout, write_timeout, close_timeout: time.Duration,
+	// Server keepalive ping cadence, measured from the last inbound frame. Zero
+	// selects half of idle_timeout; a negative value disables server pings.
+	ping_interval:                                                              time.Duration,
 	check_origin:                                                               proc(
 		data: rawptr,
 		request: ^core.Request,
@@ -789,6 +814,7 @@ Session :: struct {
 	message:                                                     codec.Message_State,
 	fragments:                                                   int,
 	read_deadline, message_deadline:                             async.Deadline,
+	ping_deadline:                                               async.Deadline,
 }
 
 Upgrade_Fields :: struct {
@@ -1132,6 +1158,18 @@ write_step :: proc(session: ^Session, io: ^IO) -> Step {
 		assert(error == .None)
 		session.control_used, session.control_sent, session.control_close = count, 0, true
 		session.control_deadline = session.close_deadline
+	}
+
+	if session.control_used == 0 &&
+	   !session.close_requested &&
+	   session.ping_deadline.epoch != 0 &&
+	   async.deadline_after(transport.runtime, 0).at >= session.ping_deadline.at {
+		count, error := codec.frame_encode(session.control[:], true, .Ping, nil, {}, false)
+		assert(error == .None)
+		session.control_used, session.control_sent, session.control_close = count, 0, false
+		session.control_deadline = async.deadline_after(transport.runtime, session.config.write_timeout)
+		// One ping per quiet interval; any inbound frame, the pong included, re-arms it.
+		session.ping_deadline = async.deadline_after(transport.runtime, session.config.ping_interval)
 	}
 
 	if session.control_used > 0 {

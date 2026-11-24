@@ -3,6 +3,7 @@ package saba_core
 import "core:log"
 import "core:mem"
 import "core:net"
+import "core:os"
 import "core:crypto/tls"
 import "core:sys/posix"
 import "core:time"
@@ -93,10 +94,33 @@ wait_ready :: proc(client: net.TCP_Socket, events: posix.Poll_Event, deadline: t
 	}
 }
 
+// Deadline a blocking helper waits against: the one the caller armed, otherwise
+// the configured phase budget. There is always one, so a silent peer cannot
+// hold the calling worker forever.
+blocking_deadline :: proc(armed: time.Tick, configured, fallback: time.Duration) -> time.Tick {
+	if armed != (time.Tick{}) {
+		return armed
+	}
+	duration := configured
+	if duration <= 0 {
+		duration = fallback
+	}
+
+	return time.tick_add(time.tick_now(), duration)
+}
+
+// Deprecated blocking read of the raw socket. It parks the calling worker in
+// poll() until data arrives or the deadline passes, so it must not be used in a
+// handler of a server that has other connections to serve; use an upgrade or a
+// deferred response instead. Without conn.read_deadline the body timeout
+// applies. TLS connections have no raw plaintext socket: once the prefetched
+// bytes are consumed the call fails with .Invalid_Argument.
 read_connection :: proc(conn: ^Connection, buffer: []u8) -> (received: int, err: net.TCP_Recv_Error) {
 	if conn._secure && len(conn.read_buffer) == 0 {
-		return 0, .Unknown
+		log.warn("read_connection cannot read a TLS connection; use the upgrade or deferred interfaces")
+		return 0, .Invalid_Argument
 	}
+	deadline: time.Tick
 
 	for {
 		if deadline_expired(conn.read_deadline) {
@@ -110,6 +134,10 @@ read_connection :: proc(conn: ^Connection, buffer: []u8) -> (received: int, err:
 			return n, nil
 		}
 
+		if deadline == (time.Tick{}) {
+			deadline = blocking_deadline(conn.read_deadline, conn._timeouts.body, REQUEST_BODY_TIMEOUT)
+		}
+
 		n, read_err := net.recv_tcp(conn.socket, buffer)
 		if read_err == .Interrupted {
 			continue
@@ -118,7 +146,7 @@ read_connection :: proc(conn: ^Connection, buffer: []u8) -> (received: int, err:
 			return n, read_err
 		}
 
-		ready, timed_out := wait_ready(conn.socket, {.IN}, conn.read_deadline)
+		ready, timed_out := wait_ready(conn.socket, {.IN}, deadline)
 
 		if !ready {
 			if timed_out {
@@ -129,13 +157,18 @@ read_connection :: proc(conn: ^Connection, buffer: []u8) -> (received: int, err:
 	}
 }
 
+// Deprecated blocking write of the raw socket; the caveats of read_connection
+// apply. Without conn.write_deadline the response timeout bounds the whole call.
+// TLS connections always fail with .Invalid_Argument.
 write_connection :: proc(conn: ^Connection, data: []u8) -> (sent: int, err: net.TCP_Send_Error) {
 	if conn._secure {
-		return 0, .Unknown
+		log.warn("write_connection cannot write a TLS connection; return a Response or use the upgrade interface")
+		return 0, .Invalid_Argument
 	}
+	deadline := blocking_deadline(conn.write_deadline, conn._timeouts.response, RESPONSE_SEND_TIMEOUT)
 
 	for {
-		if deadline_expired(conn.write_deadline) {
+		if deadline_expired(deadline) {
 			return sent, .Timeout
 		}
 		if sent == len(data) {
@@ -152,7 +185,7 @@ write_connection :: proc(conn: ^Connection, data: []u8) -> (sent: int, err: net.
 		}
 
 		if send_err == .Would_Block {
-			ready, timed_out := wait_ready(conn.socket, {.OUT}, conn.write_deadline)
+			ready, timed_out := wait_ready(conn.socket, {.OUT}, deadline)
 
 			if !ready {
 				if timed_out {
@@ -175,7 +208,17 @@ write_connection :: proc(conn: ^Connection, data: []u8) -> (sent: int, err: net.
 
 DEFAULT_MAX_CONNECTIONS :: 4096
 DEFAULT_INITIAL_CONNECTIONS :: 64
+// Floor of the worker default; see default_workers.
 DEFAULT_WORKERS :: 4
+MAX_DEFAULT_WORKERS :: 64
+
+// One worker per logical core, never fewer than DEFAULT_WORKERS. Handlers run
+// on these workers and are not preempted: a handler that blocks holds its
+// worker, and once every worker is held nothing else is accepted, read, timed
+// out or drained. Move blocking work to a deferred response.
+default_workers :: proc() -> int {
+	return clamp(os.get_processor_core_count(), DEFAULT_WORKERS, MAX_DEFAULT_WORKERS)
+}
 
 ACCEPT_BATCH_LIMIT :: 32
 ACCEPT_RETRY_INTERVAL :: 100 * time.Millisecond
@@ -201,8 +244,11 @@ Server :: struct {
 	request_body_limit:  proc(request: ^Request) -> int,
 	// Zero leaves synchronous handlers without a deadline. Positive budgets are cooperative.
 	handler_timeout:     time.Duration,
-	// Zero selects four workers; serve participates as one worker.
+	// Zero selects default_workers(): one per logical core, at least four.
+	// serve participates as one worker. Handlers must not block; see default_workers.
 	workers:             int,
+	// SIGTERM/SIGINT start a graceful drain unless disabled; see Signal_Config.
+	signals:             Signal_Config,
 	// Optional caller-owned shutdown and endpoint control.
 	control:             ^Server_Control,
 	timeouts:            Timeout_Config,
@@ -233,6 +279,16 @@ Server_Runtime :: struct {
 	listener_failed:                         bool,
 	active_connections:                      int,
 	timeouts:                                Resolved_Timeouts,
+	// Resolved worker count; capacity growth reserves one retiring task per worker.
+	workers:                                 int,
+	// Owned by the accept task: rate limit for accept failure logging.
+	accept_log_at:                           time.Tick,
+	accept_errors_suppressed:                int,
+	// Guarded by the signal watch that lists this runtime.
+	signal_previous, signal_next:            ^Server_Runtime,
+	// Written before the server runs and after it stopped; nil when unlisted.
+	signal_watch:                            ^Signal_Watch,
+	signal_drained:                          bool,
 	observability_mutex:                     sync.Mutex,
 	metrics:                                 Request_Metrics,
 	next_request_id:                         u64,
@@ -300,7 +356,8 @@ serve :: proc(config: Server) -> bool {
 		address_text = "127.0.0.1"
 	}
 
-	address, address_ok := net.parse_ip4_address(address_text)
+	// IPv4 or IPv6 literal; "::" listens on every IPv6 address.
+	address, address_ok := parse_listen_address(address_text)
 
 	if !address_ok {
 		log.error("Could not parse server address:", address_text)
@@ -326,6 +383,7 @@ serve :: proc(config: Server) -> bool {
 		config = config,
 		cancellation = cancellation,
 		timeouts = resolve_timeouts(config.timeouts),
+		workers = workers,
 		logger = context.logger,
 		capacity_state = {current = initial, maximum = maximum},
 	}
@@ -399,11 +457,23 @@ serve :: proc(config: Server) -> bool {
 	}
 
 	publish_server(config.control, runtime, endpoint)
-	async.wake(&runtime.executor, &runtime.accept_task)
-	log.infof("listening on %s://localhost:%d", "https" if config.tls != nil else "http", endpoint.port)
-	err := async.run(&runtime.executor)
 
-	if err.kind != .None && !(err.kind == .Stopping && server_stop_requested(config.control)) {
+	if !config.signals.disabled {
+		signal_watch_register(&process_signal_watch, runtime, true)
+	}
+	// Runs before the executor is destroyed, so the watcher never sees a dead runtime.
+	defer signal_watch_unregister(runtime)
+
+	async.wake(&runtime.executor, &runtime.accept_task)
+	log.infof(
+		"listening on %s://%s",
+		"https" if config.tls != nil else "http",
+		net.endpoint_to_string(endpoint, context.temp_allocator),
+	)
+	err := async.run(&runtime.executor)
+	signalled := sync.atomic_load(&runtime.signal_drained)
+
+	if err.kind != .None && !(err.kind == .Stopping && (signalled || server_stop_requested(config.control))) {
 		log.error("Server runtime failed:", err)
 		return false
 	}
@@ -445,15 +515,20 @@ accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 		}
 
 		if err.kind != .None {
-			log.error("Could not accept connection:", err)
-			cause, _ := err.network_cause.(net.Accept_Error)
-			if err.kind != .Network_Error ||
-			   cause == .Invalid_Argument ||
-			   cause == .Unsupported_Socket ||
-			   cause == .Not_Listening {
+			action := accept_error_action(err)
+
+			if action == .Fatal {
+				log.error("Could not accept connection; the listener cannot continue:", err)
 				runtime.listener_failed = true
 				shutdown_runtime(runtime)
 				return .Done
+			}
+
+			accept_error_log(runtime, err, time.tick_now())
+
+			// The peer gave up on one queued connection; the next may be ready now.
+			if action == .Retry {
+				continue
 			}
 
 			runtime.accept_retry = async.deadline_after(&runtime.executor, ACCEPT_RETRY_INTERVAL)
@@ -469,6 +544,63 @@ accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 	}
 
 	return .Yield
+}
+
+Accept_Action :: enum {
+	// The listener itself is unusable.
+	Fatal,
+	// One connection was lost; accept again immediately.
+	Retry,
+	// A resource is exhausted; wait ACCEPT_RETRY_INTERVAL before accepting again.
+	Backoff,
+}
+
+accept_error_action :: proc(err: async.Error) -> Accept_Action {
+	if err.kind != .Network_Error {
+		return .Fatal
+	}
+	cause, _ := err.network_cause.(net.Accept_Error)
+
+	#partial switch cause {
+	case .Invalid_Argument, .Unsupported_Socket, .Not_Listening:
+		return .Fatal
+	case .Aborted:
+		return .Retry
+	}
+
+	return .Backoff
+}
+
+ACCEPT_LOG_INTERVAL :: 5 * time.Second
+
+// At most one line per interval: descriptor exhaustion repeats every retry and
+// a peer can provoke aborted connections at will. True when a line was written.
+accept_error_log :: proc(runtime: ^Server_Runtime, err: async.Error, now: time.Tick) -> bool {
+	if runtime.accept_log_at != (time.Tick{}) && time.tick_diff(now, runtime.accept_log_at) > 0 {
+		runtime.accept_errors_suppressed += 1
+		return false
+	}
+
+	log.errorf(
+		"Could not accept connection: %v (%d similar errors not logged since the last report)",
+		err,
+		runtime.accept_errors_suppressed,
+	)
+	runtime.accept_errors_suppressed = 0
+	runtime.accept_log_at = time.tick_add(now, ACCEPT_LOG_INTERVAL)
+
+	return true
+}
+
+// Accepts an IPv4 or IPv6 literal, with or without brackets around IPv6.
+parse_listen_address :: proc(text: string) -> (net.Address, bool) {
+	literal := text
+	if len(literal) > 1 && literal[0] == '[' && literal[len(literal) - 1] == ']' {
+		literal = literal[1:len(literal) - 1]
+	}
+	address := net.parse_address(literal)
+
+	return address, address != nil
 }
 
 reject_connection :: proc(client: net.TCP_Socket, secure: bool) {
@@ -1036,9 +1168,14 @@ tls_peer_identity :: proc(connection: ^Connection) -> tls.Peer_Identity {
 	return tls.server_async_connection_state(&connection._task.tls_state.owner).peer_identity
 }
 
-// All budgets are total phase deadlines; progress never extends them. Zero
-// selects existing defaults. Idle is first-byte wait only: HTTP/1 currently
-// closes after each response and has no keep-alive idle phase.
+// Zero selects the defaults. header and idle are total phase deadlines that
+// progress never extends. body and response are stall budgets on HTTP/1: each
+// byte of progress re-arms them, provided the transfer as a whole keeps an
+// average of MIN_TRANSFER_RATE after its first budget. A peer that stops is cut
+// off after one budget and one that trickles is cut when it falls behind that
+// rate; a slow but live peer is given as long as its bytes need, whatever the
+// size and whether the body is chunked or not. A stream with its own timeout
+// keeps that as a fixed lifetime.
 Timeout_Config :: struct {
 	header, body, response, idle: time.Duration,
 }
@@ -1170,7 +1307,6 @@ response_can_reuse :: proc(task: ^Connection_Task, status: HTTP_Status) -> bool 
 	if async.cancelled(&task.task) || server_is_draining(task.runtime) {
 		return false
 	}
-
 	return true
 }
 
@@ -1276,10 +1412,12 @@ keep_alive_next_request :: #force_no_inline proc(task: ^Connection_Task) -> bool
 	saved: [REQUEST_HEADER_LIMIT]u8
 	count := copy(saved[:], remaining)
 	task.connection.read_buffer = nil
+	release_request_body(task)
 	task.request = {}
 	task.chunked = nil
 	task.output = {}
 	task.header = nil
+	task.transfer_started = {}
 	mem.dynamic_arena_destroy(&task.arena)
 	finish_operation_resources(task)
 	task.observed, task.observation_finished, task.response_finished = false, false, false

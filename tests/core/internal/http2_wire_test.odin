@@ -1,0 +1,635 @@
+package saba_core
+
+import "core:crypto/tls"
+import tlscredentials "core:crypto/tls/credentials"
+import credential_store "core:crypto/tls/credentials/store"
+import "core:sync"
+import "core:testing"
+import "core:thread"
+import "core:time"
+import async "shared:async"
+
+// Loopback wire regressions for the HTTP/2 owner: one real TLS listener and a
+// hand-framed peer, so deadlines, flow control and resets are exercised end to end.
+H2W_IDLE :: 300 * time.Millisecond
+H2W_RESPONSE :: time.Second
+H2W_PATIENCE :: 6 * time.Second
+
+H2W_Server :: struct {
+	config:  Server,
+	control: Server_Control,
+	tls:     TLS_Config,
+	ok:      bool,
+	handled: int,
+	echoed:  int,
+	limit:   int,
+}
+
+H2W_Frame :: struct {
+	kind, flags: u8,
+	stream:      u32,
+	payload:     []u8,
+}
+
+H2W_Peer :: struct {
+	conn:    tls.Conn,
+	storage: [16384 + 9]u8,
+}
+
+h2w_hold :: proc(_: rawptr, _: ^Deferred_IO) -> (Response, Deferred_Step) {
+	return {}, .Waiting
+}
+
+h2w_tunnel :: proc(data: rawptr, io: ^Upgrade_IO) -> async.Resume_Result {
+	state := cast(^H2W_Server)data
+	buffer: [64]u8
+
+	for {
+		n, error := upgrade_read(io, buffer[:], {})
+		if error.kind == .Pending {
+			return .Waiting
+		}
+		if error.kind != .None || n == 0 {
+			return .Done
+		}
+		written, _ := upgrade_write(io, buffer[:n], {})
+		sync.atomic_add(&state.echoed, written)
+	}
+}
+
+h2w_handler :: proc(data: rawptr, _: ^Connection, request: ^Request) -> Response {
+	state := cast(^H2W_Server)data
+	sync.atomic_add(&state.handled, 1)
+
+	switch request.path {
+	case "/hold":
+		return {deferred = {poll = h2w_hold, drop = proc(_: rawptr) {}, timeout = 3 * time.Second}}
+	case "/refuse":
+		return {status = .OK, body = transmute([]u8)string("an ordinary body the peer never grants credit for")}
+	case "/tunnel":
+		return {status = .OK, upgrade = {data = state, resume = h2w_tunnel, drop = proc(_: rawptr) {}}}
+	case "/many":
+		headers := make([]Header, 100, request.allocator)
+		for &header in headers {
+			header = {"x-filler", "value"}
+		}
+		return {status = .OK, headers = headers, body = transmute([]u8)string("many")}
+	case "/huge":
+		headers := make([]Header, 400, request.allocator)
+		for &header in headers {
+			header = {"x-filler", "value"}
+		}
+		return {status = .OK, headers = headers, body = transmute([]u8)string("huge")}
+	case "/echo":
+		return {status = .OK, body = request.body}
+	}
+
+	return {status = .OK, body = transmute([]u8)string("ok")}
+}
+
+h2w_body_limit :: proc(request: ^Request) -> int {
+	return 64 * 1024 * 1024
+}
+
+h2w_run :: proc(t: ^testing.T, state: ^H2W_Server, exchange: proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer)) {
+	testing.set_fail_timeout(t, 40 * time.Second)
+	certificate := #load("../../tests/testdata/tls/localhost.pem")
+	credential, created := tlscredentials.create(
+		certificate,
+		#load("../../tests/testdata/tls/rsa2048.pem"),
+		{},
+		context.allocator,
+	)
+	assert(created == .None)
+	store, stored := credential_store.create({}, context.allocator)
+	assert(stored.kind == .None && credential_store.replace(store, &credential).kind == .None)
+	defer credential_store.destroy(&store)
+	roots: tls.Root_Pool
+	assert(tls.root_pool_parse(&roots, certificate).kind == .None)
+	defer tls.root_pool_destroy(&roots)
+	state.tls = {
+		store = store,
+	}
+	state.config = {
+		address = "127.0.0.1",
+		workers = 1,
+		handler = h2w_handler,
+		handler_data = state,
+		control = &state.control,
+		tls = &state.tls,
+		timeouts = {header = 2 * time.Second, body = time.Second, response = H2W_RESPONSE, idle = H2W_IDLE},
+	}
+	if state.limit != 0 {
+		state.config.request_body_limit = h2w_body_limit
+	}
+
+	worker := thread.create_and_start_with_poly_data(state, proc(s: ^H2W_Server) {s.ok = serve(s.config)})
+	assert(worker != nil)
+	defer {
+		stop_server(&state.control)
+		thread.join(worker)
+		thread.destroy(worker)
+		testing.expect(t, state.ok)
+	}
+	until := time.tick_add(time.tick_now(), 5 * time.Second)
+	for !server_ready(&state.control) && time.tick_diff(time.tick_now(), until) > 0 {
+		thread.yield()
+	}
+	endpoint, ready := server_endpoint(&state.control)
+	if !testing.expect(t, ready && endpoint.port > 0, "server did not publish a loopback endpoint") {
+		return
+	}
+
+	peer := new(H2W_Peer)
+	defer free(peer)
+	dialed := tls.dial(
+		&peer.conn,
+		"127.0.0.1",
+		endpoint.port,
+		{
+			server_name = "localhost",
+			root_cas = roots.roots[:roots.count],
+			alpn_protocols = {"h2"},
+			handshake_timeout = 5 * time.Second,
+		},
+	)
+	if !testing.expect(t, dialed.kind == .None, "TLS dial failed") {
+		return
+	}
+	defer _ = tls.abort(&peer.conn)
+	assert(tls.set_deadline(&peer.conn, time.time_add(time.now(), H2W_PATIENCE)).kind == .None)
+	exchange(t, state, peer)
+}
+
+h2w_send :: proc(peer: ^H2W_Peer, bytes: []u8) -> bool {
+	n, error := tls.write(&peer.conn, bytes)
+	return error.kind == .None && n == len(bytes)
+}
+
+h2w_frame :: proc(out: ^[dynamic]u8, kind, flags: u8, stream: u32, payload: []u8) {
+	size := len(payload)
+	append(out, u8(size >> 16), u8(size >> 8), u8(size), kind, flags)
+	append(out, u8(stream >> 24), u8(stream >> 16), u8(stream >> 8), u8(stream))
+	append(out, ..payload)
+}
+
+// Literal header fields without indexing and without Huffman coding.
+h2w_fields :: proc(out: ^[dynamic]u8, fields: [][2]string) {
+	for field in fields {
+		assert(len(field[0]) < 127 && len(field[1]) < 127)
+		append(out, 0, u8(len(field[0])))
+		append(out, field[0])
+		append(out, u8(len(field[1])))
+		append(out, field[1])
+	}
+}
+
+h2w_headers :: proc(out: ^[dynamic]u8, stream: u32, end_stream: bool, fields: [][2]string) {
+	block: [dynamic]u8
+	defer delete(block)
+	h2w_fields(&block, fields)
+	h2w_frame(out, 1, 0x4 | (0x1 if end_stream else 0), stream, block[:])
+}
+
+h2w_get :: proc(out: ^[dynamic]u8, stream: u32, path: string) {
+	h2w_headers(out, stream, true, {{":method", "GET"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", path}})
+}
+
+h2w_preface :: proc(peer: ^H2W_Peer, settings: []u8 = nil) -> bool {
+	wire: [dynamic]u8
+	defer delete(wire)
+	append(&wire, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+	h2w_frame(&wire, 4, 0, 0, settings)
+	return h2w_send(peer, wire[:])
+}
+
+h2w_read_exact :: proc(peer: ^H2W_Peer, bytes: []u8) -> bool {
+	for at := 0; at < len(bytes); {
+		n, error := tls.read(&peer.conn, bytes[at:])
+		if error.kind != .None || n == 0 {
+			return false
+		}
+		at += n
+	}
+	return true
+}
+
+// Blocks for the next frame; false is end of connection or the peer deadline.
+// SETTINGS are acknowledged here. PING is left unanswered unless asked.
+h2w_next :: proc(peer: ^H2W_Peer, answer_ping := false) -> (H2W_Frame, bool) {
+	header := peer.storage[:9]
+	if !h2w_read_exact(peer, header) {
+		return {}, false
+	}
+	size := int(header[0]) << 16 | int(header[1]) << 8 | int(header[2])
+	frame := H2W_Frame {
+		kind   = header[3],
+		flags  = header[4],
+		stream = (u32(header[5]) << 24 | u32(header[6]) << 16 | u32(header[7]) << 8 | u32(header[8])) & 0x7fffffff,
+	}
+	if size > len(peer.storage) - 9 || !h2w_read_exact(peer, peer.storage[9:][:size]) {
+		return {}, false
+	}
+	frame.payload = peer.storage[9:][:size]
+	reply: [dynamic]u8
+	defer delete(reply)
+	if frame.kind == 4 && frame.flags & 1 == 0 {
+		h2w_frame(&reply, 4, 1, 0, nil)
+	}
+	if answer_ping && frame.kind == 6 && frame.flags & 1 == 0 {
+		h2w_frame(&reply, 6, 1, 0, frame.payload)
+	}
+	if len(reply) > 0 {
+		_ = h2w_send(peer, reply[:])
+	}
+	return frame, true
+}
+
+h2w_code :: proc(frame: H2W_Frame) -> u32 {
+	payload := frame.payload
+	if frame.kind == 7 && len(payload) >= 8 {
+		return u32(payload[4]) << 24 | u32(payload[5]) << 16 | u32(payload[6]) << 8 | u32(payload[7])
+	}
+	if frame.kind == 3 && len(payload) >= 4 {
+		return u32(payload[0]) << 24 | u32(payload[1]) << 16 | u32(payload[2]) << 8 | u32(payload[3])
+	}
+	return 0
+}
+
+// Static-table statuses are one indexed octet; anything else is reported as 0.
+h2w_status :: proc(frame: H2W_Frame) -> int {
+	if frame.kind != 1 || len(frame.payload) == 0 {
+		return -1
+	}
+	switch frame.payload[0] {
+	case 0x88:
+		return 200
+	case 0x8c:
+		return 400
+	case 0x8e:
+		return 500
+	}
+	return 0
+}
+
+// An idle connection used to be handed its already expired idle deadline as
+// the transport budget: GOAWAY never left, the socket never closed and the
+// owner task spun. It must now announce GOAWAY and close within the bound.
+@(test)
+h2_idle_connection_sends_goaway_and_closes :: proc(t: ^testing.T) {
+	state: H2W_Server
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		started := time.tick_now()
+		if !testing.expect(t, h2w_preface(peer)) {
+			return
+		}
+		goaway := false
+		for {
+			frame, ok := h2w_next(peer)
+			if !ok {
+				break
+			}
+			if frame.kind == 7 {
+				goaway = true
+				testing.expect_value(t, h2w_code(frame), u32(0))
+			}
+		}
+		elapsed := time.tick_since(started)
+		testing.expect(t, goaway, "idle connection closed without GOAWAY, or never closed")
+		testing.expect(t, elapsed >= H2W_IDLE, "closed before the idle timeout")
+		testing.expect(t, elapsed < H2W_IDLE + H2W_RESPONSE + 2 * time.Second, "idle connection was not closed in time")
+	})
+}
+
+// With a stream open past the idle deadline the owner stopped reading: a new
+// request on the same connection was never dispatched.
+@(test)
+h2_connection_keeps_reading_while_a_stream_outlives_the_idle_timeout :: proc(t: ^testing.T) {
+	state: H2W_Server
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		wire: [dynamic]u8
+		defer delete(wire)
+		h2w_get(&wire, 1, "/hold")
+		if !testing.expect(t, h2w_preface(peer) && h2w_send(peer, wire[:])) {
+			return
+		}
+		time.sleep(3 * H2W_IDLE)
+		clear(&wire)
+		h2w_get(&wire, 3, "/")
+		if !testing.expect(t, h2w_send(peer, wire[:])) {
+			return
+		}
+		started := time.tick_now()
+		answered := false
+		for !answered {
+			frame, ok := h2w_next(peer)
+			if !ok {
+				break
+			}
+			if frame.stream == 3 && frame.kind == 1 {
+				testing.expect_value(t, h2w_status(frame), 200)
+				answered = true
+			}
+		}
+		testing.expect(t, answered, "request sent after the idle deadline was never answered")
+		testing.expect(t, time.tick_since(started) < 2 * time.Second)
+		testing.expect_value(t, sync.atomic_load(&state.handled), 2)
+	})
+}
+
+// An extended CONNECT answered with an ordinary response, to a peer granting
+// no flow-control credit, kept the connection open and spinning forever. The
+// body must stay unsent and the connection must still close on time.
+@(test)
+h2_credit_starved_refused_tunnel_does_not_pin_the_connection :: proc(t: ^testing.T) {
+	state: H2W_Server
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		wire: [dynamic]u8
+		defer delete(wire)
+		h2w_headers(
+			&wire,
+			1,
+			false,
+			{{":method", "CONNECT"}, {":protocol", "websocket"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/refuse"}},
+		)
+		// SETTINGS_INITIAL_WINDOW_SIZE = 0
+		if !testing.expect(t, h2w_preface(peer, []u8{0, 4, 0, 0, 0, 0}) && h2w_send(peer, wire[:])) {
+			return
+		}
+		started := time.tick_now()
+		answered, goaway := false, false
+		for {
+			frame, ok := h2w_next(peer)
+			if !ok {
+				break
+			}
+			answered ||= frame.kind == 1 && frame.stream == 1
+			goaway ||= frame.kind == 7
+			testing.expect(t, frame.kind != 0 || len(frame.payload) == 0, "body sent without flow-control credit")
+		}
+		testing.expect(t, answered, "refused tunnel was never answered")
+		testing.expect(t, goaway, "connection with a credit-starved stream never closed")
+		testing.expect(t, time.tick_since(started) < 2 * H2W_RESPONSE + H2W_IDLE + 2 * time.Second)
+	})
+}
+
+// More DATA frames than the tunnel's input queue holds used to reset the
+// stream. They are now held back until the tunnel has read.
+@(test)
+h2_tunnel_burst_of_small_data_frames_is_backpressured_not_reset :: proc(t: ^testing.T) {
+	state: H2W_Server
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		FRAMES :: 3 * H2_BODY_CHUNKS
+		wire: [dynamic]u8
+		defer delete(wire)
+		h2w_headers(
+			&wire,
+			1,
+			false,
+			{{":method", "CONNECT"}, {":protocol", "websocket"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/tunnel"}},
+		)
+		for i in 0 ..< FRAMES {
+			h2w_frame(&wire, 0, 0, 1, []u8{u8('a' + i)})
+		}
+		if !testing.expect(t, h2w_preface(peer) && h2w_send(peer, wire[:])) {
+			return
+		}
+		echoed: [FRAMES]u8
+		count := 0
+		for count < FRAMES {
+			frame, ok := h2w_next(peer)
+			if !ok {
+				break
+			}
+			if !testing.expect(t, frame.kind != 3, "tunnel was reset by a burst of small DATA frames") {
+				return
+			}
+			if frame.kind == 0 && frame.stream == 1 {
+				count += copy(echoed[count:], frame.payload)
+			}
+		}
+		if testing.expect_value(t, count, FRAMES) {
+			for byte, i in echoed {
+				testing.expect_value(t, byte, u8('a' + i))
+			}
+		}
+	})
+}
+
+// CVE-2023-44487: HEADERS immediately followed by RST_STREAM ran the handler
+// for every pair with no limit. The connection now ends with ENHANCE_YOUR_CALM.
+@(test)
+h2_rapid_reset_ends_the_connection_with_enhance_your_calm :: proc(t: ^testing.T) {
+	state: H2W_Server
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		if !testing.expect(t, h2w_preface(peer)) {
+			return
+		}
+		wire: [dynamic]u8
+		defer delete(wire)
+		calm := false
+		stream := u32(1)
+		// Each round is synchronised on its PING so no request is left unread
+		// when the server closes.
+		rounds: for _ in 0 ..< 2 * H2_RESET_BURST {
+			clear(&wire)
+			h2w_get(&wire, stream, "/")
+			h2w_frame(&wire, 3, 0, stream, []u8{0, 0, 0, 8})
+			h2w_frame(&wire, 6, 0, 0, []u8{1, 2, 3, 4, 5, 6, 7, 8})
+			stream += 2
+			if !h2w_send(peer, wire[:]) {
+				break
+			}
+			for {
+				frame, ok := h2w_next(peer)
+				if !ok {
+					break rounds
+				}
+				if frame.kind == 7 {
+					testing.expect_value(t, h2w_code(frame), u32(11))
+					calm = true
+					break rounds
+				}
+				if frame.kind == 6 && frame.flags & 1 != 0 {
+					break
+				}
+			}
+		}
+		testing.expect(t, calm, "rapid reset was never answered with GOAWAY(ENHANCE_YOUR_CALM)")
+		handled := sync.atomic_load(&state.handled)
+		testing.expect(t, handled <= H2_RESET_BURST + H2_RESET_REFILL * 10, "handler kept running for reset streams")
+	})
+}
+
+@(test)
+h2_reset_allowance_refills_and_tolerates_ordinary_cancellation :: proc(t: ^testing.T) {
+	session: HTTP2_Session
+	task := Connection_Task {
+		http2 = &session,
+	}
+	session.reset_tokens = H2_RESET_BURST
+	session.reset_refill = time.tick_now()
+	for _ in 0 ..< H2_RESET_BURST {
+		h2_count_reset(&task)
+	}
+	testing.expect(t, !session.calm)
+	testing.expect_value(t, session.reset_tokens, 0)
+	// Two idle seconds restore two refills; the bucket never exceeds its burst.
+	session.reset_refill = time.tick_add(time.tick_now(), -2 * time.Second)
+	h2_count_reset(&task)
+	testing.expect(t, !session.calm)
+	testing.expect_value(t, session.reset_tokens, 2 * H2_RESET_REFILL - 1)
+	session.reset_refill = time.tick_add(time.tick_now(), -time.Hour)
+	h2_count_reset(&task)
+	testing.expect_value(t, session.reset_tokens, H2_RESET_BURST - 1)
+}
+
+// Targets no handler expects are answered 400, an over-limit content-length
+// 413, and neither reaches the handler nor resets the stream.
+@(test)
+h2_empty_target_and_oversized_length_are_answered_without_the_handler :: proc(t: ^testing.T) {
+	state: H2W_Server
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		wire: [dynamic]u8
+		defer delete(wire)
+		h2w_headers(&wire, 1, true, {{":method", "GET"}, {":scheme", "ftp"}, {":authority", "localhost"}, {":path", ""}})
+		h2w_headers(&wire, 3, true, {{":method", "CONNECT"}, {":authority", "localhost:443"}})
+		h2w_headers(
+			&wire,
+			5,
+			false,
+			{{":method", "POST"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/echo"}, {"content-length", "999999"}},
+		)
+		if !testing.expect(t, h2w_preface(peer) && h2w_send(peer, wire[:])) {
+			return
+		}
+		statuses: [3]int
+		seen := 0
+		for seen < 3 {
+			frame, ok := h2w_next(peer)
+			if !ok {
+				break
+			}
+			if !testing.expect(t, frame.kind != 3, "malformed request was reset instead of answered") {
+				return
+			}
+			if frame.kind == 1 && frame.stream <= 5 {
+				statuses[frame.stream / 2] = h2w_status(frame)
+				seen += 1
+			}
+		}
+		testing.expect_value(t, seen, 3)
+		testing.expect_value(t, statuses[0], 400)
+		testing.expect_value(t, statuses[1], 400)
+		// 413 is not in the static table, so it is a literal: neither 200 nor absent.
+		testing.expect_value(t, statuses[2], 0)
+		testing.expect_value(t, sync.atomic_load(&state.handled), 0)
+	})
+}
+
+// 100 response headers are within the request-side header count limit and
+// must be delivered; a section that cannot be represented becomes a 500.
+@(test)
+h2_large_response_header_sets_are_delivered_or_answered_500 :: proc(t: ^testing.T) {
+	state: H2W_Server
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		wire: [dynamic]u8
+		defer delete(wire)
+		h2w_get(&wire, 1, "/many")
+		h2w_get(&wire, 3, "/huge")
+		if !testing.expect(t, h2w_preface(peer) && h2w_send(peer, wire[:])) {
+			return
+		}
+		statuses: [2]int
+		seen := 0
+		for seen < 2 {
+			frame, ok := h2w_next(peer)
+			if !ok {
+				break
+			}
+			if !testing.expect(t, frame.kind != 3, "large header set was reset instead of answered") {
+				return
+			}
+			if frame.kind == 1 && frame.stream <= 3 {
+				statuses[frame.stream / 2] = h2w_status(frame)
+				seen += 1
+			}
+		}
+		testing.expect_value(t, seen, 2)
+		testing.expect_value(t, statuses[0], 200)
+		testing.expect_value(t, statuses[1], 500)
+	})
+}
+
+// The body buffer follows received bytes. With a large application limit a
+// HEADERS frame alone used to commit the whole limit per stream.
+@(test)
+h2_request_body_buffer_grows_with_received_data :: proc(t: ^testing.T) {
+	request := new(H2_Request)
+	defer free(request)
+	task := &request.task
+	init_connection_arena(task)
+	defer release_task_storage(task)
+	request.limit = 64 * 1024 * 1024
+	testing.expect_value(t, len(task.request.body), 0)
+	testing.expect(t, h2_request_body_reserve(request, 10))
+	testing.expect_value(t, len(task.request.body), H2_BODY_INITIAL)
+	copy(task.request.body, "0123456789")
+	request.body_len = 10
+	testing.expect(t, h2_request_body_reserve(request, H2_BODY_INITIAL + 1))
+	testing.expect_value(t, len(task.request.body), 2 * H2_BODY_INITIAL)
+	testing.expect_value(t, string(task.request.body[:10]), "0123456789")
+	testing.expect(t, h2_request_body_reserve(request, 100_000))
+	testing.expect(t, len(task.request.body) >= 100_000 && len(task.request.body) < 1024 * 1024)
+	// A known content-length never reserves beyond itself.
+	request.limit = 5000
+	request.body_len = 0
+	task.request.body = nil
+	testing.expect(t, h2_request_body_reserve(request, 4097))
+	testing.expect_value(t, len(task.request.body), 4097)
+	testing.expect(t, h2_request_body_reserve(request, 4098))
+	testing.expect_value(t, len(task.request.body), 5000)
+}
+
+@(test)
+h2_request_body_is_assembled_across_data_frames :: proc(t: ^testing.T) {
+	state := H2W_Server {
+		limit = 1,
+	}
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		SIZE :: 3 * H2_BODY_INITIAL + 17
+		body := make([]u8, SIZE)
+		defer delete(body)
+		for &byte, i in body {
+			byte = u8('A' + i % 26)
+		}
+		wire: [dynamic]u8
+		defer delete(wire)
+		h2w_headers(&wire, 1, false, {{":method", "POST"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/echo"}})
+		for at := 0; at < SIZE; at += 1000 {
+			end := min(SIZE, at + 1000)
+			h2w_frame(&wire, 0, 0x1 if end == SIZE else 0, 1, body[at:end])
+		}
+		if !testing.expect(t, h2w_preface(peer) && h2w_send(peer, wire[:])) {
+			return
+		}
+		received := make([]u8, SIZE)
+		defer delete(received)
+		count := 0
+		for {
+			frame, ok := h2w_next(peer)
+			if !ok || frame.kind == 3 {
+				break
+			}
+			if frame.kind == 0 && frame.stream == 1 {
+				count += copy(received[count:], frame.payload)
+				if frame.flags & 1 != 0 {
+					break
+				}
+			}
+		}
+		if testing.expect_value(t, count, SIZE) {
+			testing.expect(t, string(received) == string(body), "echoed body differs from the request body")
+		}
+	})
+}

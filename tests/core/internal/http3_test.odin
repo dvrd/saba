@@ -6,10 +6,7 @@ import signal "shared:async/signal"
 import owned "core:mem/owned"
 import budget "core:sync/budget"
 import credential_store "core:crypto/tls/credentials/store"
-import "core:fmt"
 import "core:net"
-import "core:os"
-import "core:strings"
 import "core:testing"
 import "core:sync"
 import "core:thread"
@@ -243,7 +240,7 @@ H3_Server_Fixture :: struct {
 	ok:      bool,
 }
 @(test)
-http3_serve_independent_curl_status_cookies_and_concurrent_clients :: proc(t: ^testing.T) {
+http3_serve_status_cookies_and_concurrent_clients :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 60 * time.Second)
 	store := https80_make_store(t)
 	defer credential_store.destroy(&store)
@@ -276,186 +273,82 @@ http3_serve_independent_curl_status_cookies_and_concurrent_clients :: proc(t: ^t
 	if !testing.expect(t, ready && endpoint.port > 0) {
 		return
 	}
-	// Each process is an independent peer and both run before either is waited.
-	jobs: [2]os.Process
-	files: [2]^os.File
-
-	for i in 0 ..< 2 {
-		path := fmt.tprintf("/tmp/saba-h3-review-%d.txt", i)
-		file, error := os.open(path, {.Read, .Write, .Create, .Trunc})
-		assert(error == nil)
-		files[i] = file
-		url := fmt.tprintf("https://127.0.0.1:%d%s", endpoint.port, "/redirect" if i == 0 else "/missing")
-		job, pe := os.process_start(
-			{
-				command = []string {
-					"/opt/homebrew/opt/curl/bin/curl",
-					"--http3-only",
-					"--insecure",
-					"--noproxy",
-					"*",
-					"--max-time",
-					"8",
-					"-si",
-					url,
-				},
-				stdout = file,
-				stderr = file,
-			},
-		)
-		if !testing.expect(t, pe == nil) {
-			return
-		}
-		jobs[i] = job
+	// Each client opens its own QUIC connection.
+	clients := [2]H3_Test_Client {
+		{endpoint = endpoint, request = {target = "/redirect"}, timeout = 5 * time.Second},
+		{endpoint = endpoint, request = {target = "/missing"}, timeout = 5 * time.Second},
 	}
-
-	for job, i in jobs {
-		state, error := os.process_wait(job)
-		testing.expect(t, error == nil && state.exit_code == 0)
-		_, _ = os.seek(files[i], 0, .Start)
-		bytes: [4096]u8
-		n, _ := os.read(files[i], bytes[:])
-		text := string(bytes[:n])
-		fmt.printf("HTTP3 independent peer %d: %s\n", i, text)
-
-		if i == 0 {
-			testing.expect(t, strings.contains(text, "302") && strings.contains(text, "location: /next"))
-			testing.expect(t, strings.contains(text, "set-cookie: a=1") && strings.contains(text, "set-cookie: b=2"))
-		} else {
-			testing.expect(t, strings.contains(text, "404") && strings.contains(text, "missing"))
-		}
-
-		os.close(files[i])
+	for &client in clients {
+		h3_test_client_start(&client)
 	}
-
-	// Sequential clients also exercise request payload and normal async callback
-	// context: stream_wait and detachable deferred wakes run on the same runtime.
-	targets := []string{"/auth?one=two", "/stream", "/deferred"}
-
-	for target in targets {
-		file, error := os.open("/tmp/saba-h3-review-sequential.txt", {.Read, .Write, .Create, .Trunc})
-		assert(error == nil)
-		url := fmt.tprintf("https://127.0.0.1:%d%s", endpoint.port, target)
-		args := []string {
-			"/opt/homebrew/opt/curl/bin/curl",
-			"--http3-only",
-			"--insecure",
-			"--noproxy",
-			"*",
-			"--max-time",
-			"8",
-			"-si",
-			url,
+	for &client in clients {
+		h3_test_client_join(&client)
+		testing.expect(t, client.result.error == .None, h3_test_error(&client.result))
+	}
+	redirect := &clients[0].result
+	testing.expect_value(t, redirect.status, 302)
+	location := ""
+	cookies: [2]string
+	cookie_count := 0
+	for index in 0 ..< redirect.header_count {
+		field, valid := http3.client_result_header(redirect, index)
+		if !valid {
+			continue
 		}
-
-		post := []string {
-			"/opt/homebrew/opt/curl/bin/curl",
-			"--http3-only",
-			"--insecure",
-			"--noproxy",
-			"*",
-			"--max-time",
-			"8",
-			"-si",
-			"-X",
-			"POST",
-			"-H",
-			"Authorization: Bearer test",
-			"-d",
-			"payload",
-			url,
+		switch field.name {
+		case "location":
+			location = field.value
+		case "set-cookie":
+			if cookie_count < len(cookies) {
+				cookies[cookie_count] = field.value
+			}
+			cookie_count += 1
 		}
+	}
+	testing.expect_value(t, location, "/next")
+	testing.expect_value(t, cookie_count, 2)
+	testing.expect_value(t, cookies[0], "a=1; Secure")
+	testing.expect_value(t, cookies[1], "b=2; Secure")
+	testing.expect_value(t, clients[1].result.status, 404)
+	testing.expect_value(t, h3_test_body(&clients[1].result), "missing")
 
-		if strings.has_prefix(target, "/auth") {
-			args = post
-		}
-		job, pe := os.process_start({command = args, stdout = file, stderr = file})
-		assert(pe == nil)
-		result, re := os.process_wait(job)
-		testing.expect(t, re == nil && result.exit_code == 0)
-		_, _ = os.seek(file, 0, .Start)
-		bytes: [4096]u8
-		n, _ := os.read(file, bytes[:])
-		text := string(bytes[:n])
-		fmt.printf("HTTP3 sequential %s: %s\n", target, text)
+	// These requests exercise the callback context, body delivery, stream
+	// waiting, and detachable deferred wakes on the live serving runtime.
+	cases := []struct {request: http3.Client_Request, status: int, body: string} {
+		{{method = "POST", target = "/auth?one=two", headers = {{name = "authorization", value = "Bearer test"}},
+		  body = transmute([]u8)string("payload")}, 401, "denied"},
+		{{target = "/stream"}, 200, "abcabc"},
+		{{target = "/deferred"}, 202, "deferred-ready"},
+	}
+	for test_case in cases {
+		result := h3_test_exchange(endpoint.port, test_case.request, 5 * time.Second)
+		testing.expect(t, result.error == .None, h3_test_error(&result))
+		testing.expect_value(t, result.status, test_case.status)
+		testing.expect_value(t, h3_test_body(&result), test_case.body)
 		testing.expect(t, sync.atomic_load(&probe.valid))
-
-		if target == "/stream" {
-			testing.expect(t, strings.contains(text, "200") && strings.contains(text, "abcabc"))
-		} else if target == "/deferred" {
-			testing.expect(t, strings.contains(text, "202") && strings.contains(text, "deferred-ready"))
-		} else {
-			testing.expect(t, strings.contains(text, "401") && strings.contains(text, "denied"))
-		}
-
-		os.close(file)
 	}
 
-	// A five-second idle stream shares this listener task with another peer.
-	// Bounded transport polling must still dispatch the unrelated peer promptly.
-	idle_url := fmt.tprintf("https://127.0.0.1:%d/idle", endpoint.port)
-	idle, ie := os.process_start(
-		{
-			command = []string {
-				"/opt/homebrew/opt/curl/bin/curl",
-				"--http3-only",
-				"--insecure",
-				"--noproxy",
-				"*",
-				"--max-time",
-				"3",
-				"-s",
-				idle_url,
-			},
-		},
-	)
-	assert(ie == nil)
+	// An idle stream must leave the listener free to dispatch another peer.
+	idle := H3_Test_Client {endpoint = endpoint, request = {target = "/idle"}, timeout = 5 * time.Second}
+	h3_test_client_start(&idle)
+	defer h3_test_client_cancel(&idle)
 	idle_deadline := time.tick_add(time.tick_now(), time.Second)
 	for sync.atomic_load(&probe.idles) == 0 && time.tick_diff(time.tick_now(), idle_deadline) > 0 {
 		thread.yield()
 	}
 	testing.expect(t, sync.atomic_load(&probe.idles) > 0)
-	other_url := fmt.tprintf("https://127.0.0.1:%d/missing", endpoint.port)
-	other, oe := os.process_start(
-		{
-			command = []string {
-				"/opt/homebrew/opt/curl/bin/curl",
-				"--http3-only",
-				"--insecure",
-				"--noproxy",
-				"*",
-				"--max-time",
-				"2",
-				"-s",
-				other_url,
-			},
-		},
-	)
-	assert(oe == nil)
-	other_state, ow := os.process_wait(other)
-	testing.expect(t, ow == nil && other_state.exit_code == 0)
-	_ = os.process_kill(idle)
-	_, _ = os.process_wait(idle)
-	// Closing the server with a pending continuation must detach its wake and
-	// dispose it before serve releases its executor and request resources.
+	other := h3_test_exchange(endpoint.port, {target = "/missing"}, 2 * time.Second)
+	testing.expect(t, other.error == .None, h3_test_error(&other))
+	testing.expect_value(t, other.status, 404)
+	testing.expect(t, !thread.is_done(idle.worker), "idle peer remains active")
+	h3_test_client_cancel(&idle)
+
+	// Closing the server with a pending continuation must detach its wake
+	// before serve releases its executor and request resources.
 	prior := sync.atomic_load(&probe.polls)
-	url := fmt.tprintf("https://127.0.0.1:%d/pending", endpoint.port)
-	pending, pe := os.process_start(
-		{
-			command = []string {
-				"/opt/homebrew/opt/curl/bin/curl",
-				"--http3-only",
-				"--insecure",
-				"--noproxy",
-				"*",
-				"--max-time",
-				"2",
-				"-s",
-				url,
-			},
-		},
-	)
-	assert(pe == nil)
+	pending := H3_Test_Client {endpoint = endpoint, request = {target = "/pending"}, timeout = 5 * time.Second}
+	h3_test_client_start(&pending)
+	defer h3_test_client_cancel(&pending)
 	until := time.tick_add(time.tick_now(), time.Second)
 	for sync.atomic_load(&probe.polls) == prior && time.tick_diff(time.tick_now(), until) > 0 {
 		thread.yield()
@@ -464,8 +357,7 @@ http3_serve_independent_curl_status_cookies_and_concurrent_clients :: proc(t: ^t
 	stop_server(&fixture.control)
 	thread.join(worker)
 	joined = true
-	_ = os.process_kill(pending)
-	_, _ = os.process_wait(pending)
+	h3_test_client_cancel(&pending)
 	testing.expect_value(t, probe.drops, 4)
 	testing.expect(t, fixture.ok)
 	testing.expect_value(t, probe.calls, 8)

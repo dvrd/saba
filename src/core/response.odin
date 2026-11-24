@@ -10,6 +10,7 @@ import "core:mem"
 import budget "core:sync/budget"
 import owned "core:mem/owned"
 import "core:strconv"
+import "core:strings"
 import async "shared:async"
 
 RESPONSE_HEADER_LIMIT :: 8192
@@ -93,21 +94,105 @@ response_headers :: proc(response: Response, buffer: []u8, keep_alive: bool = fa
 		profile = .Keep_Alive
 	}
 
+	// The server writes the framing fields itself. A handler's own Content-Length
+	// that states the body's real length is redundant rather than wrong: drop it
+	// instead of failing the response. Any other value still rejects the head.
+	fields := response.headers
+	kept: [http.MAX_HEADERS]Header
+
+	if len(fields) <= len(kept) && content_length_redundant(fields, len(response.body)) {
+		count := 0
+		for field in fields {
+			if !strings.equal_fold(field.name, "Content-Length") {
+				kept[count] = field
+				count += 1
+			}
+		}
+		fields = kept[:count]
+	}
+
 	written, error := http1.response_head_encode_profile(
 		buffer,
-		{status = int(status), headers = response.headers, content_length = i64(len(response.body))},
+		{status = int(status), headers = fields, content_length = i64(len(response.body))},
 		profile,
 		max_bytes = RESPONSE_HEADER_LIMIT,
 	)
 
 	if error.kind != .None {
-		log.error("Invalid HTTP response headers:", error.kind)
+		if name, reason := response_header_fault(fields, status); name != "" {
+			log.errorf("Invalid HTTP response header %q: %s", name, reason)
+		} else {
+			log.error("Invalid HTTP response headers:", error.kind)
+		}
 		return
 	}
 
 	return buffer[:written], true
 }
 
+// True when every Content-Length the handler set is the decimal body length.
+content_length_redundant :: proc(fields: []Header, length: int) -> bool {
+	found := false
+
+	for field in fields {
+		if !strings.equal_fold(field.name, "Content-Length") {
+			continue
+		}
+		value, valid := strconv.parse_u64_of_base(field.value, 10)
+		if !valid || value != u64(length) {
+			return false
+		}
+		for character in transmute([]u8)field.value {
+			if character < '0' || character > '9' {
+				return false
+			}
+		}
+		found = true
+	}
+
+	return found
+}
+
+// Names the first field the head encoder refuses, for the log line a handler
+// author needs. Empty when the fault is not one field (for example total size).
+response_header_fault :: proc(fields: []Header, status: HTTP_Status) -> (name, reason: string) {
+	for field in fields {
+		if !http.header_name_valid(field.name) {
+			return field.name, "the name is not a valid token"
+		}
+		if !http.header_value_valid(field.value) {
+			return field.name, "the value contains a control character"
+		}
+
+		for reserved in ([?]string {
+				"Content-Length",
+				"Transfer-Encoding",
+				"Connection",
+				"Keep-Alive",
+				"Proxy-Connection",
+				"Trailer",
+				"TE",
+			}) {
+			if strings.equal_fold(field.name, reserved) {
+				return field.name, "the server sets this field; handlers must not (a Content-Length must equal the body length)"
+			}
+		}
+
+		if strings.equal_fold(field.name, "Upgrade") {
+			if status != .Switching_Protocols {
+				return field.name, "only a 101 response may carry it"
+			}
+			if strings.trim_space(field.value) == "" {
+				return field.name, "the value is empty"
+			}
+		}
+	}
+
+	return "", ""
+}
+
+// Deprecated blocking send; see write_connection. A handler should return its
+// Response instead, which is written without holding a worker.
 send_response :: proc(conn: ^Connection, response: Response, request_method: string = "") -> bool {
 	prepared := response
 
@@ -180,7 +265,9 @@ Response_Stream :: struct {
 	// Zero selects 64 KiB retained backing and 8 MiB total produced bytes.
 	max_chunk_bytes: int,
 	max_body_bytes:  i64,
-	// Total stream lifetime; zero inherits the ordinary response timeout.
+	// Total stream lifetime. Zero inherits the response timeout as a stall
+	// budget on HTTP/1: bytes the peer accepts re-arms it while the stream keeps
+	// the minimum average rate (see Timeout_Config).
 	timeout:         time.Duration,
 }
 
@@ -247,6 +334,12 @@ Response_Stream_State :: struct {
 	exchange:                   exchange.Exchange,
 	expires:                    time.Tick,
 	deadline:                   async.Deadline,
+	// Set when the stream inherited the response timeout: write progress moves
+	// `expires` forward by `stall`, never past what `sent` bytes earn since
+	// `started`, nor past the request deadline in `limit`.
+	stall:                      time.Duration,
+	started, limit:             time.Tick,
+	sent:                       i64,
 	prefix:                     [32]u8,
 	chunked, pending, terminal: bool,
 	max_chunk_bytes:            int,
@@ -323,7 +416,8 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 		limit = 64 * mem.Kilobyte
 	}
 	duration := producer.timeout
-	if duration == 0 {
+	inherits := duration == 0
+	if inherits {
 		duration = task.runtime.timeouts.response
 	}
 
@@ -335,6 +429,13 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 	state.max_chunk_bytes = limit
 	state.expires = time.tick_add(time.tick_now(), duration)
 	inherited := request_deadline(task.request.cancellation)
+
+	if inherits {
+		state.stall = duration
+		state.started = time.tick_now()
+		state.limit = inherited
+	}
+
 	if inherited != (time.Tick{}) && time.tick_diff(inherited, state.expires) > 0 {
 		state.expires = inherited
 	}
@@ -386,7 +487,7 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 			return resource_reject(task)
 		}
 
-		observe_failure(task, .Protocol_Error)
+		stream_head_fault(task, response.headers, status)
 		return false
 	}
 
@@ -411,7 +512,7 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 	n, e := http1.response_stream_head_encode(buffer, stored, profile, method, max_bytes = RESPONSE_HEADER_LIMIT)
 
 	if e.kind != .None {
-		observe_failure(task, .Protocol_Error)
+		stream_head_fault(task, response.headers, status)
 		return false
 	}
 
@@ -431,6 +532,47 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 	}
 
 	return stream_write_budget(task)
+}
+
+stream_head_fault :: proc(task: ^Connection_Task, fields: []Header, status: HTTP_Status) {
+	observe_failure(task, .Protocol_Error)
+	task.response_rejected = true
+
+	if name, reason := response_header_fault(fields, status); name != "" {
+		log.errorf("Invalid HTTP response header %q: %s", name, reason)
+	} else {
+		log.error("Invalid HTTP stream response head")
+	}
+}
+
+// Called after the peer accepted `count` stream bytes. A stream that inherited
+// the response timeout earns a fresh stall window while it keeps the minimum
+// average rate; a stream with its own timeout keeps that fixed lifetime.
+stream_progress :: proc(task: ^Connection_Task, count: int) {
+	state := task.streaming
+	if state == nil || state.stall <= 0 {
+		return
+	}
+	state.sent += i64(count)
+	now := time.tick_now()
+	next := time.tick_add(now, state.stall)
+	allowed := time.tick_add(state.started, transfer_budget(state.stall, state.sent))
+
+	if time.tick_diff(allowed, next) > 0 {
+		next = allowed
+	}
+
+	if state.limit != (time.Tick{}) && time.tick_diff(state.limit, next) > 0 {
+		next = state.limit
+	}
+
+	if time.tick_diff(state.expires, next) > 0 {
+		state.expires = next
+		state.deadline = async.deadline_after(&task.runtime.executor, time.tick_diff(now, next))
+	}
+
+	remaining := time.tick_diff(now, state.expires)
+	arm_write_deadline(task, min(remaining, task.runtime.timeouts.response))
 }
 
 // Records the outcome when the stream budget or its request context has ended.

@@ -8,7 +8,7 @@ import credential_store "core:crypto/tls/credentials/store"
 import "core:fmt"
 import "core:net"
 import "core:net/quic"
-import "core:os"
+import http3 "shared:http/v3"
 import "core:testing"
 import "core:thread"
 import "core:time"
@@ -97,26 +97,16 @@ http3_retry_normal_serve_uses_explicit_store_before_dispatch :: proc(t: ^testing
 
 	url_buffer: [96]u8
 	url := fmt.bprintf(url_buffer[:], "https://127.0.0.1:%d/retry", endpoint.port)
-	state, stdout, stderr, error := os.process_exec(
-		{
-			command = []string {
-				"/opt/homebrew/opt/curl/bin/curl",
-				"--http3-only",
-				"--insecure",
-				"--noproxy",
-				"*",
-				"--max-time",
-				"8",
-				"-sS",
-				url,
-			},
-		},
-		context.allocator,
-	)
-	defer delete(stdout); defer delete(stderr)
 	roots: tls.Root_Pool
 	assert(tls.root_pool_parse(&roots, #load("../../tests/testdata/tls/localhost.pem")).kind == .None)
 	defer tls.root_pool_destroy(&roots)
+	native := http3.client_exchange_request(
+		endpoint, "127.0.0.1", {method = "GET", target = "/retry", authority = "127.0.0.1"},
+		roots.roots[:roots.count], time.time_add(time.now(), 5 * time.Second),
+	)
+	testing.expect(t, native.error == .None, h3_test_error(&native))
+	testing.expect_value(t, native.status, 200)
+	testing.expect_value(t, h3_test_body(&native), "saba-retry-validated")
 	response, surf_error := surf.execute(
 		{method = .GET, url = url},
 		{http3 = true, timeout = 8 * time.Second, tls = {root_cas = roots.roots[:roots.count]}},
@@ -128,8 +118,6 @@ http3_retry_normal_serve_uses_explicit_store_before_dispatch :: proc(t: ^testing
 	stop_server(&fixture.control)
 	thread.join(worker)
 	joined = true
-	testing.expect(t, error == nil && state.exit_code == 0, string(stderr))
-	testing.expect_value(t, string(stdout), "saba-retry-validated")
 	testing.expect(t, fixture.ok && probe.validated)
 	testing.expect_value(t, probe.calls, 2)
 }

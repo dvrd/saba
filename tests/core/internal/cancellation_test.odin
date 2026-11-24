@@ -70,7 +70,7 @@ late_response_disposes_owned_continuation_once :: proc(t: ^testing.T) {
 	}
 
 	response := dispatch_request(&task)
-	testing.expect_value(t, response.status, .Request_Timeout)
+	testing.expect_value(t, response.status, .Gateway_Timeout)
 	testing.expect_value(t, drops, 1)
 	discard_response(&response)
 	testing.expect_value(t, drops, 1)

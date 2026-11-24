@@ -3,17 +3,13 @@ package saba_core
 import http3 "shared:http/v3"
 import "core:fmt"
 import "core:net"
-import "core:os"
+import "core:thread"
 import "core:strings"
 import "core:testing"
 import "core:time"
 import async "shared:async"
 import budget "core:sync/budget"
 import credential_store "core:crypto/tls/credentials/store"
-
-SABA_CURL :: "/opt/homebrew/opt/curl/bin/curl"
-SABA_CA :: "/Users/kakurega/dev/oss/Odin/tests/core/crypto/tls/credentials/testdata/rsa2048-valid.pem"
-SABA_LOG :: "/tmp/saba-http3-compatibility"
 
 Saba_Hit :: struct {
 	calls:    int,
@@ -43,145 +39,6 @@ saba_hit_handler :: proc(data: rawptr, conn: ^Connection, request: ^Request) -> 
 	return {status = .OK, body = hit.body[:hit.body_len]}
 }
 
-Saba_Curl :: struct {
-	child:  os.Process,
-	stdout: ^os.File,
-	stderr: ^os.File,
-	ok:     bool,
-}
-
-saba_curl_start :: proc(args: []string, label: string) -> Saba_Curl {
-	out_path := fmt.tprintf("%s/saba-%s-stdout.txt", SABA_LOG, label)
-	err_path := fmt.tprintf("%s/saba-%s-stderr.txt", SABA_LOG, label)
-	stdout, oerr := os.open(out_path, {.Read, .Write, .Create, .Trunc})
-	if oerr != nil {
-		return {}
-	}
-	stderr, eerr := os.open(err_path, {.Read, .Write, .Create, .Trunc})
-
-	if eerr != nil {
-		os.close(stdout)
-		return {}
-	}
-
-	child, perr := os.process_start({command = args, stdout = stdout, stderr = stderr})
-
-	if perr != nil {
-		os.close(stdout)
-		os.close(stderr)
-		return {}
-	}
-
-	return {child = child, stdout = stdout, stderr = stderr, ok = true}
-}
-
-saba_curl_finish :: proc(
-	job: ^Saba_Curl,
-	state: ^Http3,
-	limit: time.Duration,
-	body_dst: []u8,
-) -> (
-	exit_code: int,
-	body: string,
-) {
-	reaped := false
-	defer {
-		if job.ok && !reaped {
-			_ = os.process_kill(job.child)
-			_, _ = os.process_wait(job.child)
-		}
-
-		if job.stdout != nil {
-			os.close(job.stdout)
-		}
-		if job.stderr != nil {
-			os.close(job.stderr)
-		}
-	}
-	start := time.tick_now()
-	proc_state: os.Process_State
-	for job.ok && time.tick_since(start) < limit {
-		st, werr := os.process_wait(job.child, 0)
-
-		if werr == nil && st.exited {
-			proc_state = st
-			reaped = true
-			break
-		}
-
-		if state != nil {
-			http3.listener_step(&state.live)
-		}
-		time.sleep(time.Millisecond)
-	}
-	if job.ok && !reaped {
-		_ = os.process_kill(job.child)
-		proc_state, _ = os.process_wait(job.child)
-		reaped = true
-	}
-	bn := 0
-	if job.stdout != nil {
-		if _, serr := os.seek(job.stdout, 0, .Start); serr == nil {
-			bn, _ = os.read(job.stdout, body_dst)
-		}
-	}
-	note: [800]u8
-	en := 0
-	if job.stderr != nil {
-		if _, serr := os.seek(job.stderr, 0, .Start); serr == nil {
-			en, _ = os.read(job.stderr, note[:])
-		}
-	}
-	exit_code = proc_state.exit_code
-	if bn > len(body_dst) {
-		bn = len(body_dst)
-	}
-	body = string(body_dst[:bn])
-	if en > 0 {
-		fmt.printf("saba-stderr %s\n", string(note[:en]))
-	}
-	return
-}
-
-saba_http3_args :: proc(
-	dst: []string,
-	url_buf, resolve_buf: []u8,
-	port: int,
-	path: string,
-	insecure: bool,
-	max_time: string,
-) -> []string {
-	n := 0
-	dst[n] = SABA_CURL
-	n += 1
-	dst[n] = "--http3-only"
-	n += 1
-	dst[n] = "--max-time"
-	n += 1
-	dst[n] = max_time
-	n += 1
-	dst[n] = "-sS"
-	n += 1
-	if insecure {
-		dst[n] = "-k"
-		n += 1
-		dst[n] = fmt.bprintf(url_buf, "https://127.0.0.1:%d%s", port, path)
-		n += 1
-		return dst[:n]
-	}
-	dst[n] = "--cacert"
-	n += 1
-	dst[n] = SABA_CA
-	n += 1
-	dst[n] = "--resolve"
-	n += 1
-	dst[n] = fmt.bprintf(resolve_buf, "synthetic.invalid:%d:127.0.0.1", port)
-	n += 1
-	dst[n] = fmt.bprintf(url_buf, "https://synthetic.invalid:%d%s", port, path)
-	n += 1
-	return dst[:n]
-}
-
 @(test)
 saba_http3_disabled :: proc(t: ^testing.T) {
 	hit: Saba_Hit
@@ -202,9 +59,8 @@ saba_http3_disabled :: proc(t: ^testing.T) {
 }
 
 @(test)
-saba_http3_curl_route :: proc(t: ^testing.T) {
+saba_http3_route :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 20 * time.Second)
-	_ = os.make_directory(SABA_LOG)
 	hit: Saba_Hit
 	saba_hit_init(&hit)
 	session := new(Http3)
@@ -222,36 +78,18 @@ saba_http3_curl_route :: proc(t: ^testing.T) {
 	if !ok {
 		return
 	}
-	args: [12]string
-	url_buf, resolve_buf: [96]u8
-	command := saba_http3_args(args[:], url_buf[:], resolve_buf[:], port, "/saba", true, "5")
-	job := saba_curl_start(command, "route")
-	testing.expect(t, job.ok)
-	if !job.ok {
-		return
-	}
-	body_buf: [128]u8
-	exit_code, body := saba_curl_finish(&job, session, 8 * time.Second, body_buf[:])
-	fmt.printf(
-		"saba-route exit %d calls %d path %s body %s dead %v reason %s\n",
-		exit_code,
-		hit.calls,
-		string(hit.path[:hit.path_len]),
-		body,
-		session.rejected,
-		"HTTP3 listener",
-	)
-	testing.expect_value(t, exit_code, 0)
-	testing.expect(t, body == "saba-h3", body)
-	testing.expect(t, string(hit.path[:hit.path_len]) == "/saba")
-	testing.expect(t, hit.calls == 1)
-	testing.expect(t, !session.rejected || false, "HTTP3 listener")
+	result := h3_test_exchange(port, {target = "/saba"}, 5 * time.Second, session)
+	testing.expect(t, result.error == .None, h3_test_error(&result))
+	testing.expect_value(t, result.status, 200)
+	testing.expect_value(t, h3_test_body(&result), "saba-h3")
+	testing.expect_value(t, string(hit.path[:hit.path_len]), "/saba")
+	testing.expect_value(t, hit.calls, 1)
+	testing.expect(t, !session.rejected)
 }
 
 @(test)
-saba_http3_cacert :: proc(t: ^testing.T) {
+saba_http3_trusted_certificate :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 20 * time.Second)
-	_ = os.make_directory(SABA_LOG)
 	hit: Saba_Hit
 	saba_hit_init(&hit)
 	session := new(Http3)
@@ -269,26 +107,16 @@ saba_http3_cacert :: proc(t: ^testing.T) {
 	if !ok {
 		return
 	}
-	args: [12]string
-	url_buf, resolve_buf: [96]u8
-	command := saba_http3_args(args[:], url_buf[:], resolve_buf[:], port, "/trusted", false, "5")
-	job := saba_curl_start(command, "cacert")
-	testing.expect(t, job.ok)
-	if !job.ok {
-		return
-	}
-	body_buf: [128]u8
-	exit_code, body := saba_curl_finish(&job, session, 8 * time.Second, body_buf[:])
-	fmt.printf("saba-cacert exit %d body %s calls %d\n", exit_code, body, hit.calls)
-	testing.expect_value(t, exit_code, 0)
-	testing.expect(t, body == "saba-h3", body)
-	testing.expect(t, string(hit.path[:hit.path_len]) == "/trusted")
+	result := h3_test_exchange(port, {target = "/trusted"}, 5 * time.Second, session)
+	testing.expect(t, result.error == .None, h3_test_error(&result))
+	testing.expect_value(t, result.status, 200)
+	testing.expect_value(t, h3_test_body(&result), "saba-h3")
+	testing.expect_value(t, string(hit.path[:hit.path_len]), "/trusted")
 }
 
 @(test)
 saba_http3_untrusted :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 15 * time.Second)
-	_ = os.make_directory(SABA_LOG)
 	hit: Saba_Hit
 	saba_hit_init(&hit)
 	session := new(Http3)
@@ -306,37 +134,14 @@ saba_http3_untrusted :: proc(t: ^testing.T) {
 	if !ok {
 		return
 	}
-	args: [12]string
-	n := 0
-	args[n] = SABA_CURL
-	n += 1
-	args[n] = "--http3-only"
-	n += 1
-	args[n] = "--max-time"
-	n += 1
-	args[n] = "3"
-	n += 1
-	args[n] = "-sS"
-	n += 1
-	url_buf: [96]u8
-	args[n] = fmt.bprintf(url_buf[:], "https://127.0.0.1:%d/nope", port)
-	n += 1
-	job := saba_curl_start(args[:n], "untrusted")
-	testing.expect(t, job.ok)
-	if !job.ok {
-		return
-	}
-	body_buf: [128]u8
-	exit_code, body := saba_curl_finish(&job, session, 6 * time.Second, body_buf[:])
-	fmt.printf("saba-untrusted exit %d body %s calls %d\n", exit_code, body, hit.calls)
-	testing.expect(t, exit_code != 0)
-	testing.expect(t, body != "saba-h3")
+	result := h3_test_exchange(port, {target = "/nope"}, 3 * time.Second, session, untrusted = true)
+	testing.expect(t, result.error == .Certificate, h3_test_error(&result))
+	testing.expect_value(t, hit.calls, 0)
 }
 
 @(test)
 saba_http3_drain :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 15 * time.Second)
-	_ = os.make_directory(SABA_LOG)
 	hit: Saba_Hit
 	saba_hit_init(&hit)
 	session := new(Http3)
@@ -355,26 +160,15 @@ saba_http3_drain :: proc(t: ^testing.T) {
 		return
 	}
 	http3.listener_drain(&session.live)
-	args: [12]string
-	url_buf, resolve_buf: [96]u8
-	command := saba_http3_args(args[:], url_buf[:], resolve_buf[:], port, "/drain", true, "2")
-	job := saba_curl_start(command, "drain")
-	testing.expect(t, job.ok)
-	if !job.ok {
-		return
-	}
-	body_buf: [128]u8
-	exit_code, body := saba_curl_finish(&job, session, 5 * time.Second, body_buf[:])
-	fmt.printf("saba-drain exit %d calls %d body %s\n", exit_code, hit.calls, body)
-	testing.expect(t, exit_code != 0)
-	testing.expect(t, hit.calls == 0)
-	testing.expect(t, session.calls == 0)
+	result := h3_test_exchange(port, {target = "/drain"}, 2 * time.Second, session)
+	testing.expect(t, result.error != .None)
+	testing.expect_value(t, hit.calls, 0)
+	testing.expect_value(t, session.calls, 0)
 }
 
 @(test)
 saba_http3_body_cap :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 15 * time.Second)
-	_ = os.make_directory(SABA_LOG)
 	hit: Saba_Hit
 	saba_hit_init(&hit)
 	session := new(Http3)
@@ -393,28 +187,10 @@ saba_http3_body_cap :: proc(t: ^testing.T) {
 	if !ok {
 		return
 	}
-	args: [12]string
-	url_buf, resolve_buf: [96]u8
-	command := saba_http3_args(args[:], url_buf[:], resolve_buf[:], port, "/cap", true, "3")
-	job := saba_curl_start(command, "cap")
-	testing.expect(t, job.ok)
-	if !job.ok {
-		return
-	}
-	body_buf: [128]u8
-	exit_code, body := saba_curl_finish(&job, session, 6 * time.Second, body_buf[:])
-	fmt.printf(
-		"saba-cap exit %d rejected %v dead %v body %s reason %s\n",
-		exit_code,
-		session.rejected,
-		session.rejected,
-		body,
-		"HTTP3 listener",
-	)
+	result := h3_test_exchange(port, {target = "/cap"}, 3 * time.Second, session)
 	testing.expect(t, session.rejected)
-	testing.expect(t, session.rejected)
-	testing.expect(t, body != "saba-h3")
-	testing.expect(t, exit_code != 0)
+	testing.expect(t, result.error != .None)
+	testing.expect(t, h3_test_body(&result) != "saba-h3")
 }
 
 Saba_Relay :: struct {
@@ -493,7 +269,6 @@ saba_relay_packet :: proc(relay: ^Saba_Relay, packet: []u8, from: net.Endpoint) 
 @(test)
 saba_http3_loss :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 20 * time.Second)
-	_ = os.make_directory(SABA_LOG)
 	hit: Saba_Hit
 	saba_hit_init(&hit)
 	for &b in hit.body[:512] {
@@ -539,96 +314,47 @@ saba_http3_loss :: proc(t: ^testing.T) {
 		owner  = session,
 	}
 
-	args: [12]string
-	url_buf, resolve_buf: [96]u8
-	command := saba_http3_args(args[:], url_buf[:], resolve_buf[:], relay_ep.port, "/loss", true, "6")
-	job := saba_curl_start(command, "loss")
-	testing.expect(t, job.ok)
-	if !job.ok {
-		return
-	}
-	reaped := false
-	defer {
-		if !reaped {
-			_ = os.process_kill(job.child)
-			_, _ = os.process_wait(job.child)
-		}
+	client := H3_Test_Client {endpoint = relay_ep, request = {target = "/loss"}, timeout = 8 * time.Second}
+	h3_test_client_start(&client)
+	defer h3_test_client_cancel(&client)
 
-		os.close(job.stdout)
-		os.close(job.stderr)
-	}
-
-	start := time.tick_now()
-	proc_state: os.Process_State
-
-	for time.tick_since(start) < 9 * time.Second {
-		st, werr := os.process_wait(job.child, 0)
-
-		if werr == nil && st.exited {
-			proc_state = st
-			reaped = true
-			break
-		}
-
+	for !thread.is_done(client.worker) {
 		buf: [2048]u8
-
 		for _ in 0 ..< 8 {
-			n, from, uerr := net.recv_udp(relay.socket, buf[:])
-			if uerr != nil || n <= 0 {
+			n, from, error := net.recv_udp(relay.socket, buf[:])
+			if error != nil || n <= 0 {
 				break
 			}
 			saba_relay_packet(&relay, buf[:n], from)
 		}
-
 		if relay.held_n > 0 {
 			relay.hold_waits += 1
-
 			if relay.hold_waits >= 6 {
 				_, _ = net.send_udp(relay.socket, relay.held[:relay.held_n], relay.server)
 				relay.held_n = 0
 			}
 		}
-
-		http3.listener_step(&session.live)
+		if !http3.listener_step(&session.live) {
+			h3_test_client_cancel(&client)
+			break
+		}
 		time.sleep(time.Millisecond)
 	}
 
-	if !reaped {
-		_ = os.process_kill(job.child)
-		proc_state, _ = os.process_wait(job.child)
-		reaped = true
-	}
-
-	body_buf: [1024]u8
-	bn := 0
-
-	if _, serr := os.seek(job.stdout, 0, .Start); serr == nil {
-		bn, _ = os.read(job.stdout, body_buf[:])
-	}
-
-	body := string(body_buf[:bn])
-	fmt.printf(
-		"saba-loss exit %d packets %d dropped %v reorder %v slow %v body %s\n",
-		proc_state.exit_code,
-		relay.client_packets,
-		relay.dropped,
-		relay.reordered,
-		relay.slowed,
-		body,
-	)
-	testing.expect_value(t, proc_state.exit_code, 0)
-	testing.expect(t, body == string(hit.body[:hit.body_len]), body)
+	h3_test_client_join(&client)
+	testing.expect(t, client.result.error == .None, h3_test_error(&client.result))
+	testing.expect_value(t, client.result.status, 200)
+	testing.expect_value(t, h3_test_body(&client.result), string(hit.body[:hit.body_len]))
 	testing.expect(t, relay.application_dropped)
 	testing.expect(t, relay.dropped)
 	testing.expect(t, relay.reordered)
 	testing.expect(t, relay.slowed)
-	testing.expect(t, hit.calls == 1)
+	testing.expect_value(t, hit.calls, 1)
 }
 
 @(test)
 saba_http3_tcp :: proc(t: ^testing.T) {
 	testing.set_fail_timeout(t, 20 * time.Second)
-	_ = os.make_directory(SABA_LOG)
 	hit: Saba_Hit
 	saba_hit_init(&hit)
 	session := new(Http3)
@@ -658,16 +384,7 @@ saba_http3_tcp :: proc(t: ^testing.T) {
 		return
 	}
 	testing.expect(t, tcp_ep.port != h3_port)
-	args: [12]string
-	url_buf, resolve_buf: [96]u8
-	command := saba_http3_args(args[:], url_buf[:], resolve_buf[:], h3_port, "/both", true, "5")
-	job := saba_curl_start(command, "tcp")
-	testing.expect(t, job.ok)
-	if !job.ok {
-		return
-	}
-	body_buf: [128]u8
-	exit_code, body := saba_curl_finish(&job, session, 8 * time.Second, body_buf[:])
+	result := h3_test_exchange(h3_port, {target = "/both"}, 5 * time.Second, session)
 	client, derr := net.dial_tcp(tcp_ep)
 	testing.expect(t, derr == nil)
 	if derr != nil {
@@ -728,16 +445,9 @@ saba_http3_tcp :: proc(t: ^testing.T) {
 	}
 
 	tcp_body := string(out_buf[:on])
-	fmt.printf(
-		"saba-tcp h3-exit %d h3-body %s tcp-port %d h3-port %d tcp %s\n",
-		exit_code,
-		body,
-		tcp_ep.port,
-		h3_port,
-		tcp_body,
-	)
-	testing.expect_value(t, exit_code, 0)
-	testing.expect(t, body == "saba-h3", body)
+	testing.expect(t, result.error == .None, h3_test_error(&result))
+	testing.expect_value(t, result.status, 200)
+	testing.expect_value(t, h3_test_body(&result), "saba-h3")
 	testing.expect(t, strings.contains(tcp_body, "saba-h3"))
 	testing.expect(t, hit.calls == 2)
 }

@@ -289,7 +289,7 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 	task.request.early_data = wire.early
 	context.logger = owner.runtime.logger
 	context.temp_allocator = mem.dynamic_arena_allocator(&task.arena)
-	if request_cancelled(task.request.cancellation) || state.failed {
+	if state.failed || (task.deferred.poll == nil && request_cancelled(task.request.cancellation)) {
 		return .Failed
 	}
 
@@ -310,18 +310,12 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 				status = .Content_Too_Large,
 			}
 		} else {
-			response = owner.config.handler(owner.config.handler_data, &task.connection, &task.request)
+			response = call_request_handler(task, owner.config.handler, owner.config.handler_data)
 		}
 
 		if deferred_present(response.deferred) {
-			if !queue_deferred(task, response) {
+			if !start_deferred(task, response, &owner.task) {
 				state.failed = true
-				return .Failed
-			}
-
-			// queue_deferred uses the TCP task by default. HTTP3's real owner is the
-			// listener task; replace the signal before any continuation is polled.
-			if !rebind_deferred_signal(task, &owner.task) {
 				return .Failed
 			}
 		} else {
@@ -331,33 +325,19 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 	}
 
 	if !state.ready {
-		if deadline_expired(task.deferred_expires) {
-			cancel_request_context(task.request.cancellation, .Deadline)
-			return .Failed
-		}
-
-		response, step := task.deferred.poll(
-			task.deferred.data,
-			&Deferred_IO {
-				resources = task.resource_operation,
-				backing_allocator = task.request.backing_allocator,
-				allocator = task.request.allocator,
-				cancellation = task.request.cancellation,
-				wake = task.deferred_signal,
-			},
-		)
-
-		if step != .Ready {
-			discard_response(&response)
-			if step == .Failed {
-				return .Failed
-			}
+		response, result := poll_deferred(task)
+		switch result {
+		case .Waiting:
 			_ = async.sleep_until_earlier(&owner.runtime.executor, task.deferred_deadline)
 			return .Pending
+		case .Cancelled, .Failed:
+			state.failed = true
+			return .Failed
+		case .Invalid:
+			state.response = {status = .Not_Implemented}
+		case .Ready:
+			state.response = response
 		}
-
-		drop_deferred(task)
-		state.response = response
 		state.ready = true
 	}
 
@@ -367,8 +347,7 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 		return status
 	}
 
-	if deferred_present(response.deferred) ||
-	   response.upgrade.data != nil ||
+	if response.upgrade.data != nil ||
 	   response.upgrade.resume != nil ||
 	   response.upgrade.drop != nil ||
 	   response.status == .Switching_Protocols {
@@ -417,19 +396,35 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 		return .Failed
 	}
 
-	for field, i in response.headers {
+	// The wire layer treats an invalid response section as a connection error,
+	// which would take every other stream on this QUIC connection with it. Drop
+	// connection-specific fields as HTTP/2 does and turn anything the section
+	// cannot carry into an ordinary 500 on this stream only.
+	count, bytes := 0, 0
+	representable := int(response.status) >= 200 && int(response.status) <= 599
+
+	for field in response.headers {
 		name, error := strings.to_lower(field.name, task.request.allocator)
 		if error != nil {
 			return .Failed
 		}
-		headers[i] = {
+		if http3_skip_response_header(name) {
+			continue
+		}
+		if !http3_field_valid(name, field.value) {
+			representable = false
+			break
+		}
+		headers[count] = {
 			name          = name,
 			value         = field.value,
 			never_indexed = name == "set-cookie" || name == "authorization",
 		}
+		count += 1
+		bytes += len(name) + len(field.value) + HTTP3_FIELD_OVERHEAD
 	}
 
-	if extra != 0 {
+	if representable && extra != 0 {
 		length := i64(len(response.body))
 		if stream_present(response.stream) {
 			length = response.stream.content_length
@@ -440,16 +435,25 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 			if error != nil {
 				return .Failed
 			}
-			headers[len(response.headers)] = {
+			headers[count] = {
 				name  = "content-length",
 				value = strconv.write_int(storage, length, 10),
 			}
-		} else {
-			headers = headers[:len(response.headers)]
+			count += 1
+			bytes += 32 + HTTP3_FIELD_OVERHEAD
 		}
 	}
 
-	out.headers = headers
+	if !representable || count > HTTP3_RESPONSE_FIELDS || bytes > HTTP3_RESPONSE_BYTES {
+		discard_response(response)
+		response^ = {
+			status = .Internal_Server_Error,
+		}
+		out.status = int(response.status)
+		count = 0
+	}
+
+	out.headers = headers[:count]
 	trailers, te := make([]http3.Field, len(response.trailers), task.request.allocator)
 
 	if te != nil {
@@ -493,6 +497,44 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 	}
 
 	return .Ready
+}
+
+// Limits of the HTTP/3 response field section: at most 63 fields and a 7000
+// byte encoded block. The byte estimate charges each field its worst-case
+// literal prefix so the encoded size stays under the block limit.
+HTTP3_RESPONSE_FIELDS :: 63
+HTTP3_RESPONSE_BYTES :: 6000
+HTTP3_FIELD_OVERHEAD :: 8
+
+http3_skip_response_header :: proc(lower: string) -> bool {
+	switch lower {
+	case "connection", "proxy-connection", "keep-alive", "upgrade", "transfer-encoding", "te":
+		return true
+	}
+
+	return len(lower) > 0 && lower[0] == ':'
+}
+
+http3_field_valid :: proc(lower, value: string) -> bool {
+	if len(lower) == 0 {
+		return false
+	}
+
+	for byte in transmute([]u8)lower {
+		switch byte {
+		case 'a' ..= 'z', '0' ..= '9', '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+		case:
+			return false
+		}
+	}
+
+	for byte in transmute([]u8)value {
+		if byte == 0 || byte == '\r' || byte == '\n' {
+			return false
+		}
+	}
+
+	return true
 }
 
 http3_stream_next :: proc(data: rawptr, dst: []u8) -> (int, http3.Stream_Status) {
@@ -586,6 +628,11 @@ http3_allow_early :: proc(data: rawptr, wire: ^http3.Server_Request) -> bool {
 		wire.user_data = state
 	}
 
+	// A request whose header view could not be built must not reach the policy.
+	if state.failed {
+		return false
+	}
+
 	return owner.config.early_request_policy(owner.config.early_request_data, &state.connection.request)
 }
 
@@ -660,22 +707,34 @@ http3_upgrade_response :: proc(
 	if error != nil {
 		return true, .Failed
 	}
-	for header, i in response.headers {
+	count := 0
+	for header in response.headers {
 		name, e := strings.to_lower(header.name, task.request.allocator)
 
 		if e != nil {
 			return true, .Failed
 		}
 
-		fields[i] = {
+		if http3_skip_response_header(name) {
+			continue
+		}
+
+		if !http3_field_valid(name, header.value) || count == HTTP3_RESPONSE_FIELDS {
+			discard_response(response)
+			out.status = 500
+			return true, .Ready
+		}
+
+		fields[count] = {
 			name  = name,
 			value = header.value,
 		}
+		count += 1
 	}
 	task.upgrade = response.upgrade
 	response.upgrade = {}
 	out.status = 200
-	out.headers = fields
+	out.headers = fields[:count]
 	out.duplex = {
 		data   = state,
 		resume = http3_upgrade_resume,

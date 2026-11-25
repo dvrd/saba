@@ -29,7 +29,24 @@ Http3_Config :: struct {
 	// With unset phase policy it also bounds CONNECT closing grace. This is not a header/body
 	// receive or response-transmission phase deadline.
 	request_timeout:         time.Duration,
+	// Connection table size. Zero selects the library table (32).
 	max_connections:         int,
+	// Bounds of one request's field section. Zero selects the HTTP/1 field
+	// count (REQUEST_HEADER_COUNT_LIMIT) and the larger of the HTTP/1 header
+	// block (REQUEST_HEADER_LIMIT) and the library default. A request over
+	// either is answered 431.
+	max_request_fields:      int,
+	max_request_field_bytes: int,
+	// Connections one address may hold at once. Zero selects
+	// HTTP3_CONNECTIONS_PER_ADDRESS; a value of max_connections or more lifts
+	// the limit.
+	max_connections_per_address: int,
+	// With retry tokens, connections are admitted without the Retry round trip
+	// while fewer than retry_above are held, and challenged once the table is
+	// that full. Zero selects half the table. retry_every_connection challenges
+	// every new connection instead. Both are ignored without retry.
+	retry_above:             int,
+	retry_every_connection:  bool,
 	early_request_policy:    proc(_: rawptr, _: ^Request) -> bool,
 	early_request_data:      rawptr,
 	reset:                   ^quic.Reset_Secrets,
@@ -48,6 +65,67 @@ Http3_Config :: struct {
 	// Legacy response representation limit; zero uses the transport finite cap.
 	max_body:                int,
 	max_request_body:        int,
+}
+
+// Connections one client address may hold at once unless configured.
+HTTP3_CONNECTIONS_PER_ADDRESS :: 8
+
+// The listener limits a configuration selects, zero values resolved.
+Http3_Limits :: struct {
+	max_connections:             int,
+	max_request_fields:          int,
+	max_request_field_bytes:     int,
+	max_connections_per_address: int,
+	retry_above:                 int,
+}
+
+http3_limits_valid :: proc(config: Http3_Config) -> bool {
+	table := config.max_connections if config.max_connections > 0 else http3.LISTENER_CONNECTIONS
+	return(
+		config.max_connections >= 0 &&
+		config.max_connections <= http3.MAX_LISTENER_CONNECTIONS &&
+		config.max_request_fields >= 0 &&
+		config.max_request_fields <= http3.MAX_REQUEST_FIELDS &&
+		config.max_request_field_bytes >= 0 &&
+		config.max_request_field_bytes <= http3.MAX_REQUEST_FIELD_BYTES &&
+		config.max_connections_per_address >= 0 &&
+		config.retry_above >= 0 &&
+		config.retry_above <= table &&
+		!(config.retry_every_connection && config.retry_above > 0) \
+	)
+}
+
+http3_limits :: proc(config: Http3_Config) -> Http3_Limits {
+	limits := Http3_Limits {
+		max_connections             = config.max_connections,
+		max_request_fields          = config.max_request_fields,
+		max_request_field_bytes     = config.max_request_field_bytes,
+		max_connections_per_address = config.max_connections_per_address,
+	}
+	table := config.max_connections if config.max_connections > 0 else http3.LISTENER_CONNECTIONS
+
+	if limits.max_request_fields == 0 {
+		limits.max_request_fields = min(REQUEST_HEADER_COUNT_LIMIT, http3.MAX_REQUEST_FIELDS)
+	}
+
+	if limits.max_request_field_bytes == 0 {
+		limits.max_request_field_bytes = max(REQUEST_HEADER_LIMIT, http3.REQUEST_FIELD_BYTES)
+	}
+
+	if limits.max_connections_per_address == 0 {
+		limits.max_connections_per_address = HTTP3_CONNECTIONS_PER_ADDRESS
+	}
+
+	// At or above the table size the limit can never bind.
+	if limits.max_connections_per_address >= table {
+		limits.max_connections_per_address = 0
+	}
+
+	if config.retry != nil && !config.retry_every_connection {
+		limits.retry_above = config.retry_above if config.retry_above > 0 else max(table / 2, 1)
+	}
+
+	return limits
 }
 
 Http3 :: struct {
@@ -75,7 +153,9 @@ http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
 		return 0, false
 	}
 
-	if !http3_phases_valid(state.config.request_phases) || !timeout_in_range(state.config.request_timeout) {
+	if !http3_phases_valid(state.config.request_phases) ||
+	   !timeout_in_range(state.config.request_timeout) ||
+	   !http3_limits_valid(state.config) {
 		return 0, false
 	}
 
@@ -103,6 +183,7 @@ http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
 		early_policy = http3_allow_early
 	}
 
+	limits := http3_limits(state.config)
 	state.live.config = {
 		request_phases          = http3_phase_policy(state.config.request_phases, state.runtime.timeouts),
 		request_timeout         = state.config.request_timeout,
@@ -122,8 +203,12 @@ http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
 		on_request              = http3_poll,
 		on_request_user         = state,
 		on_request_release      = http3_release,
-		max_connections         = state.config.max_connections,
+		max_connections         = limits.max_connections,
 		max_request_body        = state.config.max_request_body,
+		max_request_fields      = limits.max_request_fields,
+		max_request_field_bytes = limits.max_request_field_bytes,
+		max_connections_per_address = limits.max_connections_per_address,
+		retry_above             = limits.retry_above,
 	}
 
 	port, ok = http3.listener_listen(&state.live)

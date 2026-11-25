@@ -193,7 +193,11 @@ response :: proc(
 
 @(private)
 failure_status :: proc(error: client.Client_Error) -> server.HTTP_Status {
-	if error.http.kind == .Deadline_Failed || error.http.transport == net.TCP_Recv_Error.Timeout || error.http.transport == net.TCP_Send_Error.Timeout || error.http.transport == net.Dial_Error.Timeout {
+	transport := error.http.transport
+	if error.http.kind == .Deadline_Failed ||
+	   transport == net.TCP_Recv_Error.Timeout ||
+	   transport == net.TCP_Send_Error.Timeout ||
+	   transport == net.Dial_Error.Timeout {
 		return .Gateway_Timeout
 	}
 	if error.kind == .Closed ||

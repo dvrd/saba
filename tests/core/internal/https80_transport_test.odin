@@ -80,7 +80,7 @@ https80_phase_change_preserves_authenticated_staging_and_clears_only_internal_ca
 		testing.expect_value(t, string(second[:]), "def")
 		testing.expect(t, !state.read_started && !state.read_done && !state.read_retarget)
 		testing.expect_value(t, state.input_at, 0)
-		testing.expect(t, state.error == nil)
+		testing.expect_value(t, state.error, nil)
 	}
 }
 
@@ -102,7 +102,7 @@ https80_retarget_never_hides_peer_close_or_protocol_failure :: proc(t: ^testing.
 	n, error := transport_read(&task, data[:], {})
 	testing.expect_value(t, n, 0)
 	testing.expect_value(t, error.kind, .Peer_Closed)
-	testing.expect(t, state.error == net.Connection_Error.Peer_Closed)
+	testing.expect_value(t, state.error, net.Network_Error(net.Connection_Error.Peer_Closed))
 	testing.expect(t, !state.read_started && !state.read_done)
 }
 
@@ -176,7 +176,7 @@ https80_transport_deadlines_reject_foreign_epochs_before_consuming_completions :
 		testing.expect(t, state.read_started && state.read_done && !state.read_retarget)
 		testing.expect(t, state.write_started && state.write_done)
 		testing.expect_value(t, state.input_at, 0)
-		testing.expect(t, state.error == nil)
+		testing.expect_value(t, state.error, nil)
 		testing.expect_value(t, data[0], u8(0))
 	}
 
@@ -220,7 +220,7 @@ https80_handshake_callback_preserves_first_failure_and_retains_new_protocol_erro
 
 	tls_handshake_done(&op)
 	testing.expect(t, state.handshake_done)
-	testing.expect(t, state.error == net.Connection_Error.Cancelled)
+	testing.expect_value(t, state.error, net.Network_Error(net.Connection_Error.Cancelled))
 	state = {}
 	op = {
 		user_data = &state,
@@ -230,5 +230,5 @@ https80_handshake_callback_preserves_first_failure_and_retains_new_protocol_erro
 
 	tls_handshake_done(&op)
 	testing.expect(t, state.handshake_done)
-	testing.expect(t, state.error == net.Connection_Error.Protocol_Failed)
+	testing.expect_value(t, state.error, net.Network_Error(net.Connection_Error.Protocol_Failed))
 }

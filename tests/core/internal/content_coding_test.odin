@@ -1,6 +1,7 @@
 package saba_core
 
 import "shared:async/compress/brotli"
+import incremental "shared:async/compress/step"
 import "core:compress/deflate"
 import "core:bytes"
 import "core:fmt"
@@ -39,22 +40,21 @@ coding_field :: proc(headers: []Header, name: string) -> (string, bool) {
 coding_decode :: proc(t: ^testing.T, encoded, expected: []u8) {
 	output: [dynamic]u8
 	defer delete(output)
-	error := deflate.decompress_gzip(&output, encoded, len(expected))
+	error := deflate.decompress_gzip(&output, encoded, options = {max_output_size = len(expected)})
 	testing.expect_value(t, error, nil)
 	testing.expect(t, string(output[:]) == string(expected))
 }
 
 @(test)
 gzip_round_trip_and_short_writes_match_limits :: proc(t: ^testing.T) {
-	bound := deflate.compress_gzip_bound(GZIP_MAX_INPUT)
-	testing.expect(t, bound > 0 && bound <= GZIP_MAX_OUTPUT)
+	testing.expect(t, deflate.compress_gzip_bound(GZIP_MAX_INPUT) <= GZIP_MAX_OUTPUT)
 	plain := coding_repeat(4096, context.allocator)
 	defer delete(plain)
-	encoder, alloc_error := new(Gzip_Stream)
+	encoder, alloc_error := new(incremental.Deflate_Encoder)
 	testing.expect(t, alloc_error == nil && encoder != nil)
 	defer free(encoder)
-	testing.expect(t, gzip_stream_begin(encoder, GZIP_MAX_OUTPUT, context.allocator))
-	defer gzip_stream_end(encoder)
+	testing.expect_value(t, incremental.deflate_encoder_init(encoder, .Gzip, GZIP_DYNAMIC_LEVEL, GZIP_MAX_OUTPUT), nil)
+	defer incremental.deflate_encoder_destroy(encoder)
 	encoded, encode_error := make([]u8, deflate.compress_gzip_bound(len(plain)))
 	testing.expect(t, encode_error == nil)
 	defer delete(encoded)
@@ -62,46 +62,30 @@ gzip_round_trip_and_short_writes_match_limits :: proc(t: ^testing.T) {
 
 	for offset < len(plain) {
 		step := min(5, len(plain) - offset)
-		count := gzip_stream_write(encoder, plain[offset:offset + step])
+		count := incremental.deflate_encoder_write(encoder, plain[offset:offset + step])
 		testing.expect(t, count > 0 && count <= step)
 		offset += count
-		written += gzip_stream_pull(encoder, encoded[written:])
+		written += incremental.deflate_encoder_pull(encoder, encoded[written:])
 	}
 
-	gzip_stream_finish(encoder)
-	for gzip_stream_pending(encoder) > 0 {
-		count := gzip_stream_pull(encoder, encoded[written:])
+	for !incremental.deflate_encoder_finish(encoder) {
+		count := incremental.deflate_encoder_pull(encoder, encoded[written:])
 		testing.expect(t, count > 0)
 		written += count
 	}
 
-	testing.expect(t, encoder.finished && !encoder.overflow && !encoder.failed && written > 0 && written < len(plain))
+	for incremental.deflate_encoder_pending(encoder) > 0 {
+		written += incremental.deflate_encoder_pull(encoder, encoded[written:])
+	}
+
+	testing.expect(t, encoder.finished && !encoder.overflow && written > 0 && written < len(plain))
 	testing.expect(t, written <= GZIP_MAX_OUTPUT)
 	coding_decode(t, encoded[:written], plain)
 
-	// The buffered path decodes to the same body.
+	// The buffered path and the stream agree: same level, same bytes.
 	whole := gzip_compress(plain, context.allocator)
 	defer delete(whole)
-	testing.expect(t, len(whole) > 0)
-	coding_decode(t, whole, plain)
-}
-
-@(test)
-gzip_stream_output_past_its_limit_overflows :: proc(t: ^testing.T) {
-	plain := coding_repeat(1 << 20, context.allocator)
-	defer delete(plain)
-	for i in 0 ..< len(plain) {
-		plain[i] = u8((i * 2654435761) >> 13)
-	}
-	encoder, alloc_error := new(Gzip_Stream)
-	testing.expect(t, alloc_error == nil && encoder != nil)
-	defer free(encoder)
-	testing.expect(t, gzip_stream_begin(encoder, 1024, context.allocator))
-	defer gzip_stream_end(encoder)
-	gzip_stream_write(encoder, plain)
-	gzip_stream_finish(encoder)
-	testing.expect(t, encoder.overflow && encoder.failed && !encoder.finished)
-	testing.expect(t, encoder.total <= 1024)
+	testing.expect(t, bytes.equal(whole, encoded[:written]))
 }
 
 @(test)

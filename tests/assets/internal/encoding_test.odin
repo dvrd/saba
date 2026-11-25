@@ -40,7 +40,7 @@ encoding_decode_brotli :: proc(t: ^testing.T, packed, expected: []u8) {
 encoding_decode_gzip :: proc(t: ^testing.T, packed, expected: []u8) {
 	output: [dynamic]u8
 	defer delete(output)
-	testing.expect_value(t, deflate.decompress_gzip(&output, packed, len(expected)), nil)
+	testing.expect_value(t, deflate.decompress_gzip(&output, packed, options = {max_output_size = len(expected)}), nil)
 	testing.expect(t, string(output[:]) == string(expected))
 }
 

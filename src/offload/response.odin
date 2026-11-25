@@ -62,6 +62,21 @@ response_with_unmanaged_bytes :: proc(
 	return {deferred = {data = state, poll = poll_result, drop = drop, timeout = timeout}}, true
 }
 
+// A job that ran out of time answers 504, as a deferred response past its
+// deadline does: the work may already have taken effect, and a 408 would invite
+// the client to replay it. 408 is only for a request the server did not receive.
+expired_response :: proc() -> server.Response {
+	return {status = .Gateway_Timeout, close_connection = true}
+}
+
+// A job the pool would not take: out of time before it started, or no room.
+admission_response :: proc(error: pool.Error) -> server.Response {
+	if error == .Expired {
+		return {status = .Gateway_Timeout}
+	}
+	return {status = .Service_Unavailable}
+}
+
 wake :: proc(data: rawptr) {
 	_ = signal.wake((cast(^Notice)data).signal)
 }
@@ -111,11 +126,7 @@ poll_result :: proc(data: rawptr, io: ^server.Deferred_IO) -> (server.Response, 
 		error := start(state, io)
 
 		if error != .None {
-			status: server.HTTP_Status = .Service_Unavailable
-			if error == .Expired {
-				status = .Request_Timeout
-			}
-			return {status = status}, .Ready
+			return admission_response(error), .Ready
 		}
 	}
 
@@ -137,7 +148,7 @@ poll_result :: proc(data: rawptr, io: ^server.Deferred_IO) -> (server.Response, 
 
 		return response, .Ready
 	case .Expired:
-		return {status = .Request_Timeout, close_connection = true}, .Ready
+		return expired_response(), .Ready
 	case .Cancelled:
 		return {status = .Service_Unavailable, close_connection = true}, .Ready
 	case .Failed:

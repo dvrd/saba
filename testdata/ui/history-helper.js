@@ -6,14 +6,17 @@ const initialForm = document.querySelector("form");
 const increment = key => sessionStorage.setItem(key, String(Number(sessionStorage.getItem(key) || 0) + 1));
 const historyProbe = () => new URL(location.href).searchParams.has("history-probe");
 
+// Firefox and WebKit leave the message out of Error.prototype.stack.
+const describe = error => error?.stack?.includes(error.message) ? error.stack : String(error) + (error?.stack ? "\n" + error.stack : "");
+
 async function report(message) {
   await fetch("/history-result", {method: "POST", body: message, cache: "no-store"});
 }
 if (historyProbe()) {
-  addEventListener("error", event => { void report("page error: " + (event.error?.stack || event.message)); });
-  addEventListener("unhandledrejection", event => { void report("unhandled rejection: " + (event.reason?.stack || event.reason)); });
+  addEventListener("error", event => { void report("page error: " + (event.error ? describe(event.error) : event.message)); });
+  addEventListener("unhandledrejection", event => { void report("unhandled rejection: " + describe(event.reason)); });
 }
-export function reportFailure(error) { return report("startup: " + (error.stack || error)); }
+export function reportFailure(error) { return report("startup: " + describe(error)); }
 function check(condition, message) { if (!condition) throw new Error(message); }
 
 export async function testIdentity() {
@@ -116,7 +119,7 @@ export async function driveHistory(editor, item) {
         }
         sessionStorage.setItem(step, "reload");
         location.reload();
-      } catch (error) { await report("restoration: " + (error.stack || error)); }
+      } catch (error) { await report("restoration: " + describe(error)); }
     });
     check(await editor.open(), "initial routed read failed");
     function type(value) {
@@ -126,5 +129,5 @@ export async function driveHistory(editor, item) {
     type(switching ? "canonical switched browser save" : "canonical browser save");
     form.requestSubmit();
     type("unsaved edit after submit");
-  } catch (error) { await report("initialization: " + (error.stack || error)); }
+  } catch (error) { await report("initialization: " + describe(error)); }
 }

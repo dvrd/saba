@@ -83,5 +83,5 @@ try {
   await verify();
   document.getElementById('result').textContent = 'PASS';
 } catch (error) {
-  document.getElementById('result').textContent = error.stack || error.message;
+  document.getElementById('result').textContent = error.stack?.includes(error.message) ? error.stack : error.message + '\n' + error.stack;
 }

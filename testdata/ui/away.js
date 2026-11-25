@@ -26,7 +26,7 @@ async function visitNextGeneration() {
 
 addEventListener("pageshow", () => {
   if (sessionStorage.getItem("saba-ui-history-step") === "rollout") {
-    visitNextGeneration().catch(error => fetch("/history-result", {method: "POST", body: String(error.stack || error)}));
+    visitNextGeneration().catch(error => fetch("/history-result", {method: "POST", body: error?.stack?.includes(error.message) ? error.stack : String(error) + "\n" + (error?.stack || "")}));
     return;
   }
   if (sessionStorage.getItem("saba-ui-switch-user") === "yes")

@@ -1,3 +1,5 @@
+// Firefox and WebKit leave the message out of Error.prototype.stack.
+const describe = error => error?.stack?.includes(error.message) ? error.stack : String(error) + (error?.stack ? "\n" + error.stack : "");
 const result = document.getElementById("result");
 const host = document.getElementById("app");
 let phase = "forwarded JSX";
@@ -32,5 +34,5 @@ try {
   const regressions = await (await import("./regressions.js")).verifyRegressions(host);
   result.textContent = encodeURIComponent(JSON.stringify({forwarded, scheduler, dom, expressions, reads, keyed, windowed, slots, mutations, templates, detached, regressions, lowered}));
 } catch (error) {
-  result.textContent = encodeURIComponent(JSON.stringify({error: phase + ": " + (error.stack || error)}));
+  result.textContent = encodeURIComponent(JSON.stringify({error: phase + ": " + describe(error)}));
 }

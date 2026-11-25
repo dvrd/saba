@@ -75,7 +75,7 @@ http3_retry_normal_serve_uses_explicit_store_before_dispatch :: proc(t: ^testing
 		handler_data = &probe,
 		control = &fixture.control,
 		workers = 2,
-		http3 = {enabled = true, endpoint = {net.IP4_Loopback, 0}, credentials = store, retry = &tokens},
+		http3 = {enabled = true, endpoint = {net.IP4_Loopback, 0}, credentials = store, retry = &tokens, retry_every_connection = true},
 	}
 
 	worker := thread.create_and_start_with_poly_data(&fixture, proc(f: ^Retry_Saba_Server) {f.ok = serve(f.config)})

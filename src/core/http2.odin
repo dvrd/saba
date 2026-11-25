@@ -56,9 +56,6 @@ HTTP2_Session :: struct {
 	// wake used when no stream or connection deadline is pending.
 	close_deadline, wake_deadline:             time.Tick,
 	reset_refill:                              time.Tick,
-	holding:                                   bool,
-	// One polled DATA event kept borrowed while its tunnel's input queue is full.
-	held:                                      h2.Event_View,
 	read_deadline:                             async.Deadline,
 	ingress:                                   [H2_INGRESS]u8,
 	ingress_len:                               int,
@@ -212,11 +209,6 @@ h2_destroy :: proc(task: ^Connection_Task) {
 			_ = h2.connection_output_advance(&session.engine, view.token, 0)
 		}
 
-		if session.holding {
-			_ = h2.connection_event_release(&session.engine, session.held.token)
-			session.holding = false
-		}
-
 		for _ in 0 ..< H2_EVENTS {
 			event, ok := h2.connection_poll(&session.engine)
 			if !ok {
@@ -320,23 +312,22 @@ h2_pump_events :: proc(task: ^Connection_Task) -> bool {
 	progress := false
 
 	for _ in 0 ..< H2_EVENTS {
-		event, ok := session.held, session.holding
-		session.held, session.holding = {}, false
-		if !ok {
-			event, ok = h2.connection_poll(&session.engine)
-		}
+		event, ok := h2.connection_poll(&session.engine)
 		if !ok {
 			break
 		}
 		taken := false
 
-		// A WebSocket tunnel whose input queue is full keeps this DATA event
-		// borrowed at the head of the engine queue. Its flow-control credit stays
-		// withheld, so the peer is back-pressured instead of losing the stream.
+		// A WebSocket tunnel whose input queue is full defers this DATA event: it
+		// stays at the head of the engine queue, unborrowed, and the next poll
+		// returns it. Its flow-control credit stays withheld, so the peer is
+		// back-pressured instead of losing the stream.
 		if data, is_data := event.payload.(h2.Data_Event); is_data {
 			if stream := h2_upgrade_find(task, data.stream);
 			   stream != nil && stream.accepted && stream.input_count == len(stream.inputs) {
-				session.held, session.holding = event, true
+				if h2.connection_event_defer(&session.engine, event.token).kind != .None {
+					session.failed = true
+				}
 				break
 			}
 		}
@@ -502,6 +493,14 @@ h2_check_deadlines :: proc(task: ^Connection_Task) -> bool {
 	session := task.http2
 	streams := h2_has_streams(task)
 	progress := false
+
+	// A connection still working through what the peer sent, or still sending
+	// what it owes, is not idle: a burst of small frames read in one go can take
+	// longer to answer than the idle timeout. Idleness starts when both are done.
+	// The write deadline bounds a peer that never reads.
+	if !streams && (session.ingress_len > 0 || h2_output_pending(session)) {
+		session.idle_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.idle)
+	}
 
 	if server_is_draining(task.runtime) {
 		h2_shutdown(task)

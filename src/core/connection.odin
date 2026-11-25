@@ -357,6 +357,11 @@ serve :: proc(config: Server) -> bool {
 		return false
 	}
 
+	if !http3_limits_valid(config.http3) {
+		log.error("Invalid HTTP3 limits: field, connection or Retry bound out of range")
+		return false
+	}
+
 	if !timeout_in_range(config.handler_timeout) {
 		log.error("Invalid handler timeout")
 		return false

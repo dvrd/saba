@@ -27,6 +27,8 @@ H2W_Server :: struct {
 	// Nonzero replaces the default body timeout; observed turns on observability.
 	body:     time.Duration,
 	observed: bool,
+	// The connection that served /refuse over an ordinary HTTP/2 stream.
+	refused:  ^Connection_Task,
 }
 
 H2W_Frame :: struct {
@@ -61,7 +63,7 @@ h2w_tunnel :: proc(data: rawptr, io: ^Upgrade_IO) -> async.Resume_Result {
 	}
 }
 
-h2w_handler :: proc(data: rawptr, _: ^Connection, request: ^Request) -> Response {
+h2w_handler :: proc(data: rawptr, conn: ^Connection, request: ^Request) -> Response {
 	state := cast(^H2W_Server)data
 	sync.atomic_add(&state.handled, 1)
 
@@ -69,6 +71,9 @@ h2w_handler :: proc(data: rawptr, _: ^Connection, request: ^Request) -> Response
 	case "/hold":
 		return {deferred = {poll = h2w_hold, drop = proc(_: rawptr) {}, timeout = 3 * time.Second}}
 	case "/refuse":
+		if conn != nil && conn._task != nil && conn._task.http2_request != nil {
+			sync.atomic_store(&state.refused, conn._task.http2_request.parent)
+		}
 		return {status = .OK, body = transmute([]u8)string("an ordinary body the peer never grants credit for")}
 	case "/tunnel":
 		return {status = .OK, upgrade = {data = state, resume = h2w_tunnel, drop = proc(_: rawptr) {}}}
@@ -789,5 +794,267 @@ h2_streams_expiring_together_are_all_reset_and_the_connection_survives :: proc(t
 			}
 		}
 		testing.expect(t, answered, "the connection did not serve a request after the resets")
+	})
+}
+
+// A response stream used to be released as soon as its last frame was queued.
+// To a peer that grants no flow-control credit the queued body never left, the
+// stream was never reset and the owner polled it until the connection closed.
+// The stream is now held until its output drains or its response deadline
+// passes, then reset, and the connection keeps serving.
+@(test)
+h2_zero_window_response_is_reset_at_its_deadline :: proc(t: ^testing.T) {
+	state: H2W_Server
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		wire: [dynamic]u8
+		defer delete(wire)
+		h2w_get(&wire, 1, "/refuse")
+		// SETTINGS_INITIAL_WINDOW_SIZE = 0
+		if !testing.expect(t, h2w_preface(peer, []u8{0, 4, 0, 0, 0, 0}) && h2w_send(peer, wire[:])) {
+			return
+		}
+		started := time.tick_now()
+		resumes_started: u64
+		reset := false
+		for !reset {
+			frame, ok := h2w_next(peer, true)
+			if !testing.expect(t, ok, "connection ended before the starved stream was reset") {
+				return
+			}
+			if !testing.expect(t, frame.kind != 7, "GOAWAY before the starved stream was reset") {
+				return
+			}
+			testing.expect(t, frame.kind != 0 || len(frame.payload) == 0, "body sent without flow-control credit")
+			if frame.kind == 1 && frame.stream == 1 {
+				resumes_started = h2w_resumes(state)
+			}
+			if frame.kind == 3 && frame.stream == 1 {
+				testing.expect_value(t, h2w_code(frame), u32(8))
+				reset = true
+			}
+		}
+		elapsed := time.tick_since(started)
+		resumes := h2w_resumes(state) - resumes_started
+		testing.expectf(t, elapsed >= H2W_RESPONSE / 2, "reset after %v, before the response deadline", elapsed)
+		testing.expectf(t, elapsed < H2W_RESPONSE + time.Second, "reset after %v", elapsed)
+		// Waiting for credit is not spinning on it: at most the owner's
+		// millisecond timer wakes the connection.
+		testing.expectf(t, resumes > 0 && f64(resumes) < 3 * f64(elapsed / time.Millisecond), "%d owner turns while waiting %v for credit", resumes, elapsed)
+
+		// A response without a body needs no credit: it ends.
+		clear(&wire)
+		h2w_headers(&wire, 3, true, {{":method", "HEAD"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/"}})
+		if !testing.expect(t, h2w_send(peer, wire[:])) {
+			return
+		}
+		ended := false
+		for !ended {
+			frame, ok := h2w_next(peer, true)
+			if !testing.expect(t, ok && frame.kind != 7, "bodiless response on a starved stream never ended") {
+				return
+			}
+			testing.expect(t, frame.kind != 3, "bodiless response on a starved stream was reset")
+			ended = frame.stream == 3 && frame.kind <= 1 && frame.flags & 1 != 0
+		}
+
+		// The connection still serves a stream the peer does grant credit to.
+		clear(&wire)
+		h2w_get(&wire, 5, "/")
+		h2w_frame(&wire, 8, 0, 5, []u8{0, 0, 0, 100})
+		if !testing.expect(t, h2w_send(peer, wire[:])) {
+			return
+		}
+		answered, body := false, false
+		for !body {
+			frame, ok := h2w_next(peer, true)
+			if !ok {
+				break
+			}
+			if frame.stream == 5 && frame.kind == 1 {
+				testing.expect_value(t, h2w_status(frame), 200)
+				answered = true
+			}
+			if frame.stream == 5 && frame.kind == 0 && frame.flags & 1 != 0 {
+				body = true
+			}
+		}
+		testing.expect(t, answered && body, "the connection did not serve a request after the reset")
+	})
+}
+
+// Owner turns of the connection that served /refuse.
+h2w_resumes :: proc(state: ^H2W_Server) -> u64 {
+	task := sync.atomic_load(&state.refused)
+	if task == nil || task.tls_state == nil {
+		return 0
+	}
+	return sync.atomic_load(&task.tls_state.executor.resumes)
+}
+
+// A DATA event a full tunnel cannot take yet used to stay borrowed across owner
+// turns. It is now deferred: no borrow outlives the pass, the engine queue
+// keeps the event at its head and its credit stays withheld.
+@(test)
+h2_event_for_a_full_tunnel_is_deferred_not_held :: proc(t: ^testing.T) {
+	session: HTTP2_Session
+	session.limits = h2_make_limits(8)
+	if !testing.expect(
+		t,
+		h2.connection_init(&session.engine, {role = .Server, limits = session.limits}, {max_stream_capacity = 16}, context.allocator).kind ==
+		.None,
+	) {
+		return
+	}
+	session.engine_ready = true
+	defer h2.connection_destroy(&session.engine)
+	upgrades: [1]^H2_Upgrade
+	session.upgrades = upgrades[:]
+	task: Connection_Task
+	task.http2 = &session
+
+	wire: [dynamic]u8
+	defer delete(wire)
+	append(&wire, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+	h2w_frame(&wire, 4, 0, 0, nil)
+	h2w_headers(&wire, 1, false, {{":method", "POST"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/"}})
+	h2w_frame(&wire, 0, 0, 1, []u8{'a', 'b', 'c'})
+	at := 0
+	for _ in 0 ..< 64 {
+		fed := h2.connection_feed(&session.engine, wire[at:], 0)
+		if !testing.expect_value(t, fed.error.kind, h2.Error_Kind.None) {
+			return
+		}
+		at += fed.consumed
+		for {
+			view, borrowed := h2.connection_output_front(&session.engine)
+			if !borrowed {
+				break
+			}
+			_ = h2.connection_output_advance(&session.engine, view.token, len(view.bytes))
+		}
+		if at == len(wire) && fed.status != .Yield {
+			break
+		}
+	}
+	if !testing.expect_value(t, at, len(wire)) {
+		return
+	}
+
+	// Everything ahead of the DATA event, the stream's HEADERS among it.
+	handle: h2.Stream_Handle
+	for handle.stream_id == 0 {
+		event, polled := h2.connection_poll(&session.engine)
+		if !testing.expect(t, polled, "no HEADERS event") {
+			return
+		}
+		if headers, is_headers := event.payload.(h2.Headers_Event); is_headers {
+			handle = headers.stream
+		}
+		_ = h2.connection_event_release(&session.engine, event.token)
+	}
+
+	// A tunnel on that stream whose input queue is full.
+	tunnel := H2_Upgrade {
+		handle      = handle,
+		accepted    = true,
+		input_count = H2_BODY_CHUNKS,
+	}
+	upgrades[0] = &tunnel
+	defer upgrades[0] = nil
+
+	for _ in 0 ..< 2 {
+		h2_pump_events(&task)
+		stats, _ := h2.connection_stats(&session.engine)
+		testing.expect(t, !stats.event_borrowed, "the event stays borrowed after the owner pass")
+	}
+
+	// Once the tunnel has room the same event is next.
+	event, polled := h2.connection_poll(&session.engine)
+	if testing.expect(t, polled, "the deferred event was lost") {
+		data, is_data := event.payload.(h2.Data_Event)
+		testing.expect(t, is_data && data.stream == handle, "the deferred event is not the tunnel's DATA")
+		_ = h2.connection_event_release(&session.engine, event.token)
+	}
+}
+
+// A client may keep uploading after an early 413 until it reads the answer.
+// Its late DATA advances no request, but it is not abuse: the connection must
+// not spend its unproductive-frame allowance on it and end the client with
+// ENHANCE_YOUR_CALM. Both an over-limit content-length and a body that
+// outgrows the limit are covered.
+@(test)
+h2_upload_after_an_early_413_does_not_exhaust_the_reset_allowance :: proc(t: ^testing.T) {
+	state: H2W_Server
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		LATE :: 3 * H2_RESET_BURST
+		if !testing.expect(t, h2w_preface(peer)) {
+			return
+		}
+		wire: [dynamic]u8
+		defer delete(wire)
+		filler: [1024]u8
+
+		for stream in ([]u32{1, 3}) {
+			clear(&wire)
+			post := [][2]string{{":method", "POST"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/echo"}}
+			if stream == 1 {
+				h2w_headers(&wire, stream, false, {post[0], post[1], post[2], post[3], {"content-length", "999999"}})
+			} else {
+				h2w_headers(&wire, stream, false, post)
+				for _ in 0 ..< 5 {
+					h2w_frame(&wire, 0, 0, stream, filler[:])
+				}
+			}
+			if !testing.expect(t, h2w_send(peer, wire[:])) {
+				return
+			}
+			rejected := false
+			for !rejected {
+				frame, ok := h2w_next(peer, true)
+				if !testing.expectf(t, ok && frame.kind != 7, "stream %d: connection ended before the 413", stream) {
+					return
+				}
+				rejected = frame.kind == 1 && frame.stream == stream
+			}
+
+			// Frames already in flight when the 413 arrived, then a PING to
+			// learn that the server has read them all.
+			clear(&wire)
+			for _ in 0 ..< LATE {
+				h2w_frame(&wire, 0, 0, stream, filler[:1])
+			}
+			h2w_frame(&wire, 6, 0, 0, []u8{1, 2, 3, 4, 5, 6, 7, u8(stream)})
+			if !testing.expect(t, h2w_send(peer, wire[:])) {
+				return
+			}
+			acknowledged := false
+			for !acknowledged {
+				frame, ok := h2w_next(peer, true)
+				if !testing.expectf(t, ok, "stream %d: connection ended after late DATA", stream) {
+					return
+				}
+				if !testing.expectf(t, frame.kind != 7, "stream %d: GOAWAY(%d) after late DATA", stream, h2w_code(frame)) {
+					return
+				}
+				acknowledged = frame.kind == 6 && frame.flags & 1 != 0 && frame.payload[7] == u8(stream)
+			}
+		}
+
+		// And the connection still serves.
+		clear(&wire)
+		h2w_get(&wire, 5, "/")
+		if !testing.expect(t, h2w_send(peer, wire[:])) {
+			return
+		}
+		answered := false
+		for !answered {
+			frame, ok := h2w_next(peer, true)
+			if !ok || frame.kind == 7 {
+				break
+			}
+			answered = frame.kind == 1 && frame.stream == 5 && h2w_status(frame) == 200
+		}
+		testing.expect(t, answered, "the connection did not serve a request after the rejected uploads")
+		testing.expect_value(t, sync.atomic_load(&state.handled), 1)
 	})
 }

@@ -2,12 +2,12 @@ package main
 
 import core "shared:saba/core"
 import surf "shared:surf"
-import http "shared:http"
+import http "shared:async/http"
 import "core:strconv"
-import h3 "shared:http/v3"
-import "core:crypto/tls"
-import credentials "core:crypto/tls/credentials"
-import store "core:crypto/tls/credentials/store"
+import h3 "shared:async/http/v3"
+import "shared:async/tls"
+import credentials "shared:async/tls/credentials"
+import store "shared:async/tls/credentials/store"
 import "core:fmt"
 import "core:log"
 import "core:net"
@@ -92,7 +92,7 @@ server :: proc(cert_path, key_path: string) {
 }
 client :: proc(port_text, cert_path, mode: string) {
 	roots: tls.Root_Pool
-	assert(tls.root_pool_load_file(&roots, cert_path).kind == .None)
+	assert(tls.root_pool_load_file(&roots, cert_path) == nil)
 	defer tls.root_pool_destroy(&roots)
 
 	if mode == "client" {

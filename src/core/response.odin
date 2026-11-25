@@ -1,14 +1,14 @@
 package saba_core
 
-import http "shared:http"
-import http1 "shared:http/v1"
+import http "shared:async/http"
+import http1 "shared:async/http/v1"
 import "core:log"
 import "core:time"
-import exchange "shared:http/exchange"
+import exchange "shared:async/http/exchange"
 import rt "base:runtime"
 import "core:mem"
-import budget "core:sync/budget"
-import owned "core:mem/owned"
+import budget "shared:async/sync/budget"
+import owned "shared:async/mem/owned"
 import "core:strconv"
 import async "shared:async"
 

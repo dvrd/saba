@@ -1,14 +1,14 @@
 package saba_core
 
-import "core:crypto/tls"
-import tlscredentials "core:crypto/tls/credentials"
-import credential_store "core:crypto/tls/credentials/store"
+import "shared:async/tls"
+import tlscredentials "shared:async/tls/credentials"
+import credential_store "shared:async/tls/credentials/store"
 import "core:sync"
 import "core:testing"
 import "core:thread"
 import "core:time"
 import async "shared:async"
-import h2 "shared:http/v2"
+import h2 "shared:async/http/v2"
 
 // Loopback wire regressions for the HTTP/2 owner: one real TLS listener and a
 // hand-framed peer, so deadlines, flow control and resets are exercised end to end.
@@ -110,7 +110,7 @@ h2w_run :: proc(t: ^testing.T, state: ^H2W_Server, exchange: proc(t: ^testing.T,
 	assert(stored.kind == .None && credential_store.replace(store, &credential).kind == .None)
 	defer credential_store.destroy(&store)
 	roots: tls.Root_Pool
-	assert(tls.root_pool_parse(&roots, certificate).kind == .None)
+	assert(tls.root_pool_parse(&roots, certificate) == nil)
 	defer tls.root_pool_destroy(&roots)
 	state.tls = {
 		store = store,
@@ -158,17 +158,17 @@ h2w_run :: proc(t: ^testing.T, state: ^H2W_Server, exchange: proc(t: ^testing.T,
 			handshake_timeout = 5 * time.Second,
 		},
 	)
-	if !testing.expect(t, dialed.kind == .None, "TLS dial failed") {
+	if !testing.expect(t, dialed == nil, "TLS dial failed") {
 		return
 	}
 	defer _ = tls.abort(&peer.conn)
-	assert(tls.set_deadline(&peer.conn, time.time_add(time.now(), H2W_PATIENCE)).kind == .None)
+	assert(tls.set_deadline(&peer.conn, time.time_add(time.now(), H2W_PATIENCE)) == nil)
 	exchange(t, state, peer)
 }
 
 h2w_send :: proc(peer: ^H2W_Peer, bytes: []u8) -> bool {
 	n, error := tls.write(&peer.conn, bytes)
-	return error.kind == .None && n == len(bytes)
+	return error == nil && n == len(bytes)
 }
 
 h2w_frame :: proc(out: ^[dynamic]u8, kind, flags: u8, stream: u32, payload: []u8) {
@@ -211,7 +211,7 @@ h2w_preface :: proc(peer: ^H2W_Peer, settings: []u8 = nil) -> bool {
 h2w_read_exact :: proc(peer: ^H2W_Peer, bytes: []u8) -> bool {
 	for at := 0; at < len(bytes); {
 		n, error := tls.read(&peer.conn, bytes[at:])
-		if error.kind != .None || n == 0 {
+		if error != nil || n == 0 {
 			return false
 		}
 		at += n

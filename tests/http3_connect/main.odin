@@ -4,17 +4,17 @@ import core "shared:saba/core"
 import ws "shared:saba/websocket"
 import surf "shared:surf"
 import codec "shared:websocket"
-import tls "core:crypto/tls"
-import credentials "core:crypto/tls/credentials"
-import store "core:crypto/tls/credentials/store"
-import budget "core:sync/budget"
+import tls "shared:async/tls"
+import credentials "shared:async/tls/credentials"
+import store "shared:async/tls/credentials/store"
+import budget "shared:async/sync/budget"
 import rt "base:runtime"
 import "core:fmt"
 import "core:bytes"
 import "core:log"
 import "core:mem"
 import "core:net"
-import h3 "shared:http/v3"
+import h3 "shared:async/http/v3"
 import "core:os"
 import "core:sync"
 import "core:thread"
@@ -129,7 +129,7 @@ server :: proc(cert_path, key_path: string, root_path: string = "", load_mode: b
 	}
 
 	if root_path != "" {
-		assert(tls.root_pool_load_file(&state.roots, root_path).kind == .None)
+		assert(tls.root_pool_load_file(&state.roots, root_path) == nil)
 		state.auth = {
 			mode  = .Require,
 			roots = state.roots.roots[:state.roots.count],
@@ -242,7 +242,7 @@ client :: proc(
 	replacement_key: string = "",
 ) {
 	roots: tls.Root_Pool
-	assert(tls.root_pool_load_file(&roots, cert_path).kind == .None)
+	assert(tls.root_pool_load_file(&roots, cert_path) == nil)
 	defer tls.root_pool_destroy(&roots)
 	identity: ^store.Store
 	if identity_cert != "" {
@@ -367,7 +367,7 @@ client :: proc(
 }
 negative :: proc(port, cert_path: string) {
 	roots: tls.Root_Pool
-	assert(tls.root_pool_load_file(&roots, cert_path).kind == .None)
+	assert(tls.root_pool_load_file(&roots, cert_path) == nil)
 	defer tls.root_pool_destroy(&roots)
 	pool: h3.Pool
 	defer h3.pool_close(&pool)

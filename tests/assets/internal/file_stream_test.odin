@@ -1,7 +1,7 @@
 package saba_assets
 
 import core "../core"
-import exchange "shared:http/exchange"
+import exchange "shared:async/http/exchange"
 import "core:mem"
 import "core:os"
 import "core:testing"

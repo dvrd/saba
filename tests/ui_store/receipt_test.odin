@@ -7,7 +7,7 @@ import "core:strings"
 import "core:testing"
 import "core:thread"
 import "core:time"
-import "shared:http"
+import "shared:async/http"
 import "shared:surf"
 
 ITEM :: "/api/items/42"

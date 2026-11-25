@@ -1,17 +1,17 @@
 package saba_core
 
-import h2 "shared:http/v2"
+import h2 "shared:async/http/v2"
 import "core:mem"
 import "core:strings"
-import budget "core:sync/budget"
+import budget "shared:async/sync/budget"
 import "core:time"
 import async "shared:async"
-import hpack "shared:http/v2/hpack"
-import charged "core:mem/budget"
-import owned "core:mem/owned"
+import hpack "shared:async/http/v2/hpack"
+import charged "shared:async/mem/budget"
+import owned "shared:async/mem/owned"
 import "core:net"
-import http "shared:http"
-import exchange "shared:http/exchange"
+import http "shared:async/http"
+import exchange "shared:async/http/exchange"
 import "core:strconv"
 
 // One serialized socket/engine owner, independent lazily allocated request and
@@ -545,8 +545,8 @@ h2_read :: proc(task: ^Connection_Task) -> (bool, bool) {
 	}
 
 	if error.kind == .Timeout {
-		if task.tls_state != nil && task.tls_state.error.kind == .Timeout {
-			task.tls_state.error = {}
+		if task.tls_state != nil && tls_timed_out(task.tls_state.error) {
+			task.tls_state.error = nil
 		}
 		return n > 0, false
 	}

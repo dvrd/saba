@@ -4,7 +4,7 @@ import rt "base:runtime"
 import core "../core"
 import async "shared:async"
 import "core:mem"
-import budget "core:sync/budget"
+import budget "shared:async/sync/budget"
 import "core:testing"
 
 WS79_Allocator :: struct {

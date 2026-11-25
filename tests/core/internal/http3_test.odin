@@ -1,11 +1,11 @@
 package saba_core
 
-import http3 "shared:http/v3"
+import http3 "shared:async/http/v3"
 import async "shared:async"
 import signal "shared:async/signal"
-import owned "core:mem/owned"
-import budget "core:sync/budget"
-import credential_store "core:crypto/tls/credentials/store"
+import owned "shared:async/mem/owned"
+import budget "shared:async/sync/budget"
+import credential_store "shared:async/tls/credentials/store"
 import "core:net"
 import "core:testing"
 import "core:sync"

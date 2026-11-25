@@ -1,12 +1,12 @@
 package saba_core
 
 import rt "base:runtime"
-import http "shared:http"
-import http1 "shared:http/v1"
+import http "shared:async/http"
+import http1 "shared:async/http/v1"
 import "core:log"
 import "core:mem"
-import charged "core:mem/budget"
-import budget "core:sync/budget"
+import charged "shared:async/mem/budget"
+import budget "shared:async/sync/budget"
 import "core:net"
 import "core:strings"
 import "core:sync"

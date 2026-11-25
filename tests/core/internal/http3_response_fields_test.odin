@@ -1,10 +1,10 @@
 package saba_core
 
-import "core:crypto/tls"
-import tlscredentials "core:crypto/tls/credentials"
-import credential_store "core:crypto/tls/credentials/store"
+import "shared:async/tls"
+import tlscredentials "shared:async/tls/credentials"
+import credential_store "shared:async/tls/credentials/store"
 import "core:net"
-import http3 "shared:http/v3"
+import http3 "shared:async/http/v3"
 import "core:testing"
 import "core:thread"
 import "core:time"
@@ -66,7 +66,7 @@ http3_connection_specific_and_unrepresentable_response_headers_stay_stream_local
 	assert(stored.kind == .None && credential_store.replace(store, &credential).kind == .None)
 	defer credential_store.destroy(&store)
 	roots: tls.Root_Pool
-	assert(tls.root_pool_parse(&roots, certificate).kind == .None)
+	assert(tls.root_pool_parse(&roots, certificate) == nil)
 	defer tls.root_pool_destroy(&roots)
 	fixture: H3_Fields_Server
 	fixture.config = {

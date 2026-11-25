@@ -1,12 +1,12 @@
 package saba_core
 
-import "core:crypto/tls"
+import "shared:async/tls"
 import "core:fmt"
 import "core:net"
 import "core:sync"
 import "core:thread"
 import "core:time"
-import http3 "shared:http/v3"
+import http3 "shared:async/http/v3"
 
 H3_Test_Client :: struct {
 	endpoint:  net.Endpoint,
@@ -35,7 +35,7 @@ h3_test_client_run :: proc(client: ^H3_Test_Client) {
 	roots: tls.Root_Pool
 	defer tls.root_pool_destroy(&roots)
 	if !client.untrusted {
-		assert(tls.root_pool_parse(&roots, transmute([]u8)string(HTTPS80_TEST_CERT)).kind == .None)
+		assert(tls.root_pool_parse(&roots, transmute([]u8)string(HTTPS80_TEST_CERT)) == nil)
 	}
 	client.result = http3.client_exchange_request(
 		client.endpoint,

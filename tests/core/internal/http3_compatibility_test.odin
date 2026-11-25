@@ -1,6 +1,6 @@
 package saba_core
 
-import http3 "shared:http/v3"
+import http3 "shared:async/http/v3"
 import "core:fmt"
 import "core:net"
 import "core:thread"
@@ -8,8 +8,8 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 import async "shared:async"
-import budget "core:sync/budget"
-import credential_store "core:crypto/tls/credentials/store"
+import budget "shared:async/sync/budget"
+import credential_store "shared:async/tls/credentials/store"
 
 Saba_Hit :: struct {
 	calls:    int,

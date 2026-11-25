@@ -3,7 +3,7 @@ package server
 import application "application"
 import assets "assets"
 import core "core"
-import "core:crypto/tls"
+import "shared:async/tls"
 import "core:log"
 import "core:mem"
 import "core:net"

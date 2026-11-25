@@ -464,7 +464,7 @@ compile_module :: proc(
 	}
 	if len(job.parser.errors) != 0 {
 		err := job.parser.errors[0]
-		p.position = int(err.loc)
+		p.position = int(err.start)
 		// Kessel reports a closing-tag mismatch at the following token.
 		if strings.has_prefix(err.message, "Expected corresponding JSX closing tag") {
 			if closing := strings.last_index(source[:min(len(source), p.position)], "</");

@@ -1,8 +1,8 @@
 package saba_core
 
-import http3 "shared:http/v3"
-import "core:crypto/tls"
-import credential_store "core:crypto/tls/credentials/store"
+import http3 "shared:async/http/v3"
+import "shared:async/tls"
+import credential_store "shared:async/tls/credentials/store"
 import "core:net"
 import "core:testing"
 import "core:time"
@@ -12,7 +12,7 @@ http3_inherits_client_auth_policy_and_requires_explicit_disable :: proc(t: ^test
 	identity := https80_make_store(t)
 	defer credential_store.destroy(&identity)
 	roots: tls.Root_Pool
-	assert(tls.root_pool_parse(&roots, transmute([]u8)string(HTTPS80_TEST_CERT)).kind == .None)
+	assert(tls.root_pool_parse(&roots, transmute([]u8)string(HTTPS80_TEST_CERT)) == nil)
 	defer tls.root_pool_destroy(&roots)
 	require := tls.Client_Auth_Config {
 		mode  = .Require,
@@ -20,7 +20,7 @@ http3_inherits_client_auth_policy_and_requires_explicit_disable :: proc(t: ^test
 	}
 
 	keys: tls.Server_Ticket_Keys
-	assert(tls.server_ticket_keys_init(&keys) == .None)
+	assert(tls.server_ticket_keys_init(&keys) == nil)
 	defer tls.server_ticket_keys_close(&keys)
 	tickets := tls.Server_Ticket_Config {
 		keys         = &keys,

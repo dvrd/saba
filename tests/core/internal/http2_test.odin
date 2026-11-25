@@ -1,7 +1,7 @@
 package saba_core
 
 import "core:testing"
-import h2 "shared:http/v2"
+import h2 "shared:async/http/v2"
 
 @(test)
 h2_limits_match_exchange_budgets :: proc(t: ^testing.T) {

@@ -2,15 +2,15 @@ package saba_core
 
 import async "shared:async"
 import rt "base:runtime"
-import "core:crypto/tls/credentials"
+import "shared:async/tls/credentials"
 import "core:encoding/hex"
 import "core:fmt"
 import "core:mem"
-import charged "core:mem/budget"
-import credential_store "core:crypto/tls/credentials/store"
+import charged "shared:async/mem/budget"
+import credential_store "shared:async/tls/credentials/store"
 import "core:net"
 import "core:sync"
-import budget "core:sync/budget"
+import budget "shared:async/sync/budget"
 import "core:testing"
 import "core:thread"
 import "core:time"
@@ -19,7 +19,9 @@ HTTPS80_Lifecycle :: struct {
 	runtime:                             Server_Runtime,
 	connection:                          ^Connection_Task,
 	initialized, done:                   bool,
-	first_thread:                        int,
+	// The bridge owns a connection by task, not by thread: callbacks may run on
+	// any worker, but never two at once, and events only inside one of them.
+	inside:                              bool,
 	resumes, cancels, closed_events:     int,
 	close_done, close_callbacks_drained: bool,
 }
@@ -40,7 +42,7 @@ https80_pair :: proc() -> (client, peer: net.TCP_Socket) {
 
 https80_lifecycle_event :: proc(data: rawptr, event: ^TLS_Event) {
 	probe := cast(^HTTPS80_Lifecycle)data
-	assert(sync.current_thread_id() == probe.first_thread)
+	assert(sync.atomic_load(&probe.inside), "TLS event outside its connection task")
 
 	if event.kind == .Closed {
 		probe.closed_events += 1
@@ -52,11 +54,8 @@ https80_lifecycle_resume :: proc(data: rawptr) -> async.Resume_Result {
 	task := cast(^Connection_Task)data
 	probe := cast(^HTTPS80_Lifecycle)task.runtime.config.handler_data
 
-	if probe.resumes == 0 {
-		probe.first_thread = sync.current_thread_id()
-	} else {
-		assert(sync.current_thread_id() == probe.first_thread)
-	}
+	https80_lifecycle_enter(probe)
+	defer https80_lifecycle_leave(probe)
 
 	probe.resumes += 1
 	result := handle_connection(data)
@@ -71,7 +70,8 @@ https80_lifecycle_resume :: proc(data: rawptr) -> async.Resume_Result {
 https80_lifecycle_cancel :: proc(data: rawptr) -> async.Resume_Result {
 	task := cast(^Connection_Task)data
 	probe := cast(^HTTPS80_Lifecycle)task.runtime.config.handler_data
-	assert(sync.current_thread_id() == probe.first_thread)
+	https80_lifecycle_enter(probe)
+	defer https80_lifecycle_leave(probe)
 	probe.cancels += 1
 
 	return connection_cancel(data)
@@ -80,7 +80,7 @@ https80_lifecycle_cancel :: proc(data: rawptr) -> async.Resume_Result {
 https80_lifecycle_done :: proc(data: rawptr) {
 	task := cast(^Connection_Task)data
 	probe := cast(^HTTPS80_Lifecycle)task.runtime.config.handler_data
-	assert(sync.current_thread_id() == probe.first_thread)
+	https80_lifecycle_enter(probe)
 
 	if task.tls_state != nil && task.tls_state.initialized {
 		probe.close_done = task.tls_state.close_done
@@ -89,7 +89,17 @@ https80_lifecycle_done :: proc(data: rawptr) {
 
 	finish_connection(data)
 	probe.connection = nil
+	https80_lifecycle_leave(probe)
 	sync.atomic_store(&probe.done, true)
+}
+
+https80_lifecycle_enter :: proc(probe: ^HTTPS80_Lifecycle) {
+	_, entered := sync.atomic_compare_exchange_strong(&probe.inside, false, true)
+	assert(entered, "two callbacks of one connection task ran at once")
+}
+
+https80_lifecycle_leave :: proc(probe: ^HTTPS80_Lifecycle) {
+	sync.atomic_store(&probe.inside, false)
 }
 
 https80_wait_flag :: proc(flag: ^bool) {
@@ -151,7 +161,7 @@ https80_lifecycle_run :: proc(
 	if hello {
 		hello_hex := HTTPS80_TEST_CLIENT_HELLO
 		message, decoded := hex.decode(transmute([]u8)hello_hex)
-		assert(decoded)
+		assert(decoded == nil)
 		wire: [1024]u8
 		wire[0], wire[1], wire[2] = 22, 3, 3
 		wire[3], wire[4] = u8(len(message) >> 8), u8(len(message))

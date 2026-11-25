@@ -11,7 +11,7 @@ import "core:time"
 import async "shared:async"
 import pool "shared:async/offload"
 import signal "shared:async/signal"
-import http "shared:http"
+import http "shared:async/http"
 import surf "shared:surf"
 
 Module_Fixture :: struct {

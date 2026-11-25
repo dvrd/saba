@@ -1,8 +1,8 @@
 package saba_core
 
-import exchange "shared:http/exchange"
+import exchange "shared:async/http/exchange"
 import "core:mem"
-import owned "core:mem/owned"
+import owned "shared:async/mem/owned"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -32,7 +32,9 @@ stream_submission_moves_only_on_acceptance :: proc(t: ^testing.T) {
 	large, _ := owned.allocate(9, context.allocator)
 	defer owned.destroy(&large)
 	large.data = large.data[:1]
-	testing.expect_value(t, stream_submit(&io, &large), .Backpressure)
+	// Storage larger than the queue ever retains is refused outright: draining
+	// would never make room for it, so backpressure would never end.
+	testing.expect_value(t, stream_submit(&io, &large), .Limit_Exceeded)
 	testing.expect_value(t, len(large.storage), 9)
 	testing.expect_value(t, stream_submit(nil, &second), .Invalid)
 }

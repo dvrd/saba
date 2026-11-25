@@ -2,7 +2,7 @@ package main
 
 import rt "base:runtime"
 import "core:fmt"
-import owned "core:mem/owned"
+import owned "shared:async/mem/owned"
 import "core:os"
 import "core:thread"
 import "core:time"

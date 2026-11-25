@@ -1,8 +1,8 @@
 package saba_core
 
-import http3 "shared:http/v3"
-import credential_store "core:crypto/tls/credentials/store"
-import "core:crypto/tls"
+import http3 "shared:async/http/v3"
+import credential_store "shared:async/tls/credentials/store"
+import "shared:async/tls"
 import "core:log"
 import "core:net"
 import "core:sync"
@@ -106,7 +106,7 @@ http3_request_timeout_native_pending_callback_closes_and_releases_once :: proc(t
 	identity := https80_make_store(t)
 	defer credential_store.destroy(&identity)
 	roots: tls.Root_Pool
-	assert(tls.root_pool_parse(&roots, transmute([]u8)string(HTTPS80_TEST_CERT)).kind == .None)
+	assert(tls.root_pool_parse(&roots, transmute([]u8)string(HTTPS80_TEST_CERT)) == nil)
 	defer tls.root_pool_destroy(&roots)
 	probe: H3_Timeout_Probe
 	fixture: H3_Server_Fixture
@@ -185,7 +185,7 @@ http3_request_timeout_zero_keeps_native_thirty_second_default :: proc(t: ^testin
 	identity := https80_make_store(t)
 	defer credential_store.destroy(&identity)
 	roots: tls.Root_Pool
-	assert(tls.root_pool_parse(&roots, transmute([]u8)string(HTTPS80_TEST_CERT)).kind == .None)
+	assert(tls.root_pool_parse(&roots, transmute([]u8)string(HTTPS80_TEST_CERT)) == nil)
 	defer tls.root_pool_destroy(&roots)
 	default_seen := false
 	fixture: H3_Server_Fixture

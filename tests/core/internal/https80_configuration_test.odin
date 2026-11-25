@@ -1,7 +1,7 @@
 package saba_core
 
-import credential_store "core:crypto/tls/credentials/store"
-import credentials "core:crypto/tls/credentials"
+import credential_store "shared:async/tls/credentials/store"
+import credentials "shared:async/tls/credentials"
 import "core:testing"
 import "core:mem"
 import "core:log"

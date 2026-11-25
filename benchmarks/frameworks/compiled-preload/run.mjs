@@ -42,8 +42,10 @@ function median(numbers) {
 function installClock() {
   const eligible = () => {
     const input = document.querySelector('input[name="title"]');
+    const host = document.getElementById("app");
     return input?.value === "Lamp" && input.matches(":enabled") &&
-      !document.getElementById("app").inert && input.getClientRects().length > 0 &&
+      !host.inert && !host.hasAttribute("data-saba-pending") &&
+      input.getClientRects().length > 0 &&
       document.querySelector("[data-saba-recover]").hidden;
   };
   function check() {

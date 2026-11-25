@@ -25,14 +25,36 @@ Fixture :: struct {
 	holding:    i32,
 }
 
-attach :: proc(f: ^Fixture, timeout: time.Duration = 500 * time.Millisecond, tasks := 4) {
+// The fixture's upstream is the server itself on 127.0.0.1, which the default
+// policy refuses. Tests that proxy to it accept loopback explicitly.
+allow_loopback :: proc(_: string, addresses: []net.Endpoint, _: rawptr) -> bool {
+	for address in addresses {
+		ip, ok := address.address.(net.IP4_Address)
+		if !ok || ip != net.IP4_Loopback {
+			return false
+		}
+	}
+	return len(addresses) > 0
+}
+
+attach :: proc(
+	f: ^Fixture,
+	timeout: time.Duration = 500 * time.Millisecond,
+	tasks := 4,
+	policy: upstream.Address_Policy = allow_loopback,
+) {
 	allocator := rt.heap_allocator()
 	assert(
 		async.init(&f.runtime, {workers = 1, task_capacity = tasks, io_capacity = 4, allocator = allocator}).kind ==
 		.None,
 	)
 	config := client.Client_Config {
-		http = {allow_http = true, timeout = timeout, max_body_size = 8192},
+		http = {
+			allow_http = true,
+			timeout = timeout,
+			max_body_size = 8192,
+			address_policy = policy,
+		},
 		capacities = client.Capacities {
 			requests = 2,
 			origins = 2,
@@ -43,8 +65,7 @@ attach :: proc(f: ^Fixture, timeout: time.Duration = 500 * time.Millisecond, tas
 			work_per_resume = 8,
 		},
 	}
-	assert(client.client_init(&f.client, &f.runtime, config, allocator).kind == .None)
-	assert(upstream.attach(&f.dispatcher, &f.client, &f.runtime, allocator))
+	assert(upstream.attach(&f.dispatcher, &f.client, &f.runtime, config, allocator))
 }
 
 copy_body :: proc(source: ^surf.Response, allocator: mem.Allocator) -> (server.Response, bool) {
@@ -89,8 +110,12 @@ route :: proc(data: rawptr, _: ^server.Connection, request: ^server.Request) -> 
 	)
 }
 
-start :: proc(f: ^Fixture, timeout: time.Duration) -> net.Endpoint {
-	attach(f, timeout)
+start :: proc(
+	f: ^Fixture,
+	timeout: time.Duration,
+	policy: upstream.Address_Policy = allow_loopback,
+) -> net.Endpoint {
+	attach(f, timeout, policy = policy)
 	assert(async.start(&f.runtime).kind == .None)
 	f.worker = thread.create_and_start_with_poly_data(f, proc(f: ^Fixture) {
 		f.served = server.serve(
@@ -147,6 +172,116 @@ single_worker_serves_its_own_upstream_request :: proc(t: ^testing.T) {
 		testing.expect_value(t, string(result.body), body)
 		surf.response_destroy(&result)
 	}
+}
+
+// An application that names no policy gets the public-only one, so a proxied
+// request to a loopback upstream is refused before any dial.
+@(test)
+default_policy_refuses_a_loopback_upstream :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 12 * time.Second)
+	f: Fixture
+	endpoint := start(&f, 2 * time.Second, nil)
+	defer stop(&f)
+	buffer: [80]u8
+	url := fmt.bprintf(buffer[:], "http://127.0.0.1:%d/proxy", endpoint.port)
+	result, error := surf.execute(
+		{method = .POST, url = url, body = transmute([]u8)string("private")},
+		{allow_http = true, timeout = 3 * time.Second},
+	)
+	testing.expect_value(t, error.kind, .None)
+	testing.expect_value(t, result.status, 502)
+	testing.expect(t, string(result.body) != "private")
+	surf.response_destroy(&result)
+	stats, ok := client.client_stats(&f.client)
+	testing.expect(t, ok)
+	testing.expect_value(t, stats.active_connections + stats.idle_connections + stats.connecting_connections, 0)
+}
+
+// An explicit policy is the opt-out for an internal upstream.
+@(test)
+explicit_policy_admits_a_loopback_upstream :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 12 * time.Second)
+	f: Fixture
+	endpoint := start(&f, 2 * time.Second, allow_loopback)
+	defer stop(&f)
+	buffer: [80]u8
+	url := fmt.bprintf(buffer[:], "http://127.0.0.1:%d/proxy", endpoint.port)
+	result, error := surf.execute(
+		{method = .POST, url = url, body = transmute([]u8)string("internal")},
+		{allow_http = true, timeout = 3 * time.Second},
+	)
+	testing.expect_value(t, error.kind, .None)
+	testing.expect_value(t, result.status, 201)
+	testing.expect_value(t, string(result.body), "internal")
+	surf.response_destroy(&result)
+}
+
+public_only_allows :: proc(address: net.Address) -> bool {
+	addresses := [1]net.Endpoint{{address = address, port = 80}}
+	return upstream.address_policy_public_only("upstream.example", addresses[:], nil)
+}
+
+mapped :: proc(ip: net.IP4_Address) -> net.IP6_Address {
+	return net.IP6_Address {
+		0,
+		0,
+		0,
+		0,
+		0,
+		0xffff,
+		u16be(ip[0]) << 8 | u16be(ip[1]),
+		u16be(ip[2]) << 8 | u16be(ip[3]),
+	}
+}
+
+@(test)
+public_only_policy_refuses_special_purpose_ranges :: proc(t: ^testing.T) {
+	refused_ip4 := [?]net.IP4_Address {
+		{127, 0, 0, 1},
+		{10, 1, 2, 3},
+		{172, 16, 0, 1},
+		{192, 168, 1, 1},
+		{169, 254, 169, 254},
+		// Shared address space 100.64.0.0/10, both ends.
+		{100, 64, 0, 0},
+		{100, 127, 255, 255},
+		// 0.0.0.0/8.
+		{0, 0, 0, 0},
+		{0, 1, 2, 3},
+		// Multicast and 240.0.0.0/4, including broadcast.
+		{224, 0, 0, 1},
+		{240, 0, 0, 1},
+		{255, 255, 255, 255},
+	}
+	for ip in refused_ip4 {
+		testing.expectf(t, !public_only_allows(ip), "%v was admitted", ip)
+		testing.expectf(t, !public_only_allows(mapped(ip)), "::ffff:%v was admitted", ip)
+	}
+	refused_ip6 := [?]net.IP6_Address {
+		{},
+		net.IP6_Loopback,
+		{0xfe80, 0, 0, 0, 0, 0, 0, 1},
+		{0xfd00, 0, 0, 0, 0, 0, 0, 1},
+		{0xff02, 0, 0, 0, 0, 0, 0, 1},
+		// NAT64 well-known prefix 64:ff9b::/96 in front of a public address.
+		{0x64, 0xff9b, 0, 0, 0, 0, 0x0808, 0x0808},
+		{0x64, 0xff9b, 0, 0, 0, 0, 0x7f00, 0x0001},
+	}
+	for ip in refused_ip6 {
+		testing.expectf(t, !public_only_allows(ip), "%v was admitted", ip)
+	}
+	admitted := [?]net.Address {
+		net.IP4_Address{8, 8, 8, 8},
+		net.IP4_Address{100, 63, 255, 255},
+		net.IP4_Address{100, 128, 0, 0},
+		net.IP4_Address{223, 255, 255, 255},
+		mapped({8, 8, 8, 8}),
+		net.IP6_Address{0x2001, 0x4860, 0x4860, 0, 0, 0, 0, 0x8888},
+	}
+	for address in admitted {
+		testing.expectf(t, public_only_allows(address), "%v was refused", address)
+	}
+	testing.expect(t, !upstream.address_policy_public_only("upstream.example", nil, nil))
 }
 
 open_held_request :: proc(endpoint: net.Endpoint) -> net.TCP_Socket {

@@ -48,36 +48,64 @@ State :: struct {
 	abandoned:  bool,
 }
 
-// Attach to a fresh buffered client and the runtime that hosts it. The dispatcher
-// exclusively consumes that client. Give it one runtime task slot and a thread-safe
-// allocator. Keep all three at stable addresses through detach. Surf has no
-// per-request completion notification. While requests are active, interval sets
-// the polling cadence; a completion may wait up to one interval plus scheduler
-// delay. The task parks without a timer when idle.
+// Refuses an address set unless every address is global unicast. This is
+// Surf's policy: loopback, RFC 1918, 100.64.0.0/10, 169.254.0.0/16, 0.0.0.0/8,
+// 224.0.0.0/4, 240.0.0.0/4, ::, ::1, fe80::/10, fc00::/7, ff00::/8,
+// 64:ff9b::/96, and the ::ffff: form of each refused IPv4 address.
+address_policy_public_only :: surf.address_policy_public_only
+
+// Return false to refuse every address. user is Client_Config.http.address_policy_data.
+Address_Policy :: surf.Address_Policy
+
+// Initialize c from config and attach to it and the runtime that hosts it. The
+// dispatcher exclusively consumes that client. Give it one runtime task slot and
+// a thread-safe allocator. Keep all three at stable addresses through detach.
+// Surf has no per-request completion notification. While requests are active,
+// interval sets the polling cadence; a completion may wait up to one interval
+// plus scheduler delay. The task parks without a timer when idle.
+//
+// Outbound URLs often carry request data, so the client refuses private,
+// loopback, link-local and metadata addresses by default: a nil
+// config.http.address_policy selects address_policy_public_only. Surf checks the
+// policy after DNS and before every dial, including each redirect hop. An
+// application whose upstream is internal supplies its own policy, for example
+// one that accepts only that upstream's addresses, with any state it needs in
+// config.http.address_policy_data. A refused dial answers 502 Bad Gateway.
+//
+// On success the application owns c as before: close it, detach, then destroy
+// it. On failure c is left zeroed.
 attach :: proc(
 	d: ^Dispatcher,
 	c: ^client.Client,
 	runtime: ^async.Runtime,
+	config: client.Client_Config,
 	allocator: mem.Allocator,
 	interval: time.Duration = time.Millisecond,
 ) -> bool {
 	if d == nil ||
 	   d.client != nil ||
+	   c == nil ||
 	   runtime == nil ||
 	   interval <= 0 ||
 	   allocator.procedure == nil ||
 	   .Free not_in mem.query_features(allocator) {
 		return false
 	}
+	config := config
+	if config.http.address_policy == nil {
+		config.http.address_policy = address_policy_public_only
+		config.http.address_policy_data = nil
+	}
+	if client.client_init(c, runtime, config, allocator).kind != .None {
+		return false
+	}
+	attached := false
+	defer if !attached {
+		_ = client.client_close(c)
+		_ = client.client_destroy(c)
+	}
 	stats, ok := client.client_stats(c)
-	if !ok ||
-	   stats.capacities.requests < 1 ||
-	   stats.preparing_requests +
-			   stats.queued_requests +
-			   stats.active_requests +
-			   stats.completed_requests +
-			   stats.returning_requests !=
-		   0 {
+	if !ok || stats.capacities.requests < 1 {
 		return false
 	}
 	slots, err := make([]Slot, stats.capacities.requests, allocator)
@@ -102,6 +130,7 @@ attach :: proc(
 		return false
 	}
 	d.registered = true
+	attached = true
 	return true
 }
 
@@ -199,6 +228,11 @@ failure_status :: proc(error: client.Client_Error) -> server.HTTP_Status {
 	   transport == net.TCP_Send_Error.Timeout ||
 	   transport == net.Dial_Error.Timeout {
 		return .Gateway_Timeout
+	}
+	// The address policy refused every address of the upstream. The gateway
+	// could not reach an upstream it may use; the client did nothing wrong.
+	if error.http.kind == .Address_Rejected {
+		return .Bad_Gateway
 	}
 	if error.kind == .Closed ||
 	   error.kind == .Capacity ||

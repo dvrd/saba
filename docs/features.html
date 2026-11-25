@@ -160,11 +160,11 @@ const operations = [
     "steps": [
       [0, 1, "Read the holes", "Kessel supplies expression nodes, spans and their lexical positions to the Saba emitter.", "docs/adr/0003-saba-jsx-compiler-on-kessel.md:21", "literal · tag · callback · await", "\u003cp>{\"Inbox\"}\u003c/p>  \u003cp>{label`unread`}\u003c/p>"],
       [1, 2, "Literal child", "A primitive literal belongs to the one-shot grammar. Its value passes directly to the child position.", "docs/adr/0007-saba-reactive-props-and-bindings.md:27", "string value", "jsx(\"p\", {}, \"Inbox\")"],
-      [2, 3, "Tagged template", "Saba wraps this synchronous value expression in a private binding descriptor. The tag can read a signal when the browser evaluates it.", "docs/adr/0007-saba-reactive-props-and-bindings.md:98", "private reader", "jsx(\"p\", {}, binding(() => label`unread`))"],
-      [3, 4, "Track the tag", "The tag reads unread while its binding runs. Its returned text follows later writes to that signal.", "docs/adr/0007-saba-reactive-props-and-bindings.md:81", "count 2 → 3 · same target", "unread.set(3)"],
-      [2, 4, "Pass a callback", "A bare function passed as a prop retains its identity. The child decides when to call it. Putting the same raw function directly in a DOM child raises a type error.", "docs/adr/0007-saba-reactive-props-and-bindings.md:94", "formatter calls = 0", "jsx(List, {format})"],
-      [2, 3, "Preserve await", "Inside an async helper, await at the original construction point. The resolved value becomes a snapshot and the loader runs once.", "docs/adr/0007-saba-reactive-props-and-bindings.md:96", "one awaited snapshot", "async function row() { return jsx(\"p\", {}, await loadLabel()) }"],
-      [2, 3, "Locate unsupported yield", "A generator hole that would move suspension across a function boundary gets a diagnostic at its original source position. Assigning the resumed value before JSX preserves its order.", "docs/adr/0007-saba-reactive-props-and-bindings.md:96", "diagnostic · original JSX span", "function* row() { const text = yield next(); return \u003cp>{text}\u003c/p> }"]
+      [2, 3, "Tagged template", "Saba wraps this synchronous value expression in a private binding descriptor. The tag can read a signal when the browser evaluates it.", "docs/adr/0007-saba-reactive-props-and-bindings.md:133", "private reader", "jsx(\"p\", {}, binding(() => label`unread`))"],
+      [3, 4, "Track the tag", "The tag reads unread while its binding runs. Its returned text follows later writes to that signal.", "docs/adr/0007-saba-reactive-props-and-bindings.md:112", "count 2 → 3 · same target", "unread.set(3)"],
+      [2, 4, "Pass a callback", "A bare function passed as a prop retains its identity. The child decides when to call it. Putting the same raw function directly in a DOM child raises a type error.", "docs/adr/0007-saba-reactive-props-and-bindings.md:129", "formatter calls = 0", "jsx(List, {format})"],
+      [2, 3, "Preserve await", "Inside an async helper, await at the original construction point. The resolved value becomes a snapshot and the loader runs once.", "docs/adr/0007-saba-reactive-props-and-bindings.md:131", "one awaited snapshot", "async function row() { return jsx(\"p\", {}, await loadLabel()) }"],
+      [2, 3, "Locate unsupported yield", "A generator hole that would move suspension across a function boundary gets a diagnostic at its original source position. Assigning the resumed value before JSX preserves its order.", "docs/adr/0007-saba-reactive-props-and-bindings.md:131", "diagnostic · original JSX span", "function* row() { const text = yield next(); return \u003cp>{text}\u003c/p> }"]
     ],
     "observe": {
       "kind": "code",
@@ -193,7 +193,7 @@ const operations = [
     "current": ["src/modules/dom.js#binding", "src/modules/dom.js#computed"],
     "steps": [
       [0, 1, "Reader function", "The expression is outside the one-shot grammar. The compiler supplies a private binding descriptor whose reader runs in the browser.", "docs/adr/0007-saba-reactive-props-and-bindings.md:27", "reader = () => label()", "jsx(\"p\", {}, binding(() => label()))"],
-      [1, 2, "Tracked call", "On attachment, the browser evaluates the reader with the count binding as the active computation. The call enters the imported function.", "docs/adr/0007-saba-reactive-props-and-bindings.md:81", "label invoked once", "const value = label()"],
+      [1, 2, "Tracked call", "On attachment, the browser evaluates the reader with the count binding as the active computation. The call enters the imported function.", "docs/adr/0007-saba-reactive-props-and-bindings.md:112", "label invoked once", "const value = label()"],
       [2, 3, "Signal read", "The helper reads the signal in that tracked context. The signal records the count binding as a dependent and returns 2.", "docs/SABA_UI_CONTEXT.md:10", "reader = count binding; value = 2", "const n = unread()"],
       [2, 1, "Formatted result", "The helper combines the number with its suffix. The binding receives the result from this invocation.", "docs/adr/0007-saba-reactive-props-and-bindings.md:23", "value = \"2 unread\"", "return n + \" unread\""],
       [1, 4, "Text update", "Write the returned characters to the text node. A later write to unread can now reach this binding.", "docs/SABA_UI_CONTEXT.md:51", "count text = \"2 unread\"", "text.data = value"]
@@ -339,9 +339,9 @@ const operations = [
     "current": ["src/modules/dom.js#namespaceFor", "src/modules/dom.js#child"],
     "steps": [
       [0, 1, "Element hierarchy", "The syntax tree retains the SVG element and its nested circle for namespace-aware emission.", "docs/SABA_UI_ROADMAP.md:20", "svg → circle", "root = parseModule(source).jsx"],
-      [1, 2, "SVG context", "Establish the SVG namespace before constructing the circle. A component rendering here receives the same insertion namespace.", "docs/adr/0003-saba-jsx-compiler-on-kessel.md:31", "namespace = SVG", "visitElement(circle, svgNamespace)"],
+      [1, 2, "SVG context", "Establish the SVG namespace before constructing the circle. A component rendering here receives the same insertion namespace.", "docs/adr/0003-saba-jsx-compiler-on-kessel.md:45", "namespace = SVG", "visitElement(circle, svgNamespace)"],
       [2, 3, "Fixed geometry", "For this static example a template could preserve the original element and attribute spellings, including viewBox.", "docs/adr/0004-saba-compile-time-html-no-request-rendering.md:7", "r = \"4\"", "emitTemplate(svg)"],
-      [3, 4, "SVG DOM", "Parsing this HTML gives the circle its SVG namespace. An HTML child inside foreignObject returns to the HTML namespace.", "docs/adr/0003-saba-jsx-compiler-on-kessel.md:33", "circle namespace = SVG", "circle.namespaceURI === \"http://www.w3.org/2000/svg\""]
+      [3, 4, "SVG DOM", "Parsing this HTML gives the circle its SVG namespace. An HTML child inside foreignObject returns to the HTML namespace.", "docs/adr/0003-saba-jsx-compiler-on-kessel.md:47", "circle namespace = SVG", "circle.namespaceURI === \"http://www.w3.org/2000/svg\""]
     ],
     "observe": {
       "kind": "tree",
@@ -387,31 +387,34 @@ const operations = [
   },
   {
     "id": "delivery-source-map",
-    "title": "Explore a source map for a generated binding",
+    "title": "Follow a development source map back to JSX",
     "group": "JSX compilation",
-    "summary": "The compiler decision names source maps as a goal. This example maps a generated expression back to the JSX expression that produced it.",
-    "input": "Inbox.jsx line 2 is “  return \u003cp>{label()}\u003c/p>;”. A generated module invokes label() on line 4.",
-    "nodes": ["JSX source", "Syntax tree", "JS emitter", "Source map", "Debugger"],
-    "functions": ["parseModule(source)", "emitBinding(expression)", "recordMapping(generated, original)"],
+    "summary": "In development, a module compiled from JSX links a source map, so a debugger can show the authored JSX. This example follows one element from Inbox.jsx to the map the browser fetches.",
+    "input": "Inbox.jsx line 2 is “  return \u003cp>{label()}\u003c/p>;”. A development server mounts it under /modules/. Generated positions are illustrative.",
+    "nodes": ["JSX source", "JS emitter", "Module route", "Map route", "Debugger"],
+    "functions": ["transform_jsx(source, file, allocator, source_map)", "serve_jsx(request, source_path, display, source_map_url)", "read_module_map(request, root, relative)"],
+    "current": ["src/jsx/jsx.odin#transform_jsx", "src/modules/modules.odin#read_module_map"],
     "evidence": ["docs/adr/0003-saba-jsx-compiler-on-kessel.md"],
     "steps": [
-      [0, 1, "Source location", "A compiler pass could retain the position at which the label expression begins. Coordinates in this example are displayed starting at one.", "docs/adr/0003-saba-jsx-compiler-on-kessel.md:7", "original = 2:14", "origin = positionAt(source, \"label()\")"],
-      [1, 2, "Emitted call", "The binding emitter places the corresponding call at a different location in the JavaScript output.", "docs/adr/0003-saba-jsx-compiler-on-kessel.md:7", "generated = 4:15", "text.data =   label();"],
-      [2, 3, "Position pair", "A possible source-map writer records the association between the emitted expression and its source. The ADR leaves map format and packaging open.", "docs/adr/0003-saba-jsx-compiler-on-kessel.md:7", "4:15 → 2:14", "recordMapping(js(4, 15), jsx(2, 14))"],
-      [3, 4, "Original source", "A debugger consuming this sample mapping can display the author’s JSX when execution reaches the generated call.", "docs/adr/0003-saba-jsx-compiler-on-kessel.md:7", "display = Inbox.jsx:2:14", "locateOriginal(\"Inbox.js\", 4, 15)"]
+      [0, 1, "Note the origin", "While it emits JavaScript, the compiler records where each JSX element and each copied line of author code began. Columns count UTF-16 code units and are displayed here starting at one.", "src/jsx/map.odin:24", "original = Inbox.jsx:2:10", "note_origin(p, el.loc)"],
+      [1, 2, "Serve the module", "In development the module route compiles inbox.jsx when the browser asks for inbox.js. The JavaScript ends with a comment naming its map beside it.", "src/modules/modules.odin:121", "sourceMappingURL = inbox.js.map", "//# sourceMappingURL=inbox.js.map"],
+      [2, 3, "Request the map", "Developer tools request inbox.js.map. The map route compiles the JSX source again and asks the transform for a version 3 source map built from the recorded origins.", "src/jsx/jsx.odin:544", "version 3 · recorded origins", "publish_source_map(source_map, &p, file, shift, allocator)"],
+      [3, 4, "Relative names, embedded source", "The map names inbox.js and inbox.jsx relative to its own URL and embeds the JSX text, because the module route never serves .jsx. No filesystem path reaches the browser.", "src/modules/modules.odin:184", "sources = [\"inbox.jsx\"]", "sources_content = {string(source)},"],
+      [4, 0, "Show the original", "A debugger paused in the generated element call can display Inbox.jsx line 2. A production server neither serves nor advertises a map, and compiled page templates have none yet.", "docs/adr/0003-saba-jsx-compiler-on-kessel.md:7", "display = Inbox.jsx:2:10", "locateOriginal(\"inbox.js\", line, column)"]
     ],
     "observe": {
       "kind": "value",
-      "title": "Illustrative source-position lookup",
+      "title": "Development source-map lookup",
       "frames": [
-        "Inbox.jsx:2:14 → label()",
-        "JSX: Inbox.jsx:2:14\nExpression: label()",
-        "JSX: Inbox.jsx:2:14\nJS:  Inbox.js:4:15",
-        "Inbox.js:4:15 → Inbox.jsx:2:14",
-        "Inbox.jsx, line 2\n  return \u003cp>{label()}\u003c/p>;\n             ^"
+        "Inbox.jsx:2:10 → \u003cp>",
+        "Origin recorded\nInbox.jsx:2:10 → generated element call",
+        "GET /modules/inbox.js\n…\n//# sourceMappingURL=inbox.js.map",
+        "GET /modules/inbox.js.map\nversion 3 · mappings from recorded origins",
+        "file: inbox.js\nsources: [\"inbox.jsx\"]\nsourcesContent: [JSX text]",
+        "Inbox.jsx, line 2\n  return \u003cp>{label()}\u003c/p>;\n         ^"
       ]
     },
-    "status": "Design direction"
+    "status": "Implemented · development modules"
   },
   {
     "id": "delivery-lint",
@@ -823,20 +826,20 @@ const operations = [
     "group": "Components & DOM",
     "status": "Implemented · browser module",
     "summary": "Keep a small band of fixed-height rows mounted around the viewport. Refill it while the reader can still scroll through rows already on screen.",
-    "input": "A 100 px viewport shows five 20 px rows from 1,000 local records. Scroll starts at 400 px. Rows are numbered from zero. The caller owns the scroll space, keyed DOM and any data loading.",
+    "input": "A 100 px viewport shows five 20 px rows from 1,000 local records. Scroll starts at 400 px. Rows are numbered from zero. The caller passes no spacer or band, so it owns the scroll space, keyed DOM and any data loading.",
     "nodes": ["Viewport", "Window check", "Frame queue", "Row renderer"],
     "functions": ["observeRowWindow(viewport, options, render)"],
     "current": ["src/modules/sliding-window.js#observeRowWindow"],
     "evidence": ["src/modules/sliding-window.js", "benchmarks/frameworks/experiments/window-scroll.cjs"],
     "steps": [
-      [1, 3, "Mount the initial band", "Rows 20–24 fill the viewport. The controller calls the renderer with an exclusive end of 33. The renderer mounts rows 12–32 at a top offset of 240 px.", "src/modules/sliding-window.js:56", "mounted 12–32 · 1 render", "render(12, 33)"],
-      [0, 1, "Scroll inside the buffer", "At 460 px the reader sees rows 23–27. Five mounted rows remain below. The window check returns immediately. All 21 mounted rows stay in place.", "src/modules/sliding-window.js:39", "5 rows ahead · 0 pending frames", "if (!nearEdge) return;"],
-      [1, 2, "Three rows remain", "At 500 px, row 29 is the last visible row and row 32 is the last mounted row. The controller requests one animation frame. More scroll events can reuse it.", "src/modules/sliding-window.js:44", "3 rows ahead · 1 pending frame", "if (pending === null) pending = view.requestAnimationFrame(flush);"],
-      [2, 3, "Refill from the latest position", "The reader moves one more row before the frame. At 520 px the frame reads rows 26–30 and asks for 18–38, restoring eight rows on both sides. The keyed renderer retains rows 18–32 and adds six at the bottom.", "src/modules/sliding-window.js:64", "mounted 18–38 · 2 renders", "inspect(true);  // reads scrollTop = 520, calls render(18, 39)"],
-      [1, 2, "Approach the new edge", "Scroll in 20 px steps to 620 px. Rows 31–35 come into view. Rows 36–38 still cover further movement while another frame is queued.", "src/modules/sliding-window.js:36", "3 rows ahead · 1 pending frame", "Math.min(above, below) <= thresholdRows  // below = 39 - 36 = 3"],
-      [2, 1, "Reverse before the frame", "The reader scrolls back to 520 px. The queued frame reads the latest position. Eight rows remain on each side, so it finishes without calling the renderer.", "src/modules/sliding-window.js:39", "mounted 18–38 · 2 renders", "if (!nearEdge) return;"],
-      [1, 3, "Refill during a fast scroll", "A 120 px scroll step reaches 640 px. The visible rows still fit, but only 40 px of mounted rows remain below them. Another movement of that size would outrun the buffer, so the handler refills immediately.", "src/modules/sliding-window.js:43", "mounted 24–44 · 3 renders", "runway * rowHeight >= Math.abs(travel)  // 40 >= 120 is false"],
-      [1, 3, "Jump beyond the mounted rows", "A scrollbar jump to 1,800 px exposes rows 90–94. The scroll handler immediately asks for rows 82–102. This example already has the destination records in memory.", "src/modules/sliding-window.js:32", "mounted 82–102 · 4 renders", "const uncovered = visibleFirst < first || visibleEnd > end;  // render(82, 103)"]
+      [1, 3, "Mount the initial band", "Rows 20–24 fill the viewport. The controller calls the renderer with an exclusive end of 33 and the band placement. The renderer mounts rows 12–32 at a top offset of 240 px.", "src/modules/sliding-window.js:122", "mounted 12–32 · 1 render", "render(12, 33, {offset: 240, height: 20000})"],
+      [0, 1, "Scroll inside the buffer", "At 460 px the reader sees rows 23–27. Five mounted rows remain below. The window check returns immediately. All 21 mounted rows stay in place.", "src/modules/sliding-window.js:102", "5 rows ahead · 0 pending frames", "if (!nearEdge) return;"],
+      [1, 2, "Three rows remain", "At 500 px, row 29 is the last visible row and row 32 is the last mounted row. The controller requests one animation frame. More scroll events can reuse it.", "src/modules/sliding-window.js:107", "3 rows ahead · 1 pending frame", "if (pending === null) pending = view.requestAnimationFrame(flush);"],
+      [2, 3, "Refill from the latest position", "The reader moves one more row before the frame. At 520 px the frame reads rows 26–30 and asks for 18–38, restoring eight rows on both sides. The keyed renderer retains rows 18–32 and adds six at the bottom.", "src/modules/sliding-window.js:130", "mounted 18–38 · 2 renders", "inspect(true);  // reads scrollTop = 520, calls render(18, 39)"],
+      [1, 2, "Approach the new edge", "Scroll in 20 px steps to 620 px. Rows 31–35 come into view. Rows 36–38 still cover further movement while another frame is queued.", "src/modules/sliding-window.js:97", "3 rows ahead · 1 pending frame", "Math.min(above, below) <= thresholdRows  // below = 39 - 36 = 3"],
+      [2, 1, "Reverse before the frame", "The reader scrolls back to 520 px. The queued frame reads the latest position. Eight rows remain on each side, so it finishes without calling the renderer.", "src/modules/sliding-window.js:102", "mounted 18–38 · 2 renders", "if (!nearEdge) return;"],
+      [1, 3, "Refill during a fast scroll", "A 120 px scroll step reaches 640 px. The visible rows still fit, but only 40 px of mounted rows remain below them. Another movement of that size would outrun the buffer, so the handler refills immediately.", "src/modules/sliding-window.js:106", "mounted 24–44 · 3 renders", "runway * rowHeight >= Math.abs(travel)  // 40 >= 120 is false"],
+      [1, 3, "Jump beyond the mounted rows", "A scrollbar jump to 1,800 px exposes rows 90–94. The scroll handler immediately asks for rows 82–102. This example already has the destination records in memory.", "src/modules/sliding-window.js:93", "mounted 82–102 · 4 renders", "const uncovered = visibleFirst < first || visibleEnd > end;  // render(82, 103)"]
     ],
     "observe": {
       "kind": "value",
@@ -979,8 +982,8 @@ const operations = [
     "evidence": ["docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md", "docs/SABA_UI_CONTEXT.md"],
     "current": ["src/modules/dom.js#keyed", "src/modules/dom.js#prepareRow"],
     "steps": [
-      [0, 1, "insert B", "Validate all keys in the new ordered snapshot before editing the list. Only B is new.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:39", "requested order: A, B, C", "insertRow(\"B\", \"C\")  // insert B before C"],
-      [1, 2, "new identity", "Create B’s row scope and read-only accessor for its current record. Call renderRow once for this key.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:41", "row B · scope #B", "const rowB = createRowScope(itemB, readItem => \u003cRow record={readItem()}/>)"],
+      [0, 1, "insert B", "Validate all keys in the new ordered snapshot before editing the list. Only B is new.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:41", "requested order: A, B, C", "insertRow(\"B\", \"C\")  // insert B before C"],
+      [1, 2, "new identity", "Create B’s row scope and read-only accessor for its current record. Call renderRow once for this key.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:43", "row B · scope #B", "const rowB = createRowScope(itemB, readItem => \u003cRow record={readItem()}/>)"],
       [2, 1, "B → node B", "Associate the new key with its DOM row. Existing keys continue to identify their original rows.", "docs/SABA_UI_CONTEXT.md:54", "B maps to #B", "rowsByKey.set(\"B\", rowB)"],
       [1, 3, "insert before C", "Place row B before row C. The existing A and C rows remain in the document.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:13", "#A, #B, #C", "list.insertBefore(rowB, rowsByKey.get(\"C\"))"]
     ],
@@ -1023,10 +1026,10 @@ const operations = [
     "evidence": ["docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md", "docs/SABA_UI_CONTEXT.md"],
     "current": ["src/modules/dom.js#placeRow", "src/modules/dom.js#appendKeyed"],
     "steps": [
-      [0, 1, "Validate keys", "The new snapshot contains B, A, C and the updated B record. Check all keys before changing any row.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:39", "all keys valid", "validateKeys(nextRecords)  // B, A, C"],
-      [1, 2, "Retain B", "Reuse B’s existing scope, DOM range and read-only record accessor. The accessor will receive the replacement record in the same batch as the move.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:41", "same row #B", "const row = rowsByKey.get(\"B\")"],
-      [2, 3, "Move and update", "Publish B’s fresh record and move its range in one batch. The confirmed label binding reads Benjamin. Any text typed into the input remains in the draft.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:41", "#B, #A, #C", "batch(() => { row.setRecord(nextB); moveBefore(row, rowA) })"],
-      [3, 2, "same input", "Inspect the same input object. Its draft and selection survive the reorder. The confirmed label beside it now shows Benjamin.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:45", "unsaved input value preserved", "row.querySelector(\"input\").value  // same unsaved text"]
+      [0, 1, "Validate keys", "The new snapshot contains B, A, C and the updated B record. Check all keys before changing any row.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:41", "all keys valid", "validateKeys(nextRecords)  // B, A, C"],
+      [1, 2, "Retain B", "Reuse B’s existing scope, DOM range and read-only record accessor. The accessor will receive the replacement record in the same batch as the move.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:43", "same row #B", "const row = rowsByKey.get(\"B\")"],
+      [2, 3, "Move and update", "Publish B’s fresh record and move its range in one batch. The confirmed label binding reads Benjamin. Any text typed into the input remains in the draft.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:43", "#B, #A, #C", "batch(() => { row.setRecord(nextB); moveBefore(row, rowA) })"],
+      [3, 2, "same input", "Inspect the same input object. Its draft and selection survive the reorder. The confirmed label beside it now shows Benjamin.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:47", "unsaved input value preserved", "row.querySelector(\"input\").value  // same unsaved text"]
     ],
     "observe": {
       "kind": "rows",
@@ -1073,7 +1076,7 @@ const operations = [
     "steps": [
       [0, 1, "remove A", "Locate the row associated with A’s key.", "docs/SABA_UI_CONTEXT.md:54", "A → row #A", "const rowA = rowsByKey.get(\"A\")"],
       [1, 2, "end A’s lifetime", "Removing this row ends its component lifetime and releases the live work it created.", "docs/SABA_UI_CONTEXT.md:36", "A bindings released", "dispose(scopeOf(rowA))"],
-      [1, 3, "remove row", "Apply the removal delta to the document. B remains the same row and retains its own state.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:45", "#B only", "rowA.remove()"],
+      [1, 3, "remove row", "Apply the removal delta to the document. B remains the same row and retains its own state.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:47", "#B only", "rowA.remove()"],
       [3, 1, "drop key A", "Forget the removed row in this example’s keyed index. Later changes no longer target its old bindings.", "docs/SABA_UI_CONTEXT.md:54", "keys = [B]", "rowsByKey.delete(\"A\")"]
     ],
     "observe": {
@@ -1170,7 +1173,7 @@ const operations = [
     "evidence": ["docs/SABA_UI_CONTEXT.md", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md", "src/modules/dom.js"],
     "steps": [
       [0, 1, "onClick prop", "The component supplies a function as the button’s onClick prop. This JSX represents the application’s event wiring.", "docs/SABA_UI_CONTEXT.md:32", "onClick = markOneRead", "\u003cbutton onClick={markOneRead}>Mark one read\u003c/button>"],
-      [0, 1, "click listener", "The existing DOM runtime translates onClick to click and registers the function on the button. Registration itself leaves the count at 2.", "src/modules/dom.js:928", "listener for click", "node.addEventListener(domEventName(name), value);"],
+      [0, 1, "click listener", "The existing DOM runtime translates onClick to click and registers the function on the button. Registration itself leaves the count at 2.", "src/modules/dom.js:1135", "listener for click", "node.addEventListener(domEventName(name), value);"],
       [1, 2, "Activate button", "The visitor activates Mark one read. The browser calls the registered handler, which reads the current signal value once.", "docs/SABA_UI_CONTEXT.md:10", "current = 2", "const current = unread()"],
       [2, 3, "Write 1", "The example handler subtracts one and publishes the result. The lower bound also makes a click at zero harmless.", "docs/SABA_UI_CONTEXT.md:10", "unread = 1", "unread.set(Math.max(0, current - 1))"],
       [3, 4, "Refresh label", "The binding that previously read unread is live. It reads the new count and computes the text for the same paragraph.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:7", "label = \"1 unread\"", "const label = unread() + \" unread\""],
@@ -1201,11 +1204,11 @@ const operations = [
     "evidence": ["docs/adr/0007-saba-reactive-props-and-bindings.md", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md"],
     "steps": [
       [0, 1, "Getter prop", "Inbox setup creates a count getter closing over unread. Passing the getter leaves its signal read for the eventual consumer.", "docs/adr/0007-saba-reactive-props-and-bindings.md:23", "Relay setup = 1; count = getter", "jsx(Relay, { get count() { return unread() } })"],
-      [1, 2, "Forwarded getter", "Relay forwards count through the JSX spread. Resolving names and copying the accessor preserves its receiver and delays reading its value.", "docs/adr/0007-saba-reactive-props-and-bindings.md:77", "Badge setup = 1; count = getter", "jsx(Badge, forwardProps(props))  // \u003cBadge {...props}/>"],
+      [1, 2, "Forwarded getter", "Relay forwards count through the JSX spread. Resolving names and copying the accessor preserves its receiver and delays reading its value.", "docs/adr/0007-saba-reactive-props-and-bindings.md:108", "Badge setup = 1; count = getter", "jsx(Badge, forwardProps(props))  // \u003cBadge {...props}/>"],
       [2, 3, "Tracked child read", "Badge uses the member expression props.count. Evaluating the binding calls the forwarded getter and tracks the parent signal.", "docs/adr/0007-saba-reactive-props-and-bindings.md:23", "read = 2; depends on unread", "const read = () => props.count; bindText(textB, read)"],
       [3, 4, "Initial output", "The first evaluation writes 2 into the output’s text node. Relay and Badge each have one instance.", "docs/adr/0007-saba-reactive-props-and-bindings.md:23", "Text #B = \"2\"", "textB.data = \"2\""],
-      [0, 3, "Changed count", "The button writes 3. During that write the dependent binding evaluates again and obtains 3 through the getter.", "docs/adr/0007-saba-reactive-props-and-bindings.md:83", "read = 3; same Badge instance", "unread.set(3)  // enter the synchronous flush"],
-      [3, 4, "Same output node", "The flush writes 3 into the original Text object before the setter returns. Both child setup counts are still one.", "docs/adr/0007-saba-reactive-props-and-bindings.md:87", "Text #B = \"3\"; setups Relay 1, Badge 1", "textB.data = \"3\"  // same Text object"]
+      [0, 3, "Changed count", "The button writes 3. During that write the dependent binding evaluates again and obtains 3 through the getter.", "docs/adr/0007-saba-reactive-props-and-bindings.md:114", "read = 3; same Badge instance", "unread.set(3)  // enter the synchronous flush"],
+      [3, 4, "Same output node", "The flush writes 3 into the original Text object before the setter returns. Both child setup counts are still one.", "docs/adr/0007-saba-reactive-props-and-bindings.md:122", "Text #B = \"3\"; setups Relay 1, Badge 1", "textB.data = \"3\"  // same Text object"]
     ],
     "observe": {
       "kind": "dom",
@@ -1235,9 +1238,9 @@ const operations = [
     "steps": [
       [0, 1, "Shared HTML", "The built page supplies a heading and an existing text position. Every user can see the heading before the personal count arrives.", "docs/adr/0004-saba-compile-time-html-no-request-rendering.md:7", "\u003ch1>Inbox\u003c/h1>", "\u003cmain>\u003ch1>Inbox\u003c/h1>\u003cp data-bind=\"unread\"> \u003c/p>\u003c/main>"],
       [1, 2, "Pending count", "In this example the component gives its count signal an initial null value. Its text position stays blank while the data is pending.", "docs/SABA_UI_CONTEXT.md:10", "unread = null", "const unread = signal(null)"],
-      [2, 3, "GET /api/unread", "The sample page calls the existing api helper. Its fetch sends same-origin credentials and suspends the helper while the request is outstanding.", "src/modules/dom.js:1484", "Promise pending", "const response = await fetch(path, {"],
-      [4, 3, "JSON body", "The route supplies a successful JSON response. The existing helper checks its content type and parses the bytes into an object.", "src/modules/dom.js:1496", "{\"unread\":2}", "const data = isJsonResponse(response) ? await response.json() : null;"],
-      [3, 2, "Parsed count", "The helper fulfills its promise with the parsed object. This step hands the value back to the page module.", "src/modules/dom.js:1512", "data.unread = 2", "return data;"],
+      [2, 3, "GET /api/unread", "The sample page calls the existing api helper. Its fetch sends same-origin credentials and suspends the helper while the request is outstanding.", "src/modules/dom.js:1710", "Promise pending", "const response = await fetch(path, {"],
+      [4, 3, "JSON body", "The route supplies a successful JSON response. The existing helper checks its content type and parses the bytes into an object.", "src/modules/dom.js:1722", "{\"unread\":2}", "const data = isJsonResponse(response) ? await response.json() : null;"],
+      [3, 2, "Parsed count", "The helper fulfills its promise with the parsed object. This step hands the value back to the page module.", "src/modules/dom.js:1738", "data.unread = 2", "return data;"],
       [2, 5, "Signal write", "In the example JSX code the page writes the returned count to its signal. The binding now has new input.", "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:7", "unread = 2", "unread.set(data.unread)"],
       [5, 1, "Text patch", "The binding sets the characters in the count paragraph. The heading and paragraph keep their DOM identity.", "docs/SABA_UI_CONTEXT.md:51", "count text = \"2 unread\"", "countText.data = unread() + \" unread\""]
     ],
@@ -1271,9 +1274,9 @@ const operations = [
     "steps": [
       [0, 1, "Click", "A click invokes the sample component’s load callback. Its local signal initially holds an idle phase.", "docs/SABA_UI_CONTEXT.md:32", "phase = idle", "\u003cbutton onClick={load}>Load\u003c/button>"],
       [1, 2, "Pending", "The callback publishes a pending value before awaiting any network work. The application chooses the names of these states.", "docs/SABA_UI_CONTEXT.md:10", "phase = pending", "state.set({phase: \"pending\"})"],
-      [1, 3, "GET articles", "The same callback starts its request through the existing api helper and yields at await. The pending signal is already available to bindings.", "src/modules/dom.js:1484", "fetch pending", "const response = await fetch(path, {"],
+      [1, 3, "GET articles", "The same callback starts its request through the existing api helper and yields at await. The pending signal is already available to bindings.", "src/modules/dom.js:1710", "fetch pending", "const response = await fetch(path, {"],
       [2, 4, "Loading label", "The tracked label reads the pending phase. Its binding puts a loading message into the same status paragraph while the request is in flight.", "docs/SABA_UI_CONTEXT.md:51", "Loading articles…", "statusText.data = label()"],
-      [3, 1, "Parsed list", "The helper fulfills the promise with the parsed JSON object. The resumed callback can read its articles array.", "src/modules/dom.js:1512", "articles.length = 3", "return data;"],
+      [3, 1, "Parsed list", "The helper fulfills the promise with the parsed JSON object. The resumed callback can read its articles array.", "src/modules/dom.js:1738", "articles.length = 3", "return data;"],
       [1, 2, "Ready", "The example stores the successful count and phase together so the label reads a consistent snapshot.", "docs/SABA_UI_CONTEXT.md:10", "ready · count 3", "state.set({phase: \"ready\", count: data.articles.length})"],
       [2, 4, "Result label", "The computed reads the ready count. Its binding replaces the pending text in the existing paragraph.", "docs/SABA_UI_CONTEXT.md:51", "3 articles", "statusText.data = label()"]
     ],
@@ -1304,9 +1307,9 @@ const operations = [
     "current": ["src/modules/dom.js#api", "src/modules/reads.js#createReadPartition"],
     "evidence": ["src/modules/dom.js", "docs/SABA_UI_CONTEXT.md"],
     "steps": [
-      [0, 1, "Request", "The component provides the application message “Try again in a minute.” for the server code rate_limited. Its UI already shows a pending message.", "src/modules/dom.js:1470", "pending · message map supplied", "const data = await api(\"/api/unread\", { messages })"],
-      [2, 1, "429 JSON", "The helper parses the JSON error body. Parsing succeeds even though the HTTP response indicates failure.", "src/modules/dom.js:1496", "error = rate_limited", "const data = isJsonResponse(response) ? await response.json() : null;"],
-      [1, 0, "Reject", "For a non-successful response the helper reads the supplied message, attaches the HTTP status and server code, and rejects the promise.", "src/modules/dom.js:1509", "429 · Try again in a minute.", "throw error;"],
+      [0, 1, "Request", "The component provides the application message “Try again in a minute.” for the server code rate_limited. Its UI already shows a pending message.", "src/modules/dom.js:1696", "pending · message map supplied", "const data = await api(\"/api/unread\", { messages })"],
+      [2, 1, "429 JSON", "The helper parses the JSON error body. Parsing succeeds even though the HTTP response indicates failure.", "src/modules/dom.js:1722", "error = rate_limited", "const data = isJsonResponse(response) ? await response.json() : null;"],
+      [1, 0, "Reject", "For a non-successful response the helper reads the supplied message, attaches the HTTP status and server code, and rejects the promise.", "src/modules/dom.js:1735", "429 · Try again in a minute.", "throw error;"],
       [0, 3, "Error state", "The application’s catch branch writes the message into the status signal. Its success branch never receives a count.", "docs/SABA_UI_CONTEXT.md:10", "phase = failed", "state.set({phase: \"failed\", message: error.message})"],
       [3, 4, "Read message", "The live binding reads the failed phase and its message. This mapping is a component decision.", "docs/SABA_UI_CONTEXT.md:44", "Try again in a minute.", "const message = state().message"],
       [4, 5, "Show error", "The status text changes from the loading message to the application’s retry guidance, using the same DOM node.", "docs/SABA_UI_CONTEXT.md:51", "status text replaced", "statusText.data = label()"]
@@ -1337,13 +1340,13 @@ const operations = [
     "current": ["src/modules/dom.js#api", "src/modules/dom.js#lifetime", "src/modules/dom.js#disposeScope", "src/modules/reads.js#createReadPartition"],
     "evidence": ["src/modules/dom.js", "docs/SABA_UI_CONTEXT.md"],
     "steps": [
-      [0, 1, "Scoped fetch", "During setup the example captures the component lifetime. Its request explicitly passes that lifetime’s AbortSignal to the current api helper.", "src/modules/dom.js:1478", "abort listener attached", "abort?.addEventListener(\"abort\", forwardAbort, { once: true });"],
-      [0, 1, "Pending", "The helper attaches its controller’s signal to fetch. The pending count is visible in the live component.", "src/modules/dom.js:1493", "fetch pending", "signal: controller.signal,"],
+      [0, 1, "Scoped fetch", "During setup the example captures the component lifetime. Its request explicitly passes that lifetime’s AbortSignal to the current api helper.", "src/modules/dom.js:1704", "abort listener attached", "abort?.addEventListener(\"abort\", forwardAbort, { once: true });"],
+      [0, 1, "Pending", "The helper attaches its controller’s signal to fetch. The pending count is visible in the live component.", "src/modules/dom.js:1719", "fetch pending", "signal: controller.signal,"],
       [2, 3, "Close panel", "The panel closes, ending this component instance’s scope. Scope ownership is part of the reactive design.", "docs/SABA_UI_CONTEXT.md:36", "scope ended", "dispose(inboxScope)"],
-      [3, 1, "Abort fetch", "The existing browser runtime aborts the scope controller on disposal. The listener installed by api forwards the abort to its own fetch controller.", "src/modules/dom.js:1182", "fetch signal aborted", "scope.controller?.abort();"],
+      [3, 1, "Abort fetch", "The existing browser runtime aborts the scope controller on disposal. The listener installed by api forwards the abort to its own fetch controller.", "src/modules/dom.js:1408", "fetch signal aborted", "scope.controller?.abort();"],
       [3, 4, "Release binding", "The ended scope releases its count binding. A late result has no live Inbox binding to update.", "docs/SABA_UI_CONTEXT.md:36", "count binding released", "release(countBinding)"],
-      [2, 5, "Detach panel", "The mounted roots leave the document. This example’s request rejects on abort and its application code treats that as expected disposal.", "src/modules/dom.js:1318", "Inbox panel removed", "for (const node of nodes) node.remove();"],
-      [1, 0, "Abort rejection", "api propagates the externally triggered abort. In the sample caller, a check of the scope signal lets the catch branch exit without writing a failure state.", "src/modules/dom.js:1514", "no signal write", "if (abort?.aborted) throw error;"]
+      [2, 5, "Detach panel", "The mounted roots leave the document. This example’s request rejects on abort and its application code treats that as expected disposal.", "src/modules/dom.js:1544", "Inbox panel removed", "for (const node of nodes) node.remove();"],
+      [1, 0, "Abort rejection", "api propagates the externally triggered abort. In the sample caller, a check of the scope signal lets the catch branch exit without writing a failure state.", "src/modules/dom.js:1740", "no signal write", "if (abort?.aborted) throw error;"]
     ],
     "observe": {
       "kind": "dom",
@@ -1373,7 +1376,7 @@ const operations = [
     "evidence": ["docs/adr/0006-saba-async-reads-and-mutations.md", "docs/SABA_UI_CONTEXT.md", "src/modules/dom.js"],
     "steps": [
       [0, 1, "Refresh 2", "The scope still subscribes to the unread-count key. A same-key refresh advances its generation to 2 and keeps its last confirmed count visible alongside the refreshing indicator.", "docs/adr/0006-saba-async-reads-and-mutations.md:16", "generation 2 · refreshing", "second = issueRead(unreadEntry)"],
-      [1, 2, "Dispatch 2", "The browser helper starts the network request. Its caller retains the entry and generation for the eventual success, failure and cleanup.", "src/modules/dom.js:1484", "GET /api/unread · generation 2", "const response = await fetch(path, {"],
+      [1, 2, "Dispatch 2", "The browser helper starts the network request. Its caller retains the entry and generation for the eventual success, failure and cleanup.", "src/modules/dom.js:1710", "GET /api/unread · generation 2", "const response = await fetch(path, {"],
       [0, 1, "Refresh 3", "A second explicit refresh issues another read for this exact key. Generation 3 now owns its pending state.", "docs/adr/0006-saba-async-reads-and-mutations.md:14", "generation 3 · refreshing", "third = issueRead(unreadEntry)"],
       [2, 1, "Old failure", "The generation-2 request fails. Its failure and completion handlers check ownership before publishing. The current refresh keeps running with the original count visible.", "docs/adr/0006-saba-async-reads-and-mutations.md:14", "generation 3 · still refreshing", "if (!owns(unreadEntry, second.generation)) return"],
       [2, 1, "Count of 3", "The current request returns an unread count of 3. Its generation matches the entry, so value and ready state commit together.", "docs/adr/0006-saba-async-reads-and-mutations.md:14", "generation 3 · value 3 · ready", "commitRead(unreadEntry, third.generation, {unread: 3})"],
@@ -1484,13 +1487,13 @@ const operations = [
     "evidence": ["docs/adr/0008-saba-routed-edit-forms.md", "docs/adr/0006-saba-async-reads-and-mutations.md"],
     "steps": [
       [0, 1, "Match page", "The generated route accepts this GET, captures item ID 42 and serves the public editor template.", "docs/adr/0008-saba-routed-edit-forms.md:12", "matched /items/:id", "matchPage(\"/items/42\")"],
-      [1, 2, "Serve inert controls", "The compiled form includes a disabled fieldset. Its IDs are unique to this form instance. A second form owns different IDs.", "docs/adr/0008-saba-routed-edit-forms.md:47", "zero editable controls", "\u003cfieldset disabled>\u003clabel for=\"e1-title\">Title\u003c/label>\u003cinput id=\"e1-title\" aria-describedby=\"e1-title-help\">\u003csmall id=\"e1-title-help\">Use the item name.\u003c/small>\u003c/fieldset>"],
+      [1, 2, "Serve disabled controls", "The compiled form includes a disabled fieldset. Its IDs are unique to this form instance. A second form owns different IDs.", "docs/adr/0008-saba-routed-edit-forms.md:47", "zero editable controls", "\u003cfieldset disabled>\u003clabel for=\"e1-title\">Title\u003c/label>\u003cinput id=\"e1-title\" aria-describedby=\"e1-title-help\">\u003csmall id=\"e1-title-help\">Use the item name.\u003c/small>\u003c/fieldset>"],
       [2, 3, "Read item 42", "After attachment, load the authorized record. The submit handler checks eligibility even if called before the GET finishes.", "docs/adr/0008-saba-routed-edit-forms.md:16", "GET pending", "record = await loadItem(params.id)"],
       [3, 2, "Initialize draft", "The authorized read returns Lamp at revision 7. Enable editing. A clean draft still has nothing to save.", "docs/adr/0008-saba-routed-edit-forms.md:20", "Lamp · clean · revision 7", "initializeDraft({title:\"Lamp\",revision:7})"],
       [2, 3, "Submit then type", "Submit Desk lamp, then change it to Brass lamp while save-17 is pending. The current title version no longer matches the submitted version.", "docs/adr/0008-saba-routed-edit-forms.md:51", "save-17 · title v1 → v2", "submit(\"save-17\"); edit(\"title\", \"Brass lamp\")"],
-      [3, 2, "Ignore stale 422", "The reply rejects Desk lamp. The rule’s recorded title version is stale, so no message appears, focus stays put and the live region stays silent.", "docs/adr/0008-saba-routed-edit-forms.md:61", "zero stale announcements", "applyFieldErrors(reply, submittedVersions)"],
+      [3, 2, "Ignore stale 422", "The reply rejects Desk lamp. The rule’s recorded title version is stale, so no message appears, focus stays put and the live region stays silent.", "docs/adr/0008-saba-routed-edit-forms.md:64", "zero stale announcements", "applyFieldErrors(reply, submittedVersions)"],
       [2, 3, "Submit fresh draft", "A separate submit captures the current edit versions and a fresh operation ID. Focus stays inside form A.", "docs/adr/0008-saba-routed-edit-forms.md:22", "save-18 · title v2", "PATCH /api/items/42  {\"operationId\":\"save-18\",\"expectedRevision\":7,\"title\":\"Brass lamp\"}"],
-      [3, 4, "Associate and focus", "The current 422 applies to Brass lamp. Add A’s error ID to its input descriptions and focus its invalid field. If focus had moved into B, it would remain there.", "docs/adr/0008-saba-routed-edit-forms.md:61", "A invalid · B unchanged", "input.setAttribute(\"aria-describedby\", \"e1-title-help e1-title-error\")"]
+      [3, 4, "Associate and focus", "The current 422 applies to Brass lamp. Add A’s error ID to its input descriptions and focus its invalid field. If focus had moved into B, it would remain there.", "docs/adr/0008-saba-routed-edit-forms.md:64", "A invalid · B unchanged", "input.setAttribute(\"aria-describedby\", \"e1-title-help e1-title-error\")"]
     ],
     "observe": {
       "kind": "value",
@@ -1511,13 +1514,13 @@ const operations = [
 ];
 
 const sourceAnchors = {
-  "src/modules/sliding-window.js:43": "      if (!canRefill && runway * rowHeight >= Math.abs(travel)) {",
-  "src/modules/sliding-window.js:32": "    const uncovered = visibleFirst \u003c first || visibleEnd > end;",
-  "src/modules/sliding-window.js:36": "    const nearEdge = height > 0 && Math.min(above, below) \u003c= thresholdRows;",
-  "src/modules/sliding-window.js:39": "      if (!nearEdge) return;",
-  "src/modules/sliding-window.js:44": "        if (pending === null) pending = view.requestAnimationFrame(flush);",
-  "src/modules/sliding-window.js:56": "      render(nextFirst, nextEnd);",
-  "src/modules/sliding-window.js:64": "    inspect(true);",
+  "src/modules/sliding-window.js:106": "      if (!canRefill && runway * rowHeight >= Math.abs(travel)) {",
+  "src/modules/sliding-window.js:93": "    const uncovered = visibleFirst \u003c first || visibleEnd > end;",
+  "src/modules/sliding-window.js:97": "    const nearEdge = height > 0 && Math.min(above, below) \u003c= thresholdRows;",
+  "src/modules/sliding-window.js:102": "      if (!nearEdge) return;",
+  "src/modules/sliding-window.js:107": "        if (pending === null) pending = view.requestAnimationFrame(flush);",
+  "src/modules/sliding-window.js:122": "      render(nextFirst, nextEnd, place(position));",
+  "src/modules/sliding-window.js:130": "    inspect(true);",
   "docs/SABA_UI_CONTEXT.md:32": "A function that runs once and returns DOM nodes.",
   "docs/SABA_UI_CONTEXT.md:10": "A value that can be read and written, and that remembers which computations read it.",
   "docs/SABA_UI_CONTEXT.md:60": "The markup of a component that the compiler resolved at build time and emitted as HTML.",
@@ -1525,30 +1528,30 @@ const sourceAnchors = {
   "docs/adr/0003-saba-jsx-compiler-on-kessel.md:21": "The initial pairing is Kessel `v0.4.1` at `4fc1eaf42d9b000a53955de3d8e175d0ba34fb3f`. Its Krs installed-source digest is `cae24825a6d9ffebb523ead5543a7ef349d028e74df474314d53bd8b623172de`. The tagged package exposes `parse_job_open_inline`, `parse_job_run`, `job.program` and `checker_run_for_job`. Pass the original source and JSX filename, run the checker once, and consume the tree and diagnostics before closing the job. Borrowed source bytes must outlive the job. [Tagged JSX node definitions](https://github.com/dvrd/kessel/blob/v0.4.1/src/ast.odin#L95-L174) · [Distribution decision](0005-krs-package-distribution.md)",
   "docs/adr/0003-saba-jsx-compiler-on-kessel.md:23": "Use half-open byte offsets `[start, end)` from the original source. Emit each outermost JSX expression once and recurse into its JSX children and expression holes. Copy everything outside the replaced span verbatim. Generated imports and temporaries must avoid collisions with author bindings. For a name whose lexical binding Saba cannot establish, use the conservative reader or leave the value to browser code. Shadowed imports, a parameter with the same spelling as a module constant, or an opaque call give no license to execute code at build time. [Extraction contract](0004-saba-compile-time-html-no-request-rendering.md)",
   "docs/adr/0007-saba-reactive-props-and-bindings.md:27": "The one-shot grammar covers primitive literals, a bare lexical variable or import, a function or arrow literal, and parentheses around one of these. A bare name captures its JavaScript value at that point, including a signal accessor passed as data. Creating a function does not execute its body. Other synchronous value expressions default to a tracked reader for a DOM child or attribute, or a getter for a component prop. This includes optional chains, tagged templates, coercions and opaque helpers. No inspection of a helper body is required. Event and ref positions receive their ordinary values once during construction. A click invokes the registered handler.",
-  "docs/adr/0007-saba-reactive-props-and-bindings.md:98": "- Compile a tagged-template helper whose tag reads a signal, and a coercion whose `valueOf` reads one. A tracked text updates after a write. Pass a callback as a prop and assert identity and zero calls before the consumer invokes it.",
-  "docs/adr/0007-saba-reactive-props-and-bindings.md:81": "Bindings evaluate once on attachment. Each subsequent evaluation records its current dependencies and drops subscriptions from the previous branch. Ending a child scope releases its bindings and skips their queued effects. Removing a conditional branch disposes its nested scopes. Mounting it again creates new instances. The same range owns results containing zero, one or multiple nodes. [Structural child values and disposal](0002-saba-ui-signals-with-incremental-borrowings.md#child-values-and-ownership)",
-  "docs/adr/0007-saba-reactive-props-and-bindings.md:94": "Only a generated binding descriptor installs a DOM effect. A callback prop such as `\u003cList format={format}/>` carries the same function object. Even when a tracked prop returns a function, the consumer chooses when to call it. A raw function, promise or unsupported object in child position gets a type error.",
-  "docs/adr/0007-saba-reactive-props-and-bindings.md:96": "A tracked reader is synchronous and can reevaluate. Put side effects in setup, an event or an effect with an explicit lifetime. For a hole containing a lexically valid `await` at the hole's own evaluation depth (for example, `return \u003cp>{await label()}\u003c/p>` inside an async helper), preserve the await once at the original construction point, in JavaScript evaluation order. The resolved value is a snapshot, including when supplied as a component prop. Nested callback bodies retain their own suspension semantics. Component setup still returns a node synchronously. An unresolved promise is never awaited by a DOM binding. If another form cannot preserve its original execution context, such as a generator's `yield` hole in this milestone, report the original file, line and column and suggest assigning its result before JSX.",
+  "docs/adr/0007-saba-reactive-props-and-bindings.md:133": "- Compile a tagged-template helper whose tag reads a signal, and a coercion whose `valueOf` reads one. A tracked text updates after a write. Pass a callback as a prop and assert identity and zero calls before the consumer invokes it.",
+  "docs/adr/0007-saba-reactive-props-and-bindings.md:112": "Bindings evaluate once on attachment. Each subsequent evaluation records its current dependencies and drops subscriptions from the previous branch. Ending a child scope releases its bindings and skips their queued effects. Removing a conditional branch disposes its nested scopes. Mounting it again creates new instances. The same range owns results containing zero, one or multiple nodes. [Structural child values and disposal](0002-saba-ui-signals-with-incremental-borrowings.md#child-values-and-ownership)",
+  "docs/adr/0007-saba-reactive-props-and-bindings.md:129": "Only a generated binding descriptor installs a DOM effect. A callback prop such as `\u003cList format={format}/>` carries the same function object. Even when a tracked prop returns a function, the consumer chooses when to call it. A raw function, promise or unsupported object in child position gets a type error.",
+  "docs/adr/0007-saba-reactive-props-and-bindings.md:131": "A tracked reader is synchronous and can reevaluate. Put side effects in setup, an event or an effect with an explicit lifetime. For a hole containing a lexically valid `await` at the hole's own evaluation depth (for example, `return \u003cp>{await label()}\u003c/p>` inside an async helper), preserve the await once at the original construction point, in JavaScript evaluation order. The resolved value is a snapshot, including when supplied as a component prop. Nested callback bodies retain their own suspension semantics. Component setup still returns a node synchronously. An unresolved promise is never awaited by a DOM binding. If another form cannot preserve its original execution context, such as a generator's `yield` hole in this milestone, report the original file, line and column and suggest assigning its result before JSX.",
   "docs/adr/0007-saba-reactive-props-and-bindings.md:23": "In the first compiler milestone, the component call has the semantics of `jsx(Badge, { get count() { return unread() } })`. The child emits the equivalent of `jsx(\"output\", {}, binding(() => props.count))`, where `binding` denotes a compiler/runtime-private descriptor. While evaluating that binding, the prop getter reads the parent's signal. Clicking the button changes the output text from `2` to `3` on the same text node. Both setup functions have run exactly once.",
   "docs/SABA_UI_CONTEXT.md:51": "An owned computation that writes a DOM property or attribute, a text node, or the children between two stable anchors. Only a compiler-created binding descriptor installs an effect.",
   "docs/adr/0004-saba-compile-time-html-no-request-rendering.md:7": "The compiler emits build-time markup as HTML and emits JavaScript for the parts that depend on runtime state. After applying the route's access policy, the Odin server selects a prebuilt document. Readers of the same page in the same language receive the same HTML within a build. Private data arrives through authorized requests after the browser attaches.",
   "docs/adr/0004-saba-compile-time-html-no-request-rendering.md:33": "1. The compiler gives each extracted component occurrence an instance boundary and local target identifiers. The manifest records the expected element kind and namespace, attribute target, or ordered range boundaries inside that instance. Repeated components may reuse the same local identifier. Adjacent or initially empty child holes each have distinct markers in the parsed DOM. A guaranteed text binding owns one existing text node, or creates one between its own markers on its first nonempty write.",
-  "docs/SABA_UI_CONTEXT.md:18": "A computation run for what it does rather than what it returns, re-run when a value it read changes.",
-  "docs/adr/0004-saba-compile-time-html-no-request-rendering.md:27": "The build emits a route table, each page's HTML variants and matching attachment descriptions, its entry, and every framework or application module reachable from that entry. The HTML identifies its generation and page. The entry and every transitive build-controlled import use immutable URLs under the same generation, for example `/__saba/build/g17/inbox.js`. Validate the complete artifact set before atomically switching the server's active route table. A build error leaves the previous generation active. Apply the route's document cache policy and keep old generations for a declared deployment grace period. After retirement an old asset URL may return an error. It must never resolve to newer bytes. The same compatibility rule applies to a development rebuild.",
+  "docs/SABA_UI_CONTEXT.md:18": "A computation run for what it does rather than what it returns, re-run when a value it read changes. Each run owns what it creates and may return its own cleanup.",
+  "docs/adr/0004-saba-compile-time-html-no-request-rendering.md:27": "The build emits a route table, each page's HTML variants and matching attachment descriptions, its entry, and every framework or application module reachable from that entry. The HTML identifies its generation and page. The entry and every transitive build-controlled import use immutable URLs under the same generation, for example `/__saba/build/\u003cgeneration>/inbox.js`, where the generation is 32 hexadecimal digits derived from content. Validate the complete artifact set before atomically switching the server's active route table. A build error leaves the previous generation active. Apply the route's document cache policy and keep old generations for a declared deployment grace period. After retirement an old asset URL may return an error. It must never resolve to newer bytes. The same compatibility rule applies to a development rebuild.",
   "docs/SABA_UI_CONTEXT.md:40": "A place in JSX markup filled by an expression in braces.",
   "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:7": "Saba's runtime created real DOM nodes once and required every later change to be written by hand, with no dependency tracking by design. We are reversing that: state lives in signals, and each DOM node that reads a signal is updated in place when it changes, because rebuilding regions loses focus and input state and Mesa's views cannot be kept consistent by hand. Propagation is push-pull with clean/check/dirty marking, so shared dependencies recompute once per change.",
   "docs/adr/0007-saba-reactive-props-and-bindings.md:29": "`{Date.now()}` therefore gets a reader. Its first browser evaluation captures the time. With no signal reads it has no dependency to wake it. For an explicit snapshot, assign `const openedAt = Date.now()` during setup and use `{openedAt}`. Evaluating a hole once and proving its value available during the build are separate decisions. The later HTML emitter can extract proven build-time values. Browser clocks, request data and opaque calls stay in browser code. [HTML delivery](0004-saba-compile-time-html-no-request-rendering.md)",
   "docs/SABA_UI_ROADMAP.md:20": "- [x] **1. Compile and run one reactive component.** Kessel compiles authored JSX. Chromium verifies that a count forwarded through a spread changes the same text node, each component runs setup once and removing the child ends its subscriptions. [Authored component](../testdata/ui/forwarded.jsx) · [Compiler checks](../tests/internal/jsx_test.odin)",
-  "docs/adr/0003-saba-jsx-compiler-on-kessel.md:31": "An HTML `svg` or `math` root enters SVG or MathML. Use `createElementNS` for foreign elements, preserve case in SVG names, and use namespace-aware setters for qualified attributes such as `xlink:href`. Apply the HTML foreign-content integration rules at child boundaries. In particular, `foreignObject` stays SVG, its `div` child is HTML, and an `svg` nested in that `div` re-enters SVG. A dynamic child switching between a fragment and an empty value keeps its insertion namespace.",
-  "docs/adr/0003-saba-jsx-compiler-on-kessel.md:33": "Mount `\u003csvg>\u003cGlyph/>\u003cforeignObject>\u003cPanel/>\u003c/foreignObject>\u003c/svg>`, with `Glyph` returning a fragment containing `path` and `Panel` returning an HTML `div` with an inner `svg`. Assert the actual `namespaceURI` of every element. Forward `\u003ccircle/>` as children to a component that inserts it into an SVG container, and check a retained namespaced attribute by namespace and local name. A MathML component returning `mi` must produce a MathML node. Repeat the fixtures against parsed static HTML and browser-created bindings when milestone 2 introduces templates.",
+  "docs/adr/0003-saba-jsx-compiler-on-kessel.md:45": "An HTML `svg` or `math` root enters SVG or MathML. Use `createElementNS` for foreign elements, preserve case in SVG names, and use namespace-aware setters for qualified attributes such as `xlink:href`. Apply the HTML foreign-content integration rules at child boundaries. In particular, `foreignObject` stays SVG, its `div` child is HTML, and an `svg` nested in that `div` re-enters SVG. A dynamic child switching between a fragment and an empty value keeps its insertion namespace.",
+  "docs/adr/0003-saba-jsx-compiler-on-kessel.md:47": "Mount `\u003csvg>\u003cGlyph/>\u003cforeignObject>\u003cPanel/>\u003c/foreignObject>\u003c/svg>`, with `Glyph` returning a fragment containing `path` and `Panel` returning an HTML `div` with an inner `svg`. Assert the actual `namespaceURI` of every element. Forward `\u003ccircle/>` as children to a component that inserts it into an SVG container, and check a retained namespaced attribute by namespace and local name. A MathML component returning `mi` must produce a MathML node. Repeat the fixtures against parsed static HTML and browser-created bindings when milestone 2 introduces templates.",
   "docs/adr/0003-saba-jsx-compiler-on-kessel.md:15": "Kessel supplies the syntax tree, source spans and optional early-error diagnostics. Saba owns JSX emission and any mapping from an identifier use to its declaration required for optimization. The checker reports errors such as duplicate bindings. Its result supplies neither a public use-to-declaration map nor type inference. [Tagged parse job](https://github.com/dvrd/kessel/blob/v0.4.1/src/parse_job.odin#L286-L315) · [Tagged checker](https://github.com/dvrd/kessel/blob/v0.4.1/src/checker.odin#L377-L402)",
-  "docs/adr/0003-saba-jsx-compiler-on-kessel.md:7": "Saba's JSX transform was a self-contained lexical scanner of about 900 lines with no dependencies. The current compiler parses each module with Kessel. Saba uses that tree for reactive expression emission, SVG, spread children and static extraction. Source maps and general linting remain future work.",
+  "docs/adr/0003-saba-jsx-compiler-on-kessel.md:7": "Saba's JSX transform was a self-contained lexical scanner of about 900 lines with no dependencies. The current compiler parses each module with Kessel. Saba uses that tree for reactive expression emission, SVG, spread children and static extraction. The transform can return a version 3 source map structure to an Odin caller that asks for one. In development, a module compiled from JSX ends with a `//# sourceMappingURL` comment naming `\u003cmodule>.js.map` beside it, and that route compiles the source again to answer with the map. The map names its file and source relative to its own URL, so no filesystem path reaches the browser, and embeds the JSX source because the module route never serves `.jsx`. Production never serves or advertises a map, and compiled page templates and their build generations have no maps yet. General linting remains future work. [Mapping](../../src/jsx/map.odin) · [Development map route](../../src/modules/modules.odin)",
   "docs/adr/0005-krs-package-distribution.md:9": "Dependencies are discovered from `shared:` imports, so no dependency list is written by hand. An Odin root holds one version of each package. A project records what it needs in `.krs/packages.json`; a root records what it holds in `shared/.krs/manifest.json`.",
   "docs/adr/0005-krs-package-distribution.md:7": "The Webtools libraries were nested Git repositories inside `shared/`, edited in place, with no record of which commit a consumer was built against; applications such as Mesa held hand-copied versions that drifted. We are moving each library to its own repository outside `shared/` with its public code under `src/`, and a tool called krs installs tagged releases of that code into the `shared/` of an Odin root. `shared/` becomes generated output that nobody edits.",
   "docs/adr/0004-saba-compile-time-html-no-request-rendering.md:17": "A user's data is never in the first response's markup. There is no hydration mode in the runtime.",
   "docs/adr/0004-saba-compile-time-html-no-request-rendering.md:34": "2. The entry checks generation and page, resolves **every** initial target relative to its instance, then validates unique ownership, types, order and nesting. A structural reader owns the range between its markers. Lookup operates on the browser's parsed tree. Emit valid markup for its context or leave the subtree client-built when parser normalization would change ownership, including table content. [Binding rules](0007-saba-reactive-props-and-bindings.md)",
-  "docs/adr/0004-saba-compile-time-html-no-request-rendering.md:35": "3. Successful preflight opens a disposable root scope for synchronous setup. Queue listeners, user effects and resource starts. Stage initial binding writes until all instance setup succeeds. Commit the bindings before enabling controls and releasing the queued work. If setup fails, revoke that scope, cancel subscriptions, release refs and retain or restore the original template. Controls that require JavaScript start inert. The document includes a visible native reload link or equivalent ordinary navigation that works even if the entry never downloads. Hide it after successful activation. Recovery requires a user action and cannot create a reload loop.",
-  "docs/adr/0004-saba-compile-time-html-no-request-rendering.md:45": "Capture response bytes and DOM references **before** allowing the entry to execute. Request the same page through two authenticated sessions with scripts blocked. Both bodies contain the actual heading, two repeated badge instances and their initial target markers, with no personal values. Enable the entry, update just the second badge, and verify the same heading, target node and focused control survive. Include empty and adjacent holes. Separately corrupt a marker in the second instance and inject a setup exception after an earlier instance registered cleanup. Queue a read and effect in the earlier instance. In both failure runs the document remains readable and controls stay inert. Count zero dispatched requests, started user effects or clickable handlers, and verify each registered cleanup ran once.",
+  "docs/adr/0004-saba-compile-time-html-no-request-rendering.md:35": "3. Successful preflight opens a disposable root scope for synchronous setup. Queue listeners, user effects and resource starts. Stage initial binding writes until all instance setup succeeds. Commit the bindings before enabling controls and releasing the queued work. If setup fails, revoke that scope, cancel subscriptions, release refs and retain or restore the original template. The served host carries `data-saba-pending` and `aria-busy=\"true\"` rather than `inert`, so its static content stays readable; controls that require JavaScript are disabled in the markup. [Attaching to served HTML](0002-saba-ui-signals-with-incremental-borrowings.md#attaching-to-served-html) The document includes a visible native reload link or equivalent ordinary navigation that works even if the entry never downloads. Hide it after successful activation. Recovery requires a user action and cannot create a reload loop.",
+  "docs/adr/0004-saba-compile-time-html-no-request-rendering.md:45": "Capture response bytes and DOM references **before** allowing the entry to execute. Request the same page through two authenticated sessions with scripts blocked. Both bodies contain the actual heading, two repeated badge instances and their initial target markers, with no personal values. Enable the entry, update just the second badge, and verify the same heading, target node and focused control survive. Include empty and adjacent holes. Separately corrupt a marker in the second instance and inject a setup exception after an earlier instance registered cleanup. Queue a read and effect in the earlier instance. In both failure runs the document remains readable, the host keeps `data-saba-pending` and its controls do nothing. Count zero dispatched requests, started user effects or clickable handlers, and verify each registered cleanup ran once.",
   "docs/SABA_UI_CONTEXT.md:14": "A value derived from signals and other computeds, recalculated only when one of them has changed.",
   "docs/SABA_UI_CONTEXT.md:26": "Whether an effect is currently demanded; an effect that is not live does no work when its inputs change.",
   "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:17": "Components run once; code that reads a signal outside a tracked context does not update. Explicit `update()` remains as an escape hatch.",
@@ -1556,34 +1559,34 @@ const sourceAnchors = {
   "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:13": "- **An explicit incremental graph written with map/bind** (Jane Street Incremental): rejected as the authoring surface because it needs macro sugar we do not have, but three of its mechanisms are adopted under the signal surface: per-node cutoff, liveness gated on demand, and lists maintained by keyed deltas.",
   "docs/SABA_UI_CONTEXT.md:36": "The lifetime of one component instance; everything the instance created is released when its scope ends.",
   "docs/adr/0004-saba-compile-time-html-no-request-rendering.md:23": "Extract intrinsic markup, static attributes and escaped text whose value and HTML parsing context the compiler can prove. Follow a component reference only when Saba can resolve its lexical binding and prove the expansion safe. Never run application module initialization, a getter, a tag function or a fetch during extraction. Unknown values stay in the external module. A client-only subtree gets an empty marked range in the document. Its parent and siblings can still be emitted. A static title or heading must be present in the HTTP response before any script runs.",
-  "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:39": "Milestone 2 adds `keyed(items, keyOf, renderRow)`. Each evaluation reads an ordered snapshot of records. `keyOf(record)` returns a stable string or finite number unique among these siblings. Validate the full key sequence before creating, moving, disposing or publishing any row update. A missing, invalid or duplicate key reports an error and preserves the last committed rows. A later valid snapshot can reconcile again.",
-  "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:41": "For each new key the runtime creates a row scope, a movable DOM range and a signal holding the current record. It calls `renderRow(readItem)` once with a read-only accessor, for example `item => \u003cRow record={item()}/>`. A retained key updates the accessor to the incoming record in the same batch as the reorder. A label reading its new fields updates even when every record is a fresh object. A draft initialized once from the record belongs to the row instance. The form's explicit reset or merge policy decides when to overwrite that draft. [Editor contract](0008-saba-routed-edit-forms.md)",
+  "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:41": "Milestone 2 adds `keyed(items, keyOf, renderRow)`. Each evaluation reads an ordered snapshot of records. `keyOf(record)` returns a stable string or finite number unique among these siblings. Validate the full key sequence before creating, moving, disposing or publishing any row update. A missing, invalid or duplicate key reports an error and preserves the last committed rows. A later valid snapshot can reconcile again.",
+  "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:43": "For each new key the runtime creates a row scope, a movable DOM range and a signal holding the current record. It calls `renderRow(readItem)` once with a read-only accessor, for example `item => \u003cRow record={item()}/>`. A retained key updates the accessor to the incoming record in the same batch as the reorder. A label reading its new fields updates even when every record is a fresh object. A draft initialized once from the record belongs to the row instance. The form's explicit reset or merge policy decides when to overwrite that draft. [Editor contract](0008-saba-routed-edit-forms.md)",
   "docs/SABA_UI_CONTEXT.md:54": "A list that matches records to row scopes and DOM ranges by a stable key. A retained row gets the new record through an accessor and keeps its local draft.",
-  "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:45": "Move a retained row's whole range and keep its scope, listeners and existing input node. Preserve the active element, selection direction and caret across moves. A move path that detaches the active element must restore focus and selection after placement. Dispose removed keys once. A previously removed key that returns creates a new instance.",
-  "src/modules/dom.js:928": "        node.addEventListener(event, listener);",
-  "docs/adr/0007-saba-reactive-props-and-bindings.md:77": "The runtime passes the child's props with their getters intact. For JSX forwarding such as `\u003cBadge {...props}/>`, the compiler and runtime enumerate the enumerable own prop names at construction and forward accessors lazily using their source object as receiver. Later JSX attributes override earlier ones in source order. Consume the component's reserved `ref` separately and supply its JSX children using the existing calling convention. [Current runtime](../../src/modules/dom.js)",
-  "docs/adr/0007-saba-reactive-props-and-bindings.md:83": "An ordinary signal write outside a running flush settles affected effects before returning. A synchronous `batch(fn)` defers effects until the outermost batch exits, including on throw. Direct signal and computed reads within the batch see preceding writes. `Object.is` compares old and new values for signals and computed results. `untrack(fn)` suspends dependency collection and restores the previous tracker in a finally path, preserving scope ownership. A named pass limit reports a non-settling flush, clears its pending work and restores scheduler state so independent later writes still run.",
-  "docs/adr/0007-saba-reactive-props-and-bindings.md:87": "- Compile and run the Badge example with an intermediate component forwarding `{...props}`. Assert setup counts, text-node identity and the final `3`. Override `count` after a spread and verify the overridden getter is never evaluated.",
-  "src/modules/dom.js:1484": "    const response = await fetch(path, {",
-  "src/modules/dom.js:1496": "    const data = isJsonResponse(response) ? await response.json() : null;",
-  "src/modules/dom.js:1512": "    return data;",
-  "src/modules/dom.js:1470": "  { method = \"GET\", body, abort, messages = {} } = {},",
-  "src/modules/dom.js:1509": "      throw error;",
-  "src/modules/dom.js:1478": "    abort?.addEventListener(\"abort\", forwardAbort, { once: true });",
-  "src/modules/dom.js:1493": "      signal: controller.signal,",
-  "src/modules/dom.js:1182": "  scope.controller?.abort();",
-  "src/modules/dom.js:1318": "    for (const node of nodes) node.remove();",
-  "src/modules/dom.js:1514": "    if (abort?.aborted) throw error;",
-  "docs/adr/0006-saba-async-reads-and-mutations.md:16": "On first load, show pending. A key change displays only data for the newly selected key. During a same-key refresh, show its confirmed value with a refreshing indicator. A transient failure ends pending and exposes the error alongside that value. An authorized, definitive item deletion removes the confirmed record and disables Save. A dirty draft may be reviewed or copied. A 403 or opaque 404 clears the protected record and draft and retires affected list values. Session loss (401) or identity change releases the previous session/tenant partition, its journal and its editor state before the new identity can render. [Editor outcomes](0008-saba-routed-edit-forms.md)",
+  "docs/adr/0002-saba-ui-signals-with-incremental-borrowings.md:47": "Move a retained row's whole range and keep its scope, listeners and existing input node. Move as few rows as possible: retained rows whose previous positions form a longest increasing subsequence of the new order stay in place, and only the others move. A focused row is therefore detached only when its own position changes relative to its neighbours. Where the browser supports `moveBefore`, a retained row moves with it. Preserve the active element, selection direction and caret across moves. A move path that detaches the active element must restore focus and selection after placement. Dispose removed keys once. A previously removed key that returns creates a new instance.",
+  "src/modules/dom.js:1135": "        node.addEventListener(event, listener);",
+  "docs/adr/0007-saba-reactive-props-and-bindings.md:108": "The runtime passes the child's props with their getters intact. For JSX forwarding such as `\u003cBadge {...props}/>`, the compiler and runtime enumerate the enumerable own prop names at construction and forward accessors lazily using their source object as receiver. Later JSX attributes override earlier ones in source order. Consume the component's reserved `ref` separately and supply its JSX children using the existing calling convention. [Current runtime](../../src/modules/dom.js)",
+  "docs/adr/0007-saba-reactive-props-and-bindings.md:114": "An ordinary signal write outside a running flush settles affected effects before returning. A synchronous `batch(fn)` defers effects until the outermost batch exits, including on throw. Direct signal and computed reads within the batch see preceding writes. `Object.is` compares old and new values for signals and computed results. `untrack(fn)` suspends dependency collection and restores the previous tracker in a finally path, preserving scope ownership.",
+  "docs/adr/0007-saba-reactive-props-and-bindings.md:122": "- Compile and run the Badge example with an intermediate component forwarding `{...props}`. Assert setup counts, text-node identity and the final `3`. Override `count` after a spread and verify the overridden getter is never evaluated.",
+  "src/modules/dom.js:1710": "    const response = await fetch(path, {",
+  "src/modules/dom.js:1722": "    const data = isJsonResponse(response) ? await response.json() : null;",
+  "src/modules/dom.js:1738": "    return data;",
+  "src/modules/dom.js:1696": "  { method = \"GET\", body, abort, messages = {} } = {},",
+  "src/modules/dom.js:1735": "      throw error;",
+  "src/modules/dom.js:1704": "    abort?.addEventListener(\"abort\", forwardAbort, { once: true });",
+  "src/modules/dom.js:1719": "      signal: controller.signal,",
+  "src/modules/dom.js:1408": "  scope.controller?.abort();",
+  "src/modules/dom.js:1544": "    for (const node of nodes) node.remove();",
+  "src/modules/dom.js:1740": "    if (abort?.aborted) throw error;",
+  "docs/adr/0006-saba-async-reads-and-mutations.md:16": "On first load, show pending. A key change displays only data for the newly selected key. During a same-key refresh, show its confirmed value with a refreshing indicator. A transient failure ends pending and exposes the error alongside that value. An authorized, definitive item deletion removes the confirmed record and disables Save. A dirty draft may be reviewed or copied. A 403 or opaque 404 clears the protected record and draft. In the read partition it retires only the key that received it: that entry's confirmed value is dropped, its transport is cancelled and it reads `forbidden`. An application that supplies `familyFor` also opts into family-wide revocation, and a denied read then retires every live key of its family. Session loss (401) or identity change releases the previous session/tenant partition, its journal and its editor state before the new identity can render. [Editor outcomes](0008-saba-routed-edit-forms.md)",
   "docs/adr/0006-saba-async-reads-and-mutations.md:14": "Issuing or invalidating a read advances the entry’s generation. Success, failure and cleanup all check that the active partition still maps the key to the **same entry instance** and that its generation still matches. Delivery also checks that the subscriber’s scope is live and still attached. Switching keys detaches immediately. The last release removes the entry before aborting its transport. Reacquiring that key creates a fresh instance, even if its first generation again equals 1. These checks also apply when a transport ignores abort or decoding has already finished.",
   "docs/adr/0006-saba-async-reads-and-mutations.md:12": "A resource key is a snapshot of a flat tuple. The first element is a nonempty operation name string and the remaining elements are all normalized inputs affecting its result, for example `[\"item\", \"42\"]` or `[\"itemSearch\", \"ada\", \"title\", 1]`. The pilot accepts strings, booleans, null and safe integers, with −0 equal to 0. Compare type, value and position. Reject unsupported values and sparse tuples before starting a read. Two separately allocated equal tuples in the same authenticated session and tenant share one document cache entry, confirmed value and in-flight read. Changes to the caller’s original array leave that snapshot intact. The entry owns the transport controller. Each component owns its subscription.",
   "docs/adr/0006-saba-async-reads-and-mutations.md:18": "For example, issue searches for `ad` and then `ada`. Deliver the `ada` response first and show Ada. Deliver the older response, or reject it and run its cleanup. The rows, error and loading indicator still describe `ada`. An independent component still watching `ad` may receive its own result.",
   "docs/adr/0006-saba-async-reads-and-mutations.md:42": "- Use a deferred transport that ignores abort. Subscribers A and B request separately allocated equal `ad` keys and issue one read. Move A to `ada` and complete it first. Complete `ad` and check that only B receives it. Repeat with a rejected `ad`. End pending and publish the error only in B.",
   "docs/adr/0006-saba-async-reads-and-mutations.md:43": "- Release both subscribers, reacquire the original key and deliver the retired entry’s callbacks while its replacement is pending. Count zero publications from the retired entry and verify the new spinner stays visible. Repeat after a tenant switch and with two overlapping same-key refreshes, testing stale success, error and cleanup.",
-  "docs/adr/0006-saba-async-reads-and-mutations.md:36": "Before dispatch, write one tab-session storage entry per (authenticated session, tenant, item, operation ID). In the pilot each top-level document owns its tab journal. Allocate IDs with a cryptographic random generator, claim a previously absent key before dispatch, and regenerate on a local collision. Never overwrite or remove another attempt’s entry. If writing fails, preserve the draft, report the failure and send zero requests. Two editors saving the same item create two entries. Disposal revokes permission to publish. The document tracks settlement for its active identity independently of any individual editor. On revisit or history restoration, verify identity, enumerate every outstanding entry for the item, check its receipt and refresh the record before admitting a new save. Remove each resolved entry independently. A restored editor uses receipt lookup only. The journal stores identifiers and carries no submitted fields or credentials.",
+  "docs/adr/0006-saba-async-reads-and-mutations.md:36": "Before dispatch, write one tab-session storage entry per (authenticated session, tenant, item, operation ID). In the pilot each top-level document owns its tab journal. Allocate IDs with a cryptographic random generator, claim a previously absent key before dispatch, and regenerate on a local collision. Never overwrite or remove another attempt’s entry within the same verified session. If writing fails, preserve the draft, report the failure and send zero requests. Two editors saving the same item create two entries. Disposal revokes permission to publish. The document tracks settlement for its active identity independently of any individual editor. On revisit or history restoration, verify identity, enumerate every outstanding entry for the item, check its receipt and refresh the record before admitting a new save. Remove each resolved entry independently. A restored editor uses receipt lookup only. The journal stores identifiers and carries no submitted fields or credentials.",
   "docs/adr/0008-saba-routed-edit-forms.md:22": "The form’s submit handler prevents native submission, checks eligibility, validates and snapshots its item ID, draft, edit versions and base revision. Enter and the Save button use the same handler. One editor admits one outstanding save for its item. It sends, for example, `PATCH /api/items/42` with `{\"operationId\":\"save-17\",\"expectedRevision\":7,\"title\":\"Desk lamp\"}`. The server checks authorization and revision and records the outcome according to the mutation contract. [Read and mutation ownership](0006-saba-async-reads-and-mutations.md)",
   "docs/adr/0006-saba-async-reads-and-mutations.md:24": "The Odin handler for `/api/items/42` authorizes the caller and atomically reserves a unique (tenant, caller, item, operation ID) with the original method, target and body bytes. Check this reservation before field validation or revision comparison. An identical duplicate sees pending or receives the recorded terminal status and body. A different submission under the same key receives HTTP 409 with `code: \"operation_id_reused\"` and leaves the original receipt intact. The client reports an operation identity error, preserves the unsent intention for review and cannot use that key’s receipt to acknowledge this submission. In one storage transaction the handler locks the pending reservation, rechecks write access and validates the snapshot. It records validation failures or updates the item only where its revision equals the submitted revision. The conditional update increments the revision on success. Zero matching revisions on an existing authorized item yields a revision conflict. The same transaction stores the terminal status and body. Two operations against one revision can produce at most one write.",
-  "docs/adr/0008-saba-routed-edit-forms.md:33": "Every exit revokes the editor’s permission to publish and releases its resource subscriptions. A save already dispatched may have committed. Persist its recovery identifier before dispatch as specified in ADR 0006. A full document exit disposes the editor. When `pagehide` fires with `event.persisted === true`, hide private values and disable the form before suspension, retire its old subscriptions and preserve its in-memory draft. On a browser `pageshow` with the same flag, verify the current authenticated session and tenant with the server before looking up a receipt. Reacquire an authorized record under fresh ownership before revealing preserved data. Keep Save locked until outstanding operations and the latest record have been reconciled. [Mutation recovery](0006-saba-async-reads-and-mutations.md) · [HTML page transition events](https://html.spec.whatwg.org/multipage/nav-history-apis.html#the-pagetransitionevent-interface)",
+  "docs/adr/0008-saba-routed-edit-forms.md:33": "Every exit revokes the editor’s permission to publish and releases its resource subscriptions. A save already dispatched may have committed. Persist its recovery identifier before dispatch as specified in ADR 0006. A full document exit disposes the editor. When `pagehide` fires with `event.persisted === true`, hide private values and disable the form before suspension, retire its old subscriptions and preserve its in-memory draft. On a browser `pageshow` with the same flag, verify the current authenticated session and tenant with the server before looking up a receipt. Reacquire an authorized record under fresh ownership before revealing preserved data. Keep Save locked until outstanding operations and the latest record have been reconciled. If a sibling's receipt lookup settles this editor's operation while recovery is reading the baseline, recovery applies that outcome after the read instead of dropping it. [Mutation recovery](0006-saba-async-reads-and-mutations.md) · [HTML page transition events](https://html.spec.whatwg.org/multipage/nav-history-apis.html#the-pagetransitionevent-interface)",
   "docs/adr/0006-saba-async-reads-and-mutations.md:38": "For item 42 the pilot reads `GET /api/items/42/operations/{operationId}` with current authorization. A 401, 403 or opaque 404 follows the access-loss rules above and exposes no receipt data. A pending receipt (202) keeps the operation open. A terminal receipt (200) contains the recorded mutation status and body, including 422 or 409. A timeout or server failure leaves the journal intact for a later lookup. If the caller is authorized and the receipt is absent or expired, return 200 with `{\"state\":\"unknown\"}`. The outcome stays uncertain. Refresh the record and require explicit review before closing that entry and starting a new operation. Only an uninterrupted editor retaining its immutable submission may explicitly retry with the original ID and identical bytes inside the published retention window. Transport failure alone never resends a write.",
   "docs/adr/0008-saba-routed-edit-forms.md:49": "| Authorized record loaded | Edit fields. Save becomes available for a dirty, locally valid draft with a known base and no outstanding review or operation. Local validation reports errors on input or attempted submission. |",
   "docs/adr/0008-saba-routed-edit-forms.md:12": "The build produces one route table for the Odin page server and browser entry. Each entry identifies a pattern, HTML artifact and browser module from the same build. For the pilot, `items/index.jsx` maps to `/items` and `items/[id].jsx` maps to `/items/:id`. Links use ordinary document navigation. A direct visit, reload and link click select the same page.",
@@ -1591,134 +1594,138 @@ const sourceAnchors = {
   "docs/adr/0008-saba-routed-edit-forms.md:16": "For `GET /items/42` the server sends the editor’s compiled HTML and external module reference. The browser entry passes immutable params to the page component (`props.params.id === \"42\"`) and opens its scope. Every item ID uses the same template, with blank, disabled controls. The editor requests `GET /api/items/42`. Its Odin handler authorizes the request and returns a record such as `{\"id\":\"42\",\"revision\":7,\"title\":\"Lamp\"}`. [Compile-time delivery](0004-saba-compile-time-html-no-request-rendering.md)",
   "docs/adr/0008-saba-routed-edit-forms.md:20": "The first successful authorized read initializes a clean draft at revision 7. Keep the baseline record that the user edited, the latest confirmed record, the local draft and per-field edit versions. A clean editor can adopt a newer read. A dirty editor keeps its draft and original base revision and offers the newer record for review. Ignore older revisions. An input that returns to its baseline value is clean, but its edit version still advances. Each keyed row owns its editor scope, so reordering a row preserves its input, focus and draft. [DOM identity](0002-saba-ui-signals-with-incremental-borrowings.md)",
   "docs/adr/0008-saba-routed-edit-forms.md:51": "| Save pending | Continue editing. Duplicate submissions join the existing operation. Other editor instances have independent drafts and may submit against the same server revision. |",
-  "docs/adr/0008-saba-routed-edit-forms.md:61": "A field error can depend on more than the field where it appears. By default its dependency set is the whole submitted draft. An application may declare a narrower set for a known rule, such as `[title]` for a title-only check. If several rules can produce the same field message, use the union of their inputs. Editing any dependency or adopting a newer server revision clears that message immediately. Map an unknown field to the form’s live status only while the submitted values are still current. Stale errors cause zero focus movement or announcements. Store IDs and field references per form instance and preserve existing description IDs. Move focus only if the submitting form still owns focus and the invalid target can receive it. If the user has moved elsewhere, show current messages in their original form and leave focus alone."
+  "docs/adr/0008-saba-routed-edit-forms.md:64": "A field error can depend on more than the field where it appears. By default its dependency set is the whole submitted draft. An application may declare a narrower set for a known rule, such as `[title]` for a title-only check. If several rules can produce the same field message, use the union of their inputs. Editing any dependency or adopting a newer server revision clears that message immediately. Map an unknown field to the form’s live status only while the submitted values are still current. Stale errors cause zero focus movement or announcements. Store IDs and field references per form instance and preserve existing description IDs. Move focus only if the submitting form still owns focus and the invalid target can receive it. If the user has moved elsewhere, show current messages in their original form and leave focus alone.",
+  "src/jsx/map.odin:24": "note_origin :: proc(p: ^Emitter, loc: k.Loc) {",
+  "src/modules/modules.odin:121": "output = fmt.aprintf(\"%s\\n//# sourceMappingURL=%s\\n\", output, source_map_url, allocator = request.allocator)",
+  "src/jsx/jsx.odin:544": "publish_source_map(source_map, &p, file, shift, allocator)",
+  "src/modules/modules.odin:184": "sources_content = {string(source)},"
 };
 
 const currentFunctions = {
   "src/modules/sliding-window.js#observeRowWindow": {
     "name": "observeRowWindow",
     "path": "src/modules/sliding-window.js",
-    "line": 3,
-    "excerpt": "export function observeRowWindow(viewport, options, render) {\n  const {rowHeight, overscanRows = 8, thresholdRows = 3} = options;\n  let {rowCount} = options;\n  function checkCount(count) {\n    if (!Number.isSafeInteger(count) || count \u003c 0) throw new RangeError('Expected a nonnegative row count');\n  }"
+    "line": 32,
+    "excerpt": "export function observeRowWindow(viewport, options, render) {\n  const {rowHeight, overscanRows = 8, thresholdRows = 3, spacer = null, band = null} = options;\n  let {rowCount} = options;\n  function checkCount(count) {\n    if (!Number.isSafeInteger(count) || count \u003c 0) throw new RangeError('Expected a nonnegative row count');\n  }"
   },
   "src/jsx/jsx.odin#transform_jsx": {
     "name": "transform_jsx",
     "path": "src/jsx/jsx.odin",
-    "line": 55,
-    "excerpt": "transform_jsx :: proc(\n\tsource, file: string,\n\tallocator := context.allocator,\n) -> (\n\tjavascript: string,\n\terror: JSX_Error,\n) {\n\tpage, failure := compile_module(source, file, false, allocator)\n\treturn page.javascript, failure\n}"
+    "line": 391,
+    "excerpt": "transform_jsx :: proc(\n\tsource, file: string,\n\tallocator := context.allocator,\n\tsource_map: ^Source_Map = nil,\n) -> (\n\tjavascript: string,\n\terror: JSX_Error,\n) {\n\tpage, failure := compile_module(source, file, false, allocator, nil, source_map)\n\treturn page.javascript, failure\n}"
   },
   "src/pages/pages.odin#prepare_pages": {
     "name": "prepare_pages",
     "path": "src/pages/pages.odin",
-    "line": 34,
-    "excerpt": "prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allocator, module_mounts: []modules.Module_Cache = nil) -> (Page_Cache, bool) {\n\tcache, prepared := prepare_legacy_pages(config, development, allocator)\n\tif !prepared { return {}, false }\n\tif !prepare_templates(&cache, config.templates, module_mounts, allocator) { return {}, false }\n\treturn cache, true\n}"
+    "line": 37,
+    "excerpt": "prepare_pages :: proc(config: Page_Mount, development: bool, allocator: mem.Allocator, module_mounts: []modules.Module_Cache = nil) -> (Page_Cache, bool) {\n\tcache, prepared := prepare_legacy_pages(config, development, allocator)\n\tif !prepared { return {}, false }\n\tif !prepare_templates(&cache, config.templates, module_mounts, allocator, config.limits) { return {}, false }\n\treturn cache, true\n}"
   },
   "src/pages/pages.odin#serve_prepared_pages": {
     "name": "serve_prepared_pages",
     "path": "src/pages/pages.odin",
-    "line": 206,
+    "line": 235,
     "excerpt": "serve_prepared_pages :: proc(request: ^Request, cache: Page_Cache, development: bool) -> (Response, bool) {\n\tif (request.method != \"GET\" && request.method != \"HEAD\") || (cache.mount.directory == \"\" && len(cache.build.documents) == 0) {\n\t\treturn {}, false\n\t}"
   },
   "src/modules/modules.odin#serve_prepared_modules": {
     "name": "serve_prepared_modules",
     "path": "src/modules/modules.odin",
-    "line": 111,
-    "excerpt": "serve_prepared_modules :: proc(request: ^Request, mounts: []Module_Cache, development: bool) -> (Response, bool) {\n\tfor mount in mounts {\n\t\tif development {\n\t\t\tif response, matched := serve_modules(request, mount.mount.directory, mount.mount.prefix, true); matched {\n\t\t\t\treturn response, true\n\t\t\t}"
+    "line": 250,
+    "excerpt": "serve_prepared_modules :: proc(request: ^Request, mounts: []Module_Cache, development: bool) -> (Response, bool) {\n\tfor mount in mounts {\n\t\tif development {\n\t\t\tif response, matched := serve_modules(request, mount.mount.directory, mount.mount.prefix, true, mount.mount.exclude); matched {\n\t\t\t\treturn response, true\n\t\t\t}"
   },
   "src/modules/dom.js#jsx": {
     "name": "jsx",
     "path": "src/modules/dom.js",
-    "line": 809,
+    "line": 1013,
     "excerpt": "export function jsx(tag, properties, ...children) {\n  if (describingSlot) return {properties, children};\n  const props = properties || {};\n  const reference = props.ref;\n  if (reference != null && !references.has(reference)) {\n    throw new TypeError(\"ref must be an object created by ref(name).\");\n  }"
   },
   "src/modules/dom.js#mount": {
     "name": "mount",
     "path": "src/modules/dom.js",
-    "line": 1298,
+    "line": 1524,
     "excerpt": "export function mount(parent, Component, properties = {}) {\n  parent = resolveElement(parent);\n\n  const content = document.createDocumentFragment();\n  withContext(activeScope, parent, () => append(content, jsx(Component, properties)));\n\n  const nodes = [...content.childNodes];\n\n  parent.append(content);\n  activate(nodes);"
   },
   "src/modules/dom.js#onCleanup": {
     "name": "onCleanup",
     "path": "src/modules/dom.js",
-    "line": 1292,
+    "line": 1518,
     "excerpt": "export function onCleanup(callback) {\n  if (typeof callback !== \"function\")\n    throw new TypeError(\"Cleanup must be a function.\");\n  currentScope().cleanup.push(callback);\n}"
   },
   "src/modules/dom.js#update": {
     "name": "update",
     "path": "src/modules/dom.js",
-    "line": 1268,
+    "line": 1494,
     "excerpt": "export function update(target, content) {\n  target = resolveElement(target);\n  const fragment = document.createDocumentFragment();\n  withContext(activeScope, target, () => append(fragment, content));\n\n  const errors = [];\n  disposeNodes(childrenToDispose(target), errors);\n\n  target.replaceChildren(fragment);\n  activate([...target.childNodes]);"
   },
   "src/modules/dom.js#domEventName": {
     "name": "domEventName",
     "path": "src/modules/dom.js",
-    "line": 805,
+    "line": 1009,
     "excerpt": "function domEventName(eventProp) {\n  return eventProp.slice(2).toLowerCase();\n}"
   },
   "src/modules/dom.js#api": {
     "name": "api",
     "path": "src/modules/dom.js",
-    "line": 1468,
+    "line": 1694,
     "excerpt": "export async function api(\n  path,\n  { method = \"GET\", body, abort, messages = {} } = {},\n) {\n  const controller = new AbortController();\n  const forwardAbort = () => controller.abort(abort.reason);\n\n  if (abort?.aborted) {\n    forwardAbort();\n  } else {\n    abort?.addEventListener(\"abort\", forwardAbort, { once: true });"
   },
   "src/modules/dom.js#lifetime": {
     "name": "lifetime",
     "path": "src/modules/dom.js",
-    "line": 1101,
+    "line": 1310,
     "excerpt": "export function lifetime() {\n  return scopeLifetime(currentScope());\n}"
   },
   "src/modules/dom.js#disposeScope": {
     "name": "disposeScope",
     "path": "src/modules/dom.js",
-    "line": 1172,
+    "line": 1398,
     "excerpt": "function disposeScope(scope, errors) {\n  if (scope.disposed) return;\n  // An abort listener may write signals. Flush them after every descendant\n  // has been revoked so queued work cannot reach its former DOM.\n  batch(() => disposeScopeTree(scope, errors));\n}"
   },
   "src/core/request.odin#match_route": {
     "name": "match_route",
     "path": "src/core/request.odin",
-    "line": 163,
+    "line": 168,
     "excerpt": "match_route :: proc(request: ^Request, method, pattern: string) -> bool {\n\trequest.path_parameters = {}\n\trequest.path_parameter_count = 0\n\n\tif request.method != method {\n\t\treturn false\n\t}"
   },
   "src/modules/dom.js#validateForm": {
     "name": "validateForm",
     "path": "src/modules/dom.js",
-    "line": 1430,
+    "line": 1656,
     "excerpt": "export function validateForm(form) {\n  form = resolveElement(form);\n  const fields = [...form.querySelectorAll(\"input\")].filter(\n    (field) => field.type !== \"hidden\",\n  );\n\n  fields\n    .filter((field) => field.type === \"email\")\n    .forEach((field) => {\n      field.value = field.value.trim();\n    });"
   },
   "src/modules/dom.js#signal": {
     "name": "signal",
     "path": "src/modules/dom.js",
-    "line": 246,
+    "line": 312,
     "excerpt": "export function signal(value) {\n  const source = { version: 0, sinks: new Set() };\n  const read = () => {\n    observe(source);\n    return value;\n  };\n  read.set = (next) => {\n    if (Object.is(next, value)) return;\n    value = next;\n    source.version++;\n    revision++;"
   },
   "src/jsx/jsx.odin#compile_module": {
     "name": "compile_module",
     "path": "src/jsx/jsx.odin",
-    "line": 76,
-    "excerpt": "compile_module :: proc(\n\tsource, file: string,\n\ttemplate: bool,\n\tallocator := context.allocator,\n\twarnings: ^[dynamic]JSX_Error = nil,\n) -> (\n\tPage_Template,\n\tJSX_Error,\n) {\n\tpage: Page_Template\n\tjob: k.ParseJob"
+    "line": 413,
+    "excerpt": "compile_module :: proc(\n\tsource, file: string,\n\ttemplate: bool,\n\tallocator := context.allocator,\n\twarnings: ^[dynamic]JSX_Error = nil,\n\tsource_map: ^Source_Map = nil,\n) -> (\n\tPage_Template,\n\tJSX_Error,\n) {\n\tpage: Page_Template"
   },
   "src/jsx/jsx.odin#prepare_hole": {
     "name": "prepare_hole",
     "path": "src/jsx/jsx.odin",
-    "line": 325,
-    "excerpt": "prepare_hole :: proc(p: ^Emitter, expr: ^k.Expression, force_snapshot := false) -> (hole: Hole) {\n\thole.expr = expr\n\tsuspension: Suspension\n\tvisit_tree(expr, &hole.nodes, &suspension)\n\tif suspension.yielded != nil {\n\t\tp.position = int(suspension.yielded.loc.start)\n\t\tjsx_fail(p, \"Assign the yield result to a variable before using it in JSX\")\n\t}"
+    "line": 743,
+    "excerpt": "prepare_hole :: proc(p: ^Emitter, expr: ^k.Expression, force_snapshot := false) -> (hole: Hole) {\n\thole.expr = expr\n\tsuspension: Suspension\n\tguard: Visit_Guard\n\tvisit_tree(expr, &hole.nodes, &suspension, guard = &guard)\n\tif guard.exceeded {\n\t\tp.position = int(guard.at.start if guard.located else k.get_expression_loc(expr).start)\n\t\tjsx_fail(p, \"Expression nesting is too deep to compile\")\n\t}\n\tif suspension.yielded != nil {\n\t\tp.position = int(suspension.yielded.loc.start)\n\t\tjsx_fail(p, \"Assign the yield result to a variable before using it in JSX\")\n\t}\n\thole.live = !force_snapshot && !suspension.awaited && !one_shot(expr)\n\treturn\n}"
   },
   "src/jsx/jsx.odin#one_shot": {
     "name": "one_shot",
     "path": "src/jsx/jsx.odin",
-    "line": 302,
+    "line": 720,
     "excerpt": "one_shot :: proc(expr: ^k.Expression) -> bool {\n\t#partial switch v in expr^ {\n\tcase ^k.NullLiteral,\n\t     ^k.BooleanLiteral,\n\t     ^k.NumericLiteral,\n\t     ^k.StringLiteral,\n\t     ^k.BigIntLiteral,\n\t     ^k.Identifier,\n\t     ^k.FunctionExpression,\n\t     ^k.ArrowFunctionExpression:\n\t\treturn true"
   },
   "src/modules/dom.js#binding": {
     "name": "binding",
     "path": "src/modules/dom.js",
-    "line": 334,
+    "line": 455,
     "excerpt": "export function binding(read) {\n  return { type: bindingType, read };\n}"
   },
   "src/modules/dom.js#computed": {
     "name": "computed",
     "path": "src/modules/dom.js",
-    "line": 294,
+    "line": 364,
     "excerpt": "export function computed(callback) {\n  const node = computation(callback, false, scopeHere());\n  return () => {\n    refresh(node);\n    observe(node);\n    if (node.failed) throw node.error;\n    return node.value;\n  };\n}"
   },
   "src/jsx/template.odin#extract_page": {
@@ -1731,187 +1738,193 @@ const currentFunctions = {
     "name": "template_instance",
     "path": "src/jsx/template.odin",
     "line": 248,
-    "excerpt": "template_instance :: proc(b: ^Template_Build, fn: Template_Function, parent: int) -> string {\n\tname := fmt.aprintf(\"%s_%d\", b.setup_prefix, b.instances)\n\tprevious_instance, previous_local := b.instance, b.next_local\n\tb.instance, b.next_local = b.instances, 0\n\tb.instances += 1\n\tdefer {b.instance, b.next_local = previous_instance, previous_local}\n\tp := b.p\n\tprevious := p.output\n\tp.output = strings.builder_make()\n\tnodes: [dynamic]Syntax\n\tvisit_tree(fn.tree, &nodes, nil)"
+    "excerpt": "template_instance :: proc(b: ^Template_Build, fn: Template_Function, parent: int) -> string {\n\tname := fmt.aprintf(\"%s_%d\", b.setup_prefix, b.instances)\n\tprevious_instance, previous_local := b.instance, b.next_local\n\tb.instance, b.next_local = b.instances, 0\n\tb.instances += 1\n\tdefer {b.instance, b.next_local = previous_instance, previous_local}\n\tp := b.p\n\tprevious := p.output\n\tp.output = strings.builder_make()"
   },
   "src/modules/dom.js#appendRange": {
     "name": "appendRange",
     "path": "src/modules/dom.js",
-    "line": 450,
+    "line": 577,
     "excerpt": "function appendRange(parent, read, start, end) {\n  const claimed = start !== undefined;\n  if (!claimed) {\n    start = document.createComment(\"saba\");\n    end = document.createComment(\"/saba\");\n    parent.append(start, end);\n  }"
   },
   "src/jsx/template.odin#literal_child_text": {
     "name": "literal_child_text",
     "path": "src/jsx/template.odin",
-    "line": 619,
+    "line": 632,
     "excerpt": "literal_child_text :: proc(expr: ^k.Expression) -> (string, bool) {\n\tif expr == nil {\n\t\treturn \"\", false\n\t}"
   },
   "src/modules/dom.js#attachAttribute": {
     "name": "attachAttribute",
     "path": "src/modules/dom.js",
-    "line": 774,
+    "line": 977,
     "excerpt": "function attachAttribute(node, name, value, claimed) {\n  if (value?.type === bindingType) {\n    const slotWrite = claimed && scopeHere()?.slotBinding;\n    if (slotWrite) {\n      // Only passive HTML attributes reach this path. Coercion may execute\n      // user code, read signals or throw, so finish it in the subscription.\n      const stringValue = name.startsWith(\"aria-\") || name.startsWith(\"data-\");\n      subscribe(() => {\n        const text = attributeText(value.read(), stringValue);\n        slotWrite(() => {\n          if (text === null) node.removeAttribute(name);"
   },
   "src/modules/dom.js#namespaceFor": {
     "name": "namespaceFor",
     "path": "src/modules/dom.js",
-    "line": 689,
+    "line": 862,
     "excerpt": "function namespaceFor(tag, parent) {\n  let space = parent?.namespaceURI || html;\n  const name = parent?.localName;\n  if (space === svg && [\"foreignObject\", \"desc\", \"title\"].includes(name)) space = html;\n  if (space === math) {\n    if ([\"mi\", \"mo\", \"mn\", \"ms\", \"mtext\"].includes(name) && ![\"mglyph\", \"malignmark\"].includes(tag)) {\n      space = html;\n    }"
   },
   "src/modules/dom.js#child": {
     "name": "child",
     "path": "src/modules/dom.js",
-    "line": 340,
+    "line": 467,
     "excerpt": "export function child(tag, props, ...children) {\n  return { type: childType, tag, props, children };\n}"
   },
   "src/jsx/jsx.odin#emit_children": {
     "name": "emit_children",
     "path": "src/jsx/jsx.odin",
-    "line": 445,
+    "line": 910,
     "excerpt": "emit_children :: proc(p: ^Emitter, children: []k.JSXChild, sole_intrinsic_child := false) {\n\tfor child in children {\n\t\tif p.error.message != \"\" {\n\t\t\treturn\n\t\t}"
   },
   "src/modules/dom.js#append": {
     "name": "append",
     "path": "src/modules/dom.js",
-    "line": 372,
+    "line": 499,
     "excerpt": "function append(parent, value) {\n  if (value == null || typeof value === \"boolean\") return;\n  if (Array.isArray(value)) {\n    for (const item of value) append(parent, item);\n  } else if (value instanceof Node) {\n    parent.append(value);\n  } else if (isText(value)) {\n    parent.append(document.createTextNode(String(value)));\n  } else if (value.type === childType) {\n    append(parent, jsx(value.tag, value.props, ...value.children));\n  } else if (value.type === bindingType) {"
   },
   "src/pages/build.odin#prepare_templates": {
     "name": "prepare_templates",
     "path": "src/pages/build.odin",
-    "line": 59,
-    "excerpt": "prepare_templates :: proc(\n\tcache: ^Page_Cache,\n\tconfig: Template_Build,\n\tmounts: []modules.Module_Cache,\n\tallocator: mem.Allocator,\n) -> bool {\n\tif len(config.pages) == 0 {\n\t\treturn true\n\t}"
+    "line": 178,
+    "excerpt": "prepare_templates :: proc(\n\tcache: ^Page_Cache,\n\tconfig: Template_Build,\n\tmounts: []modules.Module_Cache,\n\tallocator: mem.Allocator,\n\tlimits := assets.Asset_Limits{},\n) -> bool {\n\tif len(config.pages) == 0 {\n\t\treturn true\n\t}"
   },
   "src/pages/build.odin#serve_document": {
     "name": "serve_document",
     "path": "src/pages/build.odin",
-    "line": 296,
+    "line": 886,
     "excerpt": "serve_document :: proc(request: ^Request, doc: Compiled_Document, development := false) -> Response {\n\tif authorize := doc.config.authorize; authorize != nil {\n\t\tdenial, allowed := authorize(request)\n\t\tif !allowed {\n\t\t\treturn denial\n\t\t}"
   },
   "src/pages/build.odin#serve_build_asset": {
     "name": "serve_build_asset",
     "path": "src/pages/build.odin",
-    "line": 281,
+    "line": 860,
     "excerpt": "serve_build_asset :: proc(request: ^Request, cache: Page_Cache) -> (Response, bool) {\n\tif !strings.has_prefix(request.path, BUILD_PATH) {\n\t\treturn {}, false\n\t}"
   },
   "src/modules/attach.js#attach": {
     "name": "attach",
     "path": "src/modules/attach.js",
-    "line": 100,
-    "excerpt": "export function attach(host, manifest, setup) {\n  if (!host || mounted.has(host)) throw new Error(\"Missing or already active Saba template host.\");\n  const resolved = resolveTargets(host, manifest);\n  const journal = activationJournal(host);\n  const previous = activation;\n  activation = {targets: resolved, journal};\n  mounted.add(host);\n  try {\n    const release = templateRoot(host, setup, () => { host.inert = false; });\n    journal.close();\n    return () => {"
+    "line": 121,
+    "excerpt": "export function attach(host, manifest, setup) {\n  if (!host || mounted.has(host)) throw new Error(\"Missing or already active Saba template host.\");\n  const resolved = resolveTargets(host, manifest);\n  const journal = activationJournal(host);\n  const previous = activation;\n  activation = {targets: resolved, journal};\n  mounted.add(host);\n  try {\n    const release = templateRoot(host, setup, () => enable(host));\n    journal.close();\n    return () => {\n      try { release(); } finally { mounted.delete(host); }\n    };"
   },
   "src/modules/dom.js#observe": {
     "name": "observe",
     "path": "src/modules/dom.js",
-    "line": 109,
+    "line": 137,
     "excerpt": "function observe(source) {\n  if (!tracking || tracking.disposed) return;\n  tracking.reads.set(source, source.version);\n  if (tracking.effect || tracking.sinks.size) connect(source, tracking);\n}"
   },
   "src/modules/dom.js#flush": {
     "name": "flush",
     "path": "src/modules/dom.js",
-    "line": 194,
-    "excerpt": "function flush() {\n  if (batchDepth || flushing) return;\n  flushing = true;\n  let failure, failed = false;\n  try {\n    let passes = 0;\n    while (pendingEffects.size) {\n      if (++passes > FLUSH_PASS_LIMIT) {\n        for (const node of pendingEffects) node.state = CLEAN;\n        pendingEffects.clear();\n        throw new Error(`Reactive flush exceeded the pass limit (${FLUSH_PASS_LIMIT}).`);"
+    "line": 230,
+    "excerpt": "function flush() {\n  if (batchDepth || flushing) return;\n  flushing = true;\n  flushId++;\n  let failure, failed = false, overflow = null;\n  try {\n    let passes = 0, limit = FLUSH_PASS_LIMIT;\n    while (pendingEffects.size) {\n      if (++passes > limit) {\n        // The effects still writing signals are the ones that cannot settle.\n        // Retire those, then let every other pending effect observe the\n        // final values instead of leaving it marked clean and stale.\n        const stuck = overflow ? [] : [...pendingEffects].filter(node =>\n          node.wroteFlush === flushId && node.wrotePass >= passes - 2);\n        overflow ||= new Error(`Reactive flush exceeded the pass limit (${FLUSH_PASS_LIMIT}).`);\n        if (!stuck.length) {\n          for (const node of pendingEffects) node.state = CLEAN;\n          pendingEffects.clear();\n          break;\n        }\n        for (const node of stuck) {\n          node.state = CLEAN;\n          pendingEffects.delete(node);\n        }\n        limit = passes + FLUSH_PASS_LIMIT;\n        continue;\n      }"
   },
   "src/modules/dom.js#untrack": {
     "name": "untrack",
     "path": "src/modules/dom.js",
-    "line": 236,
+    "line": 302,
     "excerpt": "export function untrack(callback) {\n  const previous = tracking;\n  tracking = null;\n  try {\n    return callback();\n  } finally {\n    tracking = previous;\n  }"
   },
   "src/modules/dom.js#invalidate": {
     "name": "invalidate",
     "path": "src/modules/dom.js",
-    "line": 130,
+    "line": 158,
     "excerpt": "function invalidate(node, level) {\n  if (node.disposed || node.state >= level) return;\n  node.state = level;\n  if (node.effect) pendingEffects.add(node);\n  else for (const sink of node.sinks) invalidate(sink, CHECK);\n}"
   },
   "src/modules/dom.js#refresh": {
     "name": "refresh",
     "path": "src/modules/dom.js",
-    "line": 156,
+    "line": 187,
     "excerpt": "function refresh(node) {\n  if (node.running) throw new Error(\"Reactive dependency cycle.\");\n  if (node.disposed) return;\n  if (node.state === CLEAN && (node.sinks.size || node.epoch === revision)) return;\n  if (node.state !== DIRTY) {\n    node.state = CLEAN;\n    node.epoch = revision;\n    let changed = false;\n    for (const [input, version] of node.sources) {\n      if (input.sources) refresh(input);\n      if (input.version !== version) {"
   },
   "src/modules/dom.js#effect": {
     "name": "effect",
     "path": "src/modules/dom.js",
-    "line": 315,
-    "excerpt": "export function effect(callback) {\n  if (activation || preparingRow) {\n    const owner = scopeHere(), parent = position;\n    let stop = null, cancelled = false;\n    const startEffect = () => {\n      if (!cancelled) stop = withContext(owner, parent, () => subscribe(callback));\n    };\n    if (activation) afterSetup(\"effects\", startEffect);\n    else enqueue(owner, startEffect);\n    return () => {\n      cancelled = true;"
+    "line": 436,
+    "excerpt": "export function effect(callback) {\n  if (activation || preparingRow) {\n    const owner = scopeHere(), parent = position;\n    let stop = null, cancelled = false;\n    const startEffect = () => {\n      if (!cancelled) stop = withContext(owner, parent, () => ownedEffect(callback));\n    };\n    if (activation) afterSetup(\"effects\", startEffect);\n    else enqueue(owner, startEffect);\n    return () => {\n      cancelled = true;"
   },
   "src/modules/dom.js#disconnect": {
     "name": "disconnect",
     "path": "src/modules/dom.js",
-    "line": 124,
+    "line": 152,
     "excerpt": "function disconnect(source, sink) {\n  if (source.sinks.delete(sink) && !source.sinks.size && source.sources) {\n    for (const input of source.sources.keys()) disconnect(input, source);\n  }"
   },
   "src/modules/dom.js#keyed": {
     "name": "keyed",
     "path": "src/modules/dom.js",
-    "line": 523,
+    "line": 658,
     "excerpt": "export function keyed(items, keyOf, renderRow) {\n  return { type: keyedType, items, keyOf, renderRow };\n}"
   },
   "src/modules/dom.js#prepareRow": {
     "name": "prepareRow",
     "path": "src/modules/dom.js",
-    "line": 539,
+    "line": 674,
     "excerpt": "function prepareRow(record, renderRow, owner) {\n  const scope = createScope(owner);\n  const current = signal(record);\n  let fragment;\n  const previous = preparingRow;\n  const effectsBefore = activation?.effects.length;\n  preparingRow = {scope, textParent: null};\n  try {\n    const value = withContext(scope, position, () => renderRow(() => current()));\n    if (passiveTextRoot(value, scope, effectsBefore)) {\n      scope.roots = [value];"
   },
   "src/modules/dom.js#placeRow": {
     "name": "placeRow",
     "path": "src/modules/dom.js",
-    "line": 584,
+    "line": 719,
     "excerpt": "function placeRow(row, before, added) {\n  if (row.last.nextSibling === before) return;\n  const parent = before.parentNode;\n  const inserted = [];\n  for (let node = row.first; node;) {\n    const next = node.nextSibling;\n    if (added) inserted.push(node);\n    if (!added && parent.moveBefore) parent.moveBefore(node, before);\n    else parent.insertBefore(node, before);\n    if (node === row.last) break;\n    node = next;"
   },
   "src/modules/dom.js#appendKeyed": {
     "name": "appendKeyed",
     "path": "src/modules/dom.js",
-    "line": 599,
+    "line": 766,
     "excerpt": "function appendKeyed(parent, descriptor) {\n  const first = document.createComment(\"keyed\");\n  const last = document.createComment(\"/keyed\");\n  rangeEnds.set(first, last);\n  parent.append(first, last);\n  const owner = scopeHere();\n  let rows = new Map();\n  const configuration = signal(descriptor);\n  own(\n    () => {\n      const errors = [];"
   },
   "src/modules/dom.js#removeRow": {
     "name": "removeRow",
     "path": "src/modules/dom.js",
-    "line": 572,
+    "line": 707,
     "excerpt": "function removeRow(row, errors) {\n  disposeScope(row.scope, errors);\n  if (row.first === row.last) {\n    disposeNodes([row.first], errors);\n    row.first.remove();\n    return;\n  }"
   },
   "src/modules/dom.js#liveProp": {
     "name": "liveProp",
     "path": "src/modules/dom.js",
-    "line": 364,
+    "line": 491,
     "excerpt": "export function liveProp(name, read) {\n  return Object.defineProperty({}, name, { get: read, enumerable: true, configurable: true });\n}"
   },
   "src/modules/dom.js#mergeProps": {
     "name": "mergeProps",
     "path": "src/modules/dom.js",
-    "line": 358,
+    "line": 485,
     "excerpt": "export function mergeProps(...sources) {\n  const props = {};\n  for (const source of sources) copyProps(props, source, false);\n  return props;\n}"
   },
   "src/modules/reads.js#createReadPartition": {
     "name": "createReadPartition",
     "path": "src/modules/reads.js",
-    "line": 24,
-    "excerpt": "export function createReadPartition(load, {familyFor = key => key[0], revisionOf, onSessionLost} = {}) {\n  const entries = new Map();\n  const revisions = new Map();\n  let disposed = false;\n\n  function cancel(entry) {\n    const previous = entry.controller;\n    entry.controller = null;\n    previous?.abort();\n  }"
+    "line": 43,
+    "excerpt": "export function createReadPartition(load, {\n  familyFor, revisionOf, onSessionLost, identity, verifyIdentity, onIdentityChanged,\n  revisionLimit = REVISION_LIMIT,\n} = {}) {\n  const entries = new Map();\n  const revisions = new Map();\n  const paused = signal(false);\n  const sharedFamilies = typeof familyFor === \"function\";\n  const family = sharedFamilies ? familyFor : key => key[0];\n  const page = typeof addEventListener === \"function\" && typeof removeEventListener === \"function\";"
   },
   "src/modules/mutations.js#createMutationPartition": {
     "name": "createMutationPartition",
     "path": "src/modules/mutations.js",
-    "line": 32,
-    "excerpt": "export function createMutationPartition({\n  session, tenant, transport = itemTransport(), storage, newId = () => crypto.randomUUID(),\n  retryDelays = [100, 400], onCommitted, onAccessLost, onJournalError, retentionMs = 0\n}) {\n  if (typeof session !== \"string\" || !session || typeof tenant !== \"string\" || !tenant) {\n    throw new TypeError(\"Expected verified session and tenant identifiers.\");\n  }"
+    "line": 110,
+    "excerpt": "export function createMutationPartition({\n  session, tenant, transport = itemTransport(), storage, newId = randomId,\n  retryDelays = [100, 400], onCommitted, onAccessLost, onJournalError, retentionMs = 0,\n  purgeOtherSessions = true\n}) {\n  if (typeof session !== \"string\" || !session || typeof tenant !== \"string\" || !tenant) {\n    throw new TypeError(\"Expected verified session and tenant identifiers.\");\n  }"
   },
   "src/modules/editor.js#createEditor": {
     "name": "createEditor",
     "path": "src/modules/editor.js",
-    "line": 9,
+    "line": 18,
     "excerpt": "export function createEditor({\n  partition, item, fields, validate = () => ({}), dependencies = {},\n  verifyIdentity, onIdentityChanged, owner = lifetime().abort\n}) {\n  const names = [...new Set(fields)];\n  if (!names.length || names.some(name => typeof name !== \"string\" || !name ||\n      [\"id\", \"revision\", \"operationId\", \"expectedRevision\", \"__proto__\"].includes(name))) {\n    throw new TypeError(\"Supply editable field names distinct from record metadata.\");\n  }"
   },
   "src/modules/mutations.js#itemTransport": {
     "name": "itemTransport",
     "path": "src/modules/mutations.js",
-    "line": 2,
-    "excerpt": "export function itemTransport(baseURL = \"/api/items\", timeoutMs = 10000) {\n  function path(item) { return baseURL + \"/\" + encodeURIComponent(item); }\n  async function request(url, signal, serialized) {\n    const deadline = AbortSignal.timeout(timeoutMs);\n    const options = {method: \"GET\", credentials: \"same-origin\", cache: \"no-store\",\n      signal: signal ? AbortSignal.any([signal, deadline]) : deadline};\n    if (serialized !== undefined) {\n      options.method = \"PATCH\";\n      options.headers = {\"Content-Type\": \"application/json\"};\n      options.body = serialized;\n    }"
+    "line": 65,
+    "excerpt": "export function itemTransport(baseURL = \"/api/items\", timeoutMs = 10000) {\n  function path(item) { return baseURL + \"/\" + encodeURIComponent(item); }\n  async function request(url, signal, serialized) {\n    const deadline = deadlineSignal(signal, timeoutMs);\n    const options = {method: \"GET\", credentials: \"same-origin\", cache: \"no-store\", signal: deadline.signal};\n    if (serialized !== undefined) {\n      options.method = \"PATCH\";\n      options.headers = {\"Content-Type\": \"application/json\"};\n      options.body = serialized;\n    }"
   },
   "src/jsx/advice.odin#advise_snapshot": {
     "name": "advise_snapshot",
     "path": "src/jsx/advice.odin",
     "line": 17,
     "excerpt": "advise_snapshot :: proc(\n\ta: ^Snapshot_Advice,\n\tparams: []k.FunctionParameter,\n\tbody: []^k.Statement,\n\tresult: ^k.Expression = nil,\n) {\n\tif len(params) != 1 {\n\t\treturn\n\t}"
+  },
+  "src/modules/modules.odin#read_module_map": {
+    "name": "read_module_map",
+    "path": "src/modules/modules.odin",
+    "line": 145,
+    "excerpt": "read_module_map :: proc(request: ^Request, root, relative: string) -> Response {\n\tmodule := relative[:len(relative) - len(SOURCE_MAP_SUFFIX)]\n\tstem := module[:len(module) - len(\".js\")]\n\tsource_path, has_source, source_allowed := module_file(root, fmt.tprintf(\"%s.jsx\", stem), request.allocator)\n\tif !source_allowed {\n\t\treturn not_found(request)"
   }
 };
 
@@ -2077,7 +2090,8 @@ byId('clear-search').addEventListener('click', () => {
 });
 
 const currentResponsibilities = {
-  transform_jsx: 'Kessel parses the authored module. Saba classifies each JSX expression, emits runtime calls and copies the JavaScript between JSX spans.',
+  transform_jsx: 'Kessel parses the authored module. Saba classifies each JSX expression, emits runtime calls and copies the JavaScript between JSX spans. A caller that passes source_map also receives a version 3 source map.',
+  read_module_map: 'In development this route compiles a module’s JSX source again and answers with its map, naming the module and source relative to the map and embedding the source.',
   prepare_pages: 'The page builder prepares mount routes. Compiled template routes also run the extractor, retain their language variants and link modules under the same generation.',
   serve_prepared_pages: 'In production this route looks up the prepared page and returns its stored representation.',
   serve_prepared_modules: 'In production this route looks up and serves a prepared JavaScript module.',

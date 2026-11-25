@@ -15,7 +15,7 @@ A value derived from signals and other computeds, recalculated only when one of 
 _Avoid_: Memo, derived, selector
 
 **Effect**:
-A computation run for what it does rather than what it returns, re-run when a value it read changes.
+A computation run for what it does rather than what it returns, re-run when a value it read changes. Each run owns what it creates and may return its own cleanup.
 _Avoid_: Watcher, reaction, subscriber
 
 **Cutoff**:
@@ -80,7 +80,7 @@ The server’s durable outcome for one operation. A tab-session journal holds a 
 
 **Build generation**
 
-One immutable set of route metadata, HTML, browser entries and their transitive modules. The server publishes the set together. A document can attach only to the matching generation.
+One immutable set of route metadata, HTML, browser entries and their transitive modules. The server publishes the set together. Its id is a digest of that content, and every module URL contains it. A document can attach only to the matching generation.
 
 ## Design and delivery
 

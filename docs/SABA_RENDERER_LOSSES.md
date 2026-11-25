@@ -2,6 +2,8 @@
 
 The earlier seven-way comparison exposed two material deficits for the handwritten Saba prototype. On the throttled board, React committed a cross-column drop sooner in seven of seven rounds and painted it sooner in six. In the single fully mounted million-cell trial React mounted 1.38 s sooner, used 316 MiB less sampled peak renderer memory, and painted the jump to the final cell 41 ms sooner. The repeated 2 GiB trials also consistently fit more React cells. These follow-ups keep production code and the original benchmark fixtures intact. [Dashboard and scale baseline](SABA_RICH_RENDERING.md)
 
+Measured before 2026-11-25. The compiler now lowers some keyed and checkbox lists and element-or-nothing holes to direct DOM code, which may change the compiled Saba figures below. They are kept as recorded until new measurements replace them. All runs used Chromium. [Lowering rules](adr/0007-saba-reactive-props-and-bindings.md#shapes-the-compiler-lowers-to-direct-dom-code)
+
 ## Moving a keyed card
 
 Each round used the same four-lane board with 240 cards. After selection, batch edit, undo and filtering, a trusted mouse drag moved the first card of the first lane ahead of the first card of the second lane. The benchmark checked all affected state and final DOM order, timed the same 300 ms animation, and collected Chromium compositor presentation feedback. The three variants rotated through all six execution orders twice under 4× CPU throttling. DOM mutation counts came from separate warm-up visits, with the observer disabled during timing.

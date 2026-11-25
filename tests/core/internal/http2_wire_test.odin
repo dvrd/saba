@@ -4,7 +4,6 @@ import "shared:async/tls"
 import tlscredentials "shared:async/tls/credentials"
 import credential_store "shared:async/tls/credentials/store"
 import "core:sync"
-import "core:sys/posix"
 import "core:testing"
 import "core:thread"
 import "core:time"
@@ -28,6 +27,8 @@ H2W_Server :: struct {
 	// Nonzero replaces the default body timeout; observed turns on observability.
 	body:     time.Duration,
 	observed: bool,
+	// The connection that served /refuse over an ordinary HTTP/2 stream.
+	refused:  ^Connection_Task,
 }
 
 H2W_Frame :: struct {
@@ -62,7 +63,7 @@ h2w_tunnel :: proc(data: rawptr, io: ^Upgrade_IO) -> async.Resume_Result {
 	}
 }
 
-h2w_handler :: proc(data: rawptr, _: ^Connection, request: ^Request) -> Response {
+h2w_handler :: proc(data: rawptr, conn: ^Connection, request: ^Request) -> Response {
 	state := cast(^H2W_Server)data
 	sync.atomic_add(&state.handled, 1)
 
@@ -70,6 +71,9 @@ h2w_handler :: proc(data: rawptr, _: ^Connection, request: ^Request) -> Response
 	case "/hold":
 		return {deferred = {poll = h2w_hold, drop = proc(_: rawptr) {}, timeout = 3 * time.Second}}
 	case "/refuse":
+		if conn != nil && conn._task != nil && conn._task.http2_request != nil {
+			sync.atomic_store(&state.refused, conn._task.http2_request.parent)
+		}
 		return {status = .OK, body = transmute([]u8)string("an ordinary body the peer never grants credit for")}
 	case "/tunnel":
 		return {status = .OK, upgrade = {data = state, resume = h2w_tunnel, drop = proc(_: rawptr) {}}}
@@ -810,7 +814,7 @@ h2_zero_window_response_is_reset_at_its_deadline :: proc(t: ^testing.T) {
 			return
 		}
 		started := time.tick_now()
-		cpu_started := h2w_cpu_time()
+		resumes_started: u64
 		reset := false
 		for !reset {
 			frame, ok := h2w_next(peer, true)
@@ -821,17 +825,21 @@ h2_zero_window_response_is_reset_at_its_deadline :: proc(t: ^testing.T) {
 				return
 			}
 			testing.expect(t, frame.kind != 0 || len(frame.payload) == 0, "body sent without flow-control credit")
+			if frame.kind == 1 && frame.stream == 1 {
+				resumes_started = h2w_resumes(state)
+			}
 			if frame.kind == 3 && frame.stream == 1 {
 				testing.expect_value(t, h2w_code(frame), u32(8))
 				reset = true
 			}
 		}
 		elapsed := time.tick_since(started)
-		cpu := h2w_cpu_time() - cpu_started
+		resumes := h2w_resumes(state) - resumes_started
 		testing.expectf(t, elapsed >= H2W_RESPONSE / 2, "reset after %v, before the response deadline", elapsed)
 		testing.expectf(t, elapsed < H2W_RESPONSE + time.Second, "reset after %v", elapsed)
-		// Waiting for credit is not polling for it.
-		testing.expectf(t, cpu < elapsed / 2, "%v of CPU while waiting %v for credit", cpu, elapsed)
+		// Waiting for credit is not spinning on it: at most the owner's
+		// millisecond timer wakes the connection.
+		testing.expectf(t, resumes > 0 && f64(resumes) < 3 * f64(elapsed / time.Millisecond), "%d owner turns while waiting %v for credit", resumes, elapsed)
 
 		// A response without a body needs no credit: it ends.
 		clear(&wire)
@@ -874,15 +882,13 @@ h2_zero_window_response_is_reset_at_its_deadline :: proc(t: ^testing.T) {
 	})
 }
 
-// Process CPU time, user and system.
-h2w_cpu_time :: proc() -> time.Duration {
-	usage: posix.rusage
-	if posix.getrusage(.SELF, &usage) != .OK {
+// Owner turns of the connection that served /refuse.
+h2w_resumes :: proc(state: ^H2W_Server) -> u64 {
+	task := sync.atomic_load(&state.refused)
+	if task == nil || task.tls_state == nil {
 		return 0
 	}
-	total := usage.ru_utime.tv_sec + usage.ru_stime.tv_sec
-	micro := usage.ru_utime.tv_usec + usage.ru_stime.tv_usec
-	return time.Duration(total) * time.Second + time.Duration(micro) * time.Microsecond
+	return sync.atomic_load(&task.tls_state.executor.resumes)
 }
 
 // A DATA event a full tunnel cannot take yet used to stay borrowed across owner

@@ -165,7 +165,8 @@ analyze_element :: proc(
 		#partial switch v in value^ {
 		case ^k.StringLiteral:
 			// The runtime writes a static checked through the live property.
-			if seen_dynamic || key.name == "checked" || !closed_static_ok(p, v) {
+			if seen_dynamic || key.name == "checked" || !closed_static_ok(p, v) ||
+			   !direct_url_ok(key.name, p.source[v.loc.start + 1:v.loc.end - 1]) {
 				return {}, false
 			}
 			append(&node.statics, Closed_Static{key.name, p.source[v.loc.start + 1:v.loc.end - 1]})
@@ -536,4 +537,33 @@ emit_hole_test :: proc(b: ^Emitter, node: Closed_Node, param: string) {
 	if !node.when_true {
 		jsx_emit(b, ")")
 	}
+}
+
+// Whether a lowered row writes a dynamic URL attribute, so its module must
+// import the runtime's attribute check.
+lowered_writes_url :: proc(rows: []Closed_Row, name: string) -> bool {
+	row := find_row(rows, name)
+	if row == nil {
+		return false
+	}
+	for attr in row.dynamics {
+		if url_attribute(attr.name) {
+			return true
+		}
+	}
+	return row.tree && node_writes_url(row.root)
+}
+
+node_writes_url :: proc(node: Closed_Node) -> bool {
+	for attr in node.dynamics {
+		if url_attribute(attr.name) {
+			return true
+		}
+	}
+	for child in node.children {
+		if node_writes_url(child) {
+			return true
+		}
+	}
+	return false
 }

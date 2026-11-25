@@ -753,7 +753,16 @@ jsx_lowers_tree_rows_with_media_and_holes :: proc(t: ^testing.T) {
 	image := jsx_expect_lowered(t, keyed_module(`<img data-id={record().id} src={record().src} alt={record().alt} />`), "img.jsx")
 	testing.expect(t, strings.contains(image, `globalThis.document.createElement("img")`))
 	image_update := jsx_between(image, "cell.record !== row", "cell.record = row")
-	testing.expect(t, strings.contains(image_update, `__saba_attr0(cell.element, "src", row["src"], false);`))
+	// A URL goes through the runtime's own check, so a javascript: URL throws
+	// and trusted() is unwrapped exactly as on the runtime path.
+	testing.expect(t, strings.contains(image_update, `__saba_attr0(cell.element, "src", __saba_checkedAttribute("src", row["src"]), false);`))
+	testing.expect(t, strings.contains(image, `checkedAttribute as __saba_checkedAttribute`))
+	// A static URL is lowered only when it plainly is not a javascript: URL.
+	jsx_expect_lowered(t, keyed_module(`<img src="/a.png" data-id={record().id} alt={record().alt} />`), "img-static.jsx")
+	jsx_expect_runtime(t, keyed_module(`<img src="javascript:alert(1)" data-id={record().id} alt={record().alt} />`), "img-script.jsx")
+	// Rows without a URL do not import the check.
+	plain := jsx_expect_lowered(t, keyed_module(`<div data-id={record().id} title={record().title}>{record().label + ''}</div>`), "plain.jsx")
+	testing.expect(t, !strings.contains(plain, "checkedAttribute"))
 	testing.expect(t, strings.contains(image_update, `"alt"`))
 	testing.expect(t, !strings.contains(image_update, `"data-id"`))
 

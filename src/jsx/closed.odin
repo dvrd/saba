@@ -65,7 +65,7 @@ runtime_imports :: proc(program: ^k.Program) -> (found: Runtime_Imports) {
 // Every function a lowered mount adds at module scope. The names are reserved
 // against the whole source, and the generated code reads no authored binding.
 Lowered_Names :: struct {
-	impl, create, update, move, text, attr, own: string,
+	impl, create, update, move, text, attr, own, checked: string,
 }
 
 lowered_names :: proc(p: ^Emitter, index: int) -> Lowered_Names {
@@ -80,6 +80,7 @@ lowered_names :: proc(p: ^Emitter, index: int) -> Lowered_Names {
 		text = name(p, "textOf", index),
 		attr = name(p, "attr", index),
 		own = jsx_helper_name(p.source, fmt.tprintf("__saba_%s", helper_exports[Helper.Own])),
+		checked = jsx_helper_name(p.source, fmt.tprintf("__saba_%s", helper_exports[Helper.Checked])),
 	}
 }
 
@@ -168,6 +169,9 @@ lower_closed :: proc(p: ^Emitter, program: ^k.Program, nodes: ^[dynamic]Syntax) 
 		)
 		append(nodes, Syntax{loc, body, row_origin(rows[:], row)})
 		p.aliases[Helper.Own] = names.own
+		if lowered_writes_url(rows[:], row) {
+			p.aliases[Helper.Checked] = names.checked
+		}
 		lowered += 1
 	}
 }
@@ -599,6 +603,16 @@ js_string :: proc(text: string) -> string {
 	return string(encoded)
 }
 
+// The attributes the runtime checks for a javascript: URL.
+url_attribute :: proc(name: string) -> bool {
+	for known in ([]string{"href", "src", "action", "formaction", "xlink:href"}) {
+		if strings.equal_fold(name, known) {
+			return true
+		}
+	}
+	return false
+}
+
 strict_attribute :: proc(name: string) -> bool {
 	return strings.has_prefix(name, "data-") || strings.has_prefix(name, "aria-")
 }
@@ -617,6 +631,14 @@ emit_attr_write :: proc(
 		jsx_emit(b, js_format("%s%s.checked = ", indent, object))
 		emit_row_expr(b, attr.expr, param)
 		jsx_emit(b, ";\n")
+		return
+	}
+	// A URL is checked exactly as the runtime checks it: a javascript: URL
+	// throws, and trusted() is unwrapped.
+	if url_attribute(attr.name) {
+		jsx_emit(b, js_format("%s%s(%s, %s, %s(%s, ", indent, names.attr, object, js_string(attr.name), names.checked, js_string(attr.name)))
+		emit_row_expr(b, attr.expr, param)
+		jsx_emit(b, "), false);\n")
 		return
 	}
 	if produces_string(attr.expr) || (key != "" && reads_only(attr.expr, param, key)) {

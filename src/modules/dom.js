@@ -933,7 +933,8 @@ function scriptURL(text) {
   return /^javascript:/i.test(text.replace(/[\t\n\r]/g, "").replace(/^[\u0000- ]+/, ""));
 }
 
-function checkedAttribute(name, value) {
+// Exported for compiled code that writes attributes without the runtime.
+export function checkedAttribute(name, value) {
   if (value?.type === trustedType) return value.value;
   const key = name.toLowerCase();
   // Anything but an absent or boolean value is written as its string.

@@ -28,6 +28,7 @@ Helper :: enum {
 	Effect,
 	Paint,
 	Own,
+	Checked,
 }
 helper_exports := [Helper]string {
 	.Factory           = "jsx",
@@ -41,6 +42,7 @@ helper_exports := [Helper]string {
 	.Effect            = "effect",
 	.Paint             = "paint",
 	.Own               = "ownSlotWindow",
+	.Checked           = "checkedAttribute",
 }
 
 Emitter :: struct {

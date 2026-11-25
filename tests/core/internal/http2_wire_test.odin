@@ -4,6 +4,7 @@ import "shared:async/tls"
 import tlscredentials "shared:async/tls/credentials"
 import credential_store "shared:async/tls/credentials/store"
 import "core:sync"
+import "core:sys/posix"
 import "core:testing"
 import "core:thread"
 import "core:time"
@@ -790,4 +791,96 @@ h2_streams_expiring_together_are_all_reset_and_the_connection_survives :: proc(t
 		}
 		testing.expect(t, answered, "the connection did not serve a request after the resets")
 	})
+}
+
+// A response stream used to be released as soon as its last frame was queued.
+// To a peer that grants no flow-control credit the queued body never left, the
+// stream was never reset and the owner polled it until the connection closed.
+// The stream is now held until its output drains or its response deadline
+// passes, then reset, and the connection keeps serving.
+@(test)
+h2_zero_window_response_is_reset_at_its_deadline :: proc(t: ^testing.T) {
+	state: H2W_Server
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		wire: [dynamic]u8
+		defer delete(wire)
+		h2w_get(&wire, 1, "/refuse")
+		// SETTINGS_INITIAL_WINDOW_SIZE = 0
+		if !testing.expect(t, h2w_preface(peer, []u8{0, 4, 0, 0, 0, 0}) && h2w_send(peer, wire[:])) {
+			return
+		}
+		started := time.tick_now()
+		cpu_started := h2w_cpu_time()
+		reset := false
+		for !reset {
+			frame, ok := h2w_next(peer, true)
+			if !testing.expect(t, ok, "connection ended before the starved stream was reset") {
+				return
+			}
+			if !testing.expect(t, frame.kind != 7, "GOAWAY before the starved stream was reset") {
+				return
+			}
+			testing.expect(t, frame.kind != 0 || len(frame.payload) == 0, "body sent without flow-control credit")
+			if frame.kind == 3 && frame.stream == 1 {
+				testing.expect_value(t, h2w_code(frame), u32(8))
+				reset = true
+			}
+		}
+		elapsed := time.tick_since(started)
+		cpu := h2w_cpu_time() - cpu_started
+		testing.expectf(t, elapsed >= H2W_RESPONSE / 2, "reset after %v, before the response deadline", elapsed)
+		testing.expectf(t, elapsed < H2W_RESPONSE + time.Second, "reset after %v", elapsed)
+		// Waiting for credit is not polling for it.
+		testing.expectf(t, cpu < elapsed / 2, "%v of CPU while waiting %v for credit", cpu, elapsed)
+
+		// A response without a body needs no credit: it ends.
+		clear(&wire)
+		h2w_headers(&wire, 3, true, {{":method", "HEAD"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/"}})
+		if !testing.expect(t, h2w_send(peer, wire[:])) {
+			return
+		}
+		ended := false
+		for !ended {
+			frame, ok := h2w_next(peer, true)
+			if !testing.expect(t, ok && frame.kind != 7, "bodiless response on a starved stream never ended") {
+				return
+			}
+			testing.expect(t, frame.kind != 3, "bodiless response on a starved stream was reset")
+			ended = frame.stream == 3 && frame.kind <= 1 && frame.flags & 1 != 0
+		}
+
+		// The connection still serves a stream the peer does grant credit to.
+		clear(&wire)
+		h2w_get(&wire, 5, "/")
+		h2w_frame(&wire, 8, 0, 5, []u8{0, 0, 0, 100})
+		if !testing.expect(t, h2w_send(peer, wire[:])) {
+			return
+		}
+		answered, body := false, false
+		for !body {
+			frame, ok := h2w_next(peer, true)
+			if !ok {
+				break
+			}
+			if frame.stream == 5 && frame.kind == 1 {
+				testing.expect_value(t, h2w_status(frame), 200)
+				answered = true
+			}
+			if frame.stream == 5 && frame.kind == 0 && frame.flags & 1 != 0 {
+				body = true
+			}
+		}
+		testing.expect(t, answered && body, "the connection did not serve a request after the reset")
+	})
+}
+
+// Process CPU time, user and system.
+h2w_cpu_time :: proc() -> time.Duration {
+	usage: posix.rusage
+	if posix.getrusage(.SELF, &usage) != .OK {
+		return 0
+	}
+	total := usage.ru_utime.tv_sec + usage.ru_stime.tv_sec
+	micro := usage.ru_utime.tv_usec + usage.ru_stime.tv_usec
+	return time.Duration(total) * time.Second + time.Duration(micro) * time.Microsecond
 }

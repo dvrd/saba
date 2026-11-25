@@ -167,8 +167,20 @@ export default function Product() {
 }
 
 @(test)
-retained_and_expired_modules_in_chromium :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 60 * time.Second)
+retained_and_expired_modules_in_chromium :: proc(t: ^testing.T) {delivery_fixture(t, .Chromium)}
+
+@(test)
+retained_and_expired_modules_in_firefox :: proc(t: ^testing.T) {delivery_fixture(t, .Firefox)}
+
+@(test)
+retained_and_expired_modules_in_webkit :: proc(t: ^testing.T) {delivery_fixture(t, .WebKit)}
+
+delivery_fixture :: proc(t: ^testing.T, engine: Engine) {
+	testing.set_fail_timeout(t, engine_timeout(engine, 60 * time.Second))
+	if !engine_enter(t, engine, "the module delivery fixture") {
+		return
+	}
+	defer engine_leave(engine)
 	work, error := os.make_directory_temp("", "saba-delivery-*", context.temp_allocator)
 	if !testing.expect(t, error == nil) {
 		return
@@ -225,28 +237,27 @@ retained_and_expired_modules_in_chromium :: proc(t: ^testing.T) {
 		return
 	}
 	defer os.close(dump)
-	p, started := os.process_start(
-		{
-			command = {
-				chromium_path(),
-				"--headless",
-				"--no-first-run",
-				"--no-default-browser-check",
-				"--disable-background-networking",
-				"--disable-extensions",
-				"--dump-dom",
-				"--virtual-time-budget=12000",
-				fmt.tprintf("--user-data-dir=%s/profile", work),
-				fmt.tprintf("http://127.0.0.1:%d/", ep.port),
-			},
-			stdout = dump,
-			stderr = os.stderr,
-		},
-	)
-	if !testing.expectf(t, started == nil, "Could not start Chromium: %v", started) {
+	url := fmt.tprintf("http://127.0.0.1:%d/", ep.port)
+	command := []string {
+		chromium_path(),
+		"--headless",
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--disable-background-networking",
+		"--disable-extensions",
+		"--dump-dom",
+		"--virtual-time-budget=12000",
+		fmt.tprintf("--user-data-dir=%s/profile", work),
+		url,
+	}
+	if engine != .Chromium {
+		command = driver_command(engine, "dump", url, 60)
+	}
+	p, started := os.process_start({command = command, stdout = dump, stderr = os.stderr})
+	if !testing.expectf(t, started == nil, "Could not start %s: %v", engine_name(engine), started) {
 		return
 	}
-	result, waited := os.process_wait(p, 30 * time.Second)
+	result, waited := os.process_wait(p, engine_timeout(engine, 30 * time.Second))
 	if waited != nil {
 		_ = os.process_kill(p); _, _ = os.process_wait(p)
 	}

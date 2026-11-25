@@ -93,7 +93,20 @@ export async function driveHistory(editor, item) {
       await report("new generation reconciled its predecessor's pending mutation");
       return;
     }
-    if (stage === "away") throw new Error("Back loaded a new document instead of restoring the original");
+    if (stage === "away") {
+      // An engine without a back/forward cache (Playwright's WebKit build)
+      // loads a new document on Back. The test names that engine; anywhere
+      // else this means the page stopped being eligible for the cache.
+      check(new URL(location.href).searchParams.has("no-bfcache"), "Back loaded a new document instead of restoring the original");
+      check(sessionStorage.getItem("saba-ui-private-hidden") === null, "a page that was not cached reported a persisted pagehide");
+      check(await editor.open(), "routed read after Back failed");
+      check(input.value === (switching ? "Lamp" : "canonical browser save") && !editor.canSave(), "Back without the cache showed the wrong account, draft or committed value");
+      check(sessionStorage.getItem(writes) === "1" && Number(sessionStorage.getItem(receiptReads)) === (switching ? 0 : 1) &&
+        sessionStorage.getItem(identityChecks) === null, "unexpected PATCH, receipt or identity-check count");
+      await report(switching ? "new document on Back, changed identity, zero previous receipts, fresh authorized record" :
+        "new document on Back, one receipt, one committed PATCH, committed value");
+      return;
+    }
     if (stage === "reload") {
       check(await editor.open(), "fresh record load failed");
       check(input.value === (switching ? "Lamp" : "canonical browser save") && !editor.canSave(), "reload restored the wrong account or draft");

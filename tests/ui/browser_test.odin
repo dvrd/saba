@@ -187,8 +187,24 @@ compiled_jsx_in_chromium :: proc(t: ^testing.T) {browser_fixture(t, false)}
 @(test)
 deploy_while_a_save_is_reserved :: proc(t: ^testing.T) {browser_fixture(t, true)}
 
-browser_fixture :: proc(t: ^testing.T, deployment: bool) {
-	testing.set_fail_timeout(t, 90 * time.Second)
+@(test)
+compiled_jsx_in_firefox :: proc(t: ^testing.T) {browser_fixture(t, false, .Firefox)}
+
+@(test)
+deploy_while_a_save_is_reserved_in_firefox :: proc(t: ^testing.T) {browser_fixture(t, true, .Firefox)}
+
+@(test)
+compiled_jsx_in_webkit :: proc(t: ^testing.T) {browser_fixture(t, false, .WebKit)}
+
+@(test)
+deploy_while_a_save_is_reserved_in_webkit :: proc(t: ^testing.T) {browser_fixture(t, true, .WebKit)}
+
+browser_fixture :: proc(t: ^testing.T, deployment: bool, engine := Engine.Chromium) {
+	testing.set_fail_timeout(t, engine_timeout(engine, 90 * time.Second))
+	if !engine_enter(t, engine, "the compiled JSX fixture" if !deployment else "the deployment fixture") {
+		return
+	}
+	defer engine_leave(engine)
 	state := Browser_Server {
 		directory   = "testdata/ui",
 		development = deployment,
@@ -265,7 +281,7 @@ browser_fixture :: proc(t: ^testing.T, deployment: bool) {
 	}
 
 	if deployment {
-		verify_native_history(t, &state, work, endpoint.port, "deploy")
+		verify_native_history(t, &state, work, endpoint.port, "deploy", engine)
 		return
 	}
 
@@ -281,25 +297,25 @@ browser_fixture :: proc(t: ^testing.T, deployment: bool) {
 	}
 	defer _ = os.close(dump)
 	browser := chromium_path()
-	process, started := os.process_start(
-		{
-			command = {
-				browser,
-				"--headless",
-				"--no-first-run",
-				"--no-default-browser-check",
-				"--disable-background-networking",
-				"--disable-extensions",
-				"--disable-dev-shm-usage",
-				"--dump-dom",
-				"--virtual-time-budget=5000",
-				fmt.tprintf("--user-data-dir=%s/profile", work),
-				fmt.tprintf("http://127.0.0.1:%d/", endpoint.port),
-			},
-			stdout = dump,
-			stderr = os.stderr,
-		},
-	)
+	url := fmt.tprintf("http://127.0.0.1:%d/", endpoint.port)
+	command := []string {
+		browser,
+		"--headless",
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--disable-background-networking",
+		"--disable-extensions",
+		"--disable-dev-shm-usage",
+		"--dump-dom",
+		"--virtual-time-budget=5000",
+		fmt.tprintf("--user-data-dir=%s/profile", work),
+		url,
+	}
+	if engine != .Chromium {
+		browser = node_path()
+		command = driver_command(engine, "dump", url, 60)
+	}
+	process, started := os.process_start({command = command, stdout = dump, stderr = os.stderr})
 	if !testing.expectf(
 		t,
 		started == nil,
@@ -309,7 +325,7 @@ browser_fixture :: proc(t: ^testing.T, deployment: bool) {
 	) {
 		return
 	}
-	result, waited := os.process_wait(process, 35 * time.Second)
+	result, waited := os.process_wait(process, engine_timeout(engine, 35 * time.Second))
 	if waited != nil {
 		_ = os.process_kill(process)
 		_, _ = os.process_wait(process)
@@ -317,7 +333,8 @@ browser_fixture :: proc(t: ^testing.T, deployment: bool) {
 	if !testing.expectf(
 		t,
 		waited == nil && result.success,
-		"Chromium failed (%v, exit %d)",
+		"%s failed (%v, exit %d)",
+		engine_name(engine),
 		waited,
 		result.exit_code,
 	) {
@@ -409,8 +426,8 @@ browser_fixture :: proc(t: ^testing.T, deployment: bool) {
 	testing.expect(t, report.detached, "receipt failed to update surviving searches after removing the submitting editor")
 	testing.expect(t, report.regressions, "runtime regression fixture did not complete")
 	testing.expect(t, report.lowered, "lowered lists and holes did not match the runtime path")
-	verify_native_history(t, &state, work, endpoint.port, "same-user")
-	verify_native_history(t, &state, work, endpoint.port, "switch-user")
+	verify_native_history(t, &state, work, endpoint.port, "same-user", engine)
+	verify_native_history(t, &state, work, endpoint.port, "switch-user", engine)
 }
 
 // A persistent browser is required because --dump-dom exits at the first
@@ -422,6 +439,7 @@ verify_native_history :: proc(
 	work: string,
 	port: int,
 	mode: string,
+	engine: Engine,
 ) {
 	sync.mutex_lock(&state.lock)
 	state.history_size = 0
@@ -432,23 +450,26 @@ verify_native_history :: proc(
 		return
 	}
 	defer _ = os.close(log)
-	process, started := os.process_start(
-		{
-			command = {
-				chromium_path(),
-				"--headless",
-				"--no-first-run",
-				"--no-default-browser-check",
-				"--disable-extensions",
-				"--enable-logging=stderr",
-				"--disable-background-networking",
-				fmt.tprintf("--user-data-dir=%s/%s-profile", work, mode),
-				fmt.tprintf("http://127.0.0.1:%d/items/42?history-probe&%s", port, mode),
-			},
-			stdout = log,
-			stderr = log,
-		},
-	)
+	// Playwright's WebKit build never restores a page from the back/forward
+	// cache (not even a static one), so Back there loads a new document.
+	// Safari does restore pages; the fixture then asserts the uncached path.
+	bfcache := engine != .WebKit
+	url := fmt.tprintf("http://127.0.0.1:%d/items/42?history-probe&%s%s", port, mode, "" if bfcache else "&no-bfcache")
+	command := []string {
+		chromium_path(),
+		"--headless",
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--disable-extensions",
+		"--enable-logging=stderr",
+		"--disable-background-networking",
+		fmt.tprintf("--user-data-dir=%s/%s-profile", work, mode),
+		url,
+	}
+	if engine != .Chromium {
+		command = driver_command(engine, "navigate", url, 70)
+	}
+	process, started := os.process_start({command = command, stdout = log, stderr = log})
 	if !testing.expectf(
 		t,
 		started == nil,
@@ -465,7 +486,9 @@ verify_native_history :: proc(
 			_, _ = os.process_wait(process)
 		}
 	}
-	until := time.tick_add(time.tick_now(), 25 * time.Second)
+	// Playwright adds its own browser startup to the navigation.
+	wait := 25 * time.Second if engine == .Chromium else 60 * time.Second
+	until := time.tick_add(time.tick_now(), wait)
 	message: string
 	published := false
 	for time.tick_since(until) < 0 {
@@ -515,6 +538,12 @@ verify_native_history :: proc(
 		"persisted Back, changed identity, zero previous receipts, fresh authorized record" if \
 			mode == "switch-user" else \
 			"persisted Back, verified identity, one receipt, one committed PATCH, clean reload"
+	if !bfcache {
+		expected =
+			"new document on Back, changed identity, zero previous receipts, fresh authorized record" if \
+				mode == "switch-user" else \
+				"new document on Back, one receipt, one committed PATCH, committed value"
+	}
 	if mode == "deploy" {
 		expected = "new generation reconciled its predecessor's pending mutation"
 	}

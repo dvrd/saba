@@ -401,6 +401,36 @@ abandoned_request_keeps_its_budget_until_physical_retirement :: proc(t: ^testing
 	testing.expect_value(t, async.destroy(&f.runtime).kind, .None)
 }
 
+// The request arrived whole; only the time to answer ran out. That is the
+// gateway's timeout, not the client's (408 invites a replay).
+@(test)
+expired_request_deadline_answers_gateway_timeout :: proc(t: ^testing.T) {
+	f: Fixture
+	attach(&f)
+	cancellation, created := server.new_request_context(
+		nil,
+		time.tick_add(time.tick_now(), -time.Second),
+		rt.heap_allocator(),
+	)
+	assert(created)
+	request := server.Request {
+		cancellation = cancellation,
+	}
+	outbound := upstream.response(
+		&f.dispatcher,
+		&request,
+		{method = .GET, url = "http://127.0.0.1:1/unused"},
+		copy_body,
+	)
+	testing.expect_value(t, outbound.status, server.HTTP_Status.Gateway_Timeout)
+	testing.expect(t, outbound.deferred.poll == nil)
+	server.release_request_context(&request.cancellation)
+	testing.expect_value(t, client.client_close(&f.client).kind, .None)
+	testing.expect(t, upstream.detach(&f.dispatcher))
+	testing.expect_value(t, client.client_destroy(&f.client).kind, .None)
+	testing.expect_value(t, async.destroy(&f.runtime).kind, .None)
+}
+
 Detach_Blocker :: struct {
 	task:             async.Task,
 	entered, release: sync.Sema,

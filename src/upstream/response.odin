@@ -158,9 +158,11 @@ response :: proc(
 	if stopped {
 		return {status = .Service_Unavailable}
 	}
+	// A request whose deadline has passed was fully received; the upstream is
+	// what did not answer in time. 408 would invite the browser to replay it.
 	if server.request_cancelled(request.cancellation) {
 		if server.request_context_status(request.cancellation) == .Deadline {
-			return {status = .Request_Timeout}
+			return {status = .Gateway_Timeout}
 		}
 		return {status = .Service_Unavailable}
 	}
@@ -169,7 +171,7 @@ response :: proc(
 	if cutoff := server.request_deadline(request.cancellation); cutoff != (time.Tick{}) {
 		inherited := time.tick_diff(time.tick_now(), cutoff)
 		if inherited <= 0 {
-			return {status = .Request_Timeout}
+			return {status = .Gateway_Timeout}
 		}
 		if remaining == 0 || inherited < remaining {
 			remaining = inherited

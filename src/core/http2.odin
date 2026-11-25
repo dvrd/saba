@@ -481,6 +481,21 @@ h2_next_deadline :: proc(task: ^Connection_Task) -> time.Tick {
 	return deadline
 }
 
+// A write gets its own budget, the response timeout, ended early only by the
+// close deadline once the connection is closing. Stream deadlines are when the
+// owner acts on a stream, not how long a frame may take to leave: streams armed
+// together expire microseconds apart, and a write bounded by the next one timed
+// out, which drops the whole connection.
+h2_write_deadline :: proc(task: ^Connection_Task) -> time.Tick {
+	session := task.http2
+	deadline := time.tick_add(time.tick_now(), task.runtime.timeouts.response)
+	if session.close_deadline != (time.Tick{}) {
+		h2_earlier(&deadline, session.close_deadline)
+	}
+
+	return deadline
+}
+
 // Starts the bounded close of an idle or failed connection. True only on a
 // state change, so an expired deadline cannot keep the owner turn busy.
 h2_check_deadlines :: proc(task: ^Connection_Task) -> bool {
@@ -617,7 +632,7 @@ h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
 	}
 	task.deadline = async.deadline_after(
 		&task.runtime.executor,
-		max(0, time.tick_diff(time.tick_now(), h2_next_deadline(task))),
+		max(0, time.tick_diff(time.tick_now(), h2_write_deadline(task))),
 	)
 
 	if state.write_started {

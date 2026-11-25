@@ -24,6 +24,9 @@ H2W_Server :: struct {
 	handled: int,
 	echoed:  int,
 	limit:   int,
+	// Nonzero replaces the default body timeout; observed turns on observability.
+	body:     time.Duration,
+	observed: bool,
 }
 
 H2W_Frame :: struct {
@@ -127,6 +130,10 @@ h2w_run :: proc(t: ^testing.T, state: ^H2W_Server, exchange: proc(t: ^testing.T,
 	if state.limit != 0 {
 		state.config.request_body_limit = h2w_body_limit
 	}
+	if state.body != 0 {
+		state.config.timeouts.body = state.body
+	}
+	state.config.observability.enabled = state.observed
 
 	worker := thread.create_and_start_with_poly_data(state, proc(s: ^H2W_Server) {s.ok = serve(s.config)})
 	assert(worker != nil)
@@ -726,5 +733,61 @@ h2_response_trailers_follow_the_body :: proc(t: ^testing.T) {
 		testing.expect_value(t, data, 4)
 		testing.expect_value(t, sections, 2)
 		testing.expect_value(t, ended_by, 1)
+	})
+}
+
+// Streams armed together expire together. Resetting the first must not hand the
+// transport a write budget taken from the next stream's deadline, microseconds
+// away: that write timed out and dropped the connection after one or two
+// resets, without a GOAWAY, and every other stream on it was lost.
+@(test)
+h2_streams_expiring_together_are_all_reset_and_the_connection_survives :: proc(t: ^testing.T) {
+	state := H2W_Server {
+		body     = 400 * time.Millisecond,
+		observed = true,
+	}
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		STALLED :: 32
+		wire: [dynamic]u8
+		defer delete(wire)
+		for i in 0 ..< STALLED {
+			post := [][2]string{{":method", "POST"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/echo"}}
+			h2w_headers(&wire, u32(2 * i + 1), false, post)
+		}
+		if !testing.expect(t, h2w_preface(peer) && h2w_send(peer, wire[:])) {
+			return
+		}
+		reset := make(map[u32]bool)
+		defer delete(reset)
+		for len(reset) < STALLED {
+			frame, ok := h2w_next(peer, true)
+			if !testing.expect(t, ok, "connection ended before every stalled stream was reset") {
+				break
+			}
+			if !testing.expect(t, frame.kind != 7, "GOAWAY before every stalled stream was reset") {
+				break
+			}
+			if frame.kind == 3 {
+				reset[frame.stream] = true
+			}
+		}
+		testing.expect_value(t, len(reset), STALLED)
+		clear(&wire)
+		h2w_get(&wire, 2 * STALLED + 1, "/")
+		if !testing.expect(t, h2w_send(peer, wire[:])) {
+			return
+		}
+		answered := false
+		for !answered {
+			frame, ok := h2w_next(peer, true)
+			if !ok {
+				break
+			}
+			if frame.stream == 2 * STALLED + 1 && frame.kind == 1 {
+				testing.expect_value(t, h2w_status(frame), 200)
+				answered = true
+			}
+		}
+		testing.expect(t, answered, "the connection did not serve a request after the resets")
 	})
 }

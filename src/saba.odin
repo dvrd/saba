@@ -346,6 +346,8 @@ Server :: struct {
 	address:                              string,
 	port:                                 int,
 	max_connections, initial_connections: int,
+	// Completed TCP handshakes queued until accepted; zero selects 128.
+	backlog:                              int,
 	runtime_allocator:                    mem.Allocator,
 	database:                             ^db.SQLite_DB,
 	handler:                              Handler,
@@ -402,6 +404,7 @@ serve :: proc(config: Server) -> bool {
 				port = config.port,
 				max_connections = config.max_connections,
 				initial_connections = config.initial_connections,
+				backlog = config.backlog,
 				runtime_allocator = config.runtime_allocator,
 				handler_data = &snapshot,
 				request_body_limit = config.request_body_limit,

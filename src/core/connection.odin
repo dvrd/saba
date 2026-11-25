@@ -223,6 +223,9 @@ default_workers :: proc() -> int {
 }
 
 ACCEPT_BATCH_LIMIT :: 32
+// Matches the default of async.listen. The kernel may clamp larger values
+// (somaxconn on Linux, kern.ipc.somaxconn on Darwin).
+DEFAULT_LISTEN_BACKLOG :: 128
 ACCEPT_RETRY_INTERVAL :: 100 * time.Millisecond
 
 Server :: struct {
@@ -234,6 +237,9 @@ Server :: struct {
 	port:                int,
 	// Admission ceiling; zero selects DEFAULT_MAX_CONNECTIONS.
 	max_connections:     int,
+	// Completed TCP handshakes the kernel queues until the server accepts them.
+	// Zero selects DEFAULT_LISTEN_BACKLOG; values must be below max(i32).
+	backlog:             int,
 	// Startup capacity; zero selects min(64, ceiling). Grows at 80% occupancy.
 	initial_connections: int,
 	// Optional thread-safe allocator for runtime bookkeeping and worker setup.
@@ -353,6 +359,12 @@ serve :: proc(config: Server) -> bool {
 		return false
 	}
 
+	backlog, backlog_ok := listen_backlog(config.backlog)
+	if !backlog_ok {
+		log.error("Invalid server backlog: it must be zero (the default) or between 1 and max(i32) - 1")
+		return false
+	}
+
 	address_text := config.address
 	if address_text == "" {
 		address_text = "127.0.0.1"
@@ -443,7 +455,7 @@ serve :: proc(config: Server) -> bool {
 		return false
 	}
 
-	listener, listen_error := async.listen(&runtime.executor, &runtime.accept_task, {address, config.port})
+	listener, listen_error := async.listen(&runtime.executor, &runtime.accept_task, {address, config.port}, backlog)
 
 	if listen_error.kind != .None {
 		log.error("Could not start server:", listen_error)
@@ -546,6 +558,18 @@ accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 	}
 
 	return .Yield
+}
+
+// Resolves the listen(2) backlog. core:net requires a value below max(i32).
+listen_backlog :: proc(requested: int) -> (int, bool) {
+	if requested == 0 {
+		return DEFAULT_LISTEN_BACKLOG, true
+	}
+	if requested < 0 || requested >= int(max(i32)) {
+		return 0, false
+	}
+
+	return requested, true
 }
 
 Accept_Action :: enum {

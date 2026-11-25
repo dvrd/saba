@@ -86,6 +86,22 @@ facade_http3_invalid_request_timeout_reaches_prebind_validation :: proc(t: ^test
 }
 
 @(test)
+facade_invalid_backlog_reaches_core_validation :: proc(t: ^testing.T) {
+	context.logger = log.nil_logger()
+	// Without forwarding, the remembered stop would make the server that bound
+	// with the default backlog return success.
+	control: Server_Control
+	stop_server(&control)
+	config := Server {
+		control = &control,
+		backlog = -1,
+		handler = proc(_: ^Connection, _: ^Request) -> Response {return {status = .OK}},
+	}
+
+	testing.expect(t, !serve(config))
+}
+
+@(test)
 facade_http3_phase_configuration_remains_explicit :: proc(t: ^testing.T) {
 	config := Server {
 		http3 = {

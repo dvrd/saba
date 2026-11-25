@@ -2,7 +2,7 @@ package main
 
 import core "shared:saba/core"
 import wsapp "shared:saba/websocket"
-import codec "shared:websocket"
+import codec "shared:async/websocket"
 import credentials "shared:async/tls/credentials"
 import store "shared:async/tls/credentials/store"
 import budget "shared:async/sync/budget"

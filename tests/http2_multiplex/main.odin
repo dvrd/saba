@@ -3,7 +3,7 @@ package main
 import core "shared:saba/core"
 import ws "shared:saba/websocket"
 import assets "shared:saba/assets"
-import codec "shared:websocket"
+import codec "shared:async/websocket"
 import tls "shared:async/tls"
 import credentials "shared:async/tls/credentials"
 import store "shared:async/tls/credentials/store"

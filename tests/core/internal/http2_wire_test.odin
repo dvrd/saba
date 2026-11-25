@@ -970,3 +970,85 @@ h2_event_for_a_full_tunnel_is_deferred_not_held :: proc(t: ^testing.T) {
 		_ = h2.connection_event_release(&session.engine, event.token)
 	}
 }
+
+// A client may keep uploading after an early 413 until it reads the answer.
+// Its late DATA advances no request, but it is not abuse: the connection must
+// not spend its unproductive-frame allowance on it and end the client with
+// ENHANCE_YOUR_CALM. Both an over-limit content-length and a body that
+// outgrows the limit are covered.
+@(test)
+h2_upload_after_an_early_413_does_not_exhaust_the_reset_allowance :: proc(t: ^testing.T) {
+	state: H2W_Server
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		LATE :: 3 * H2_RESET_BURST
+		if !testing.expect(t, h2w_preface(peer)) {
+			return
+		}
+		wire: [dynamic]u8
+		defer delete(wire)
+		filler: [1024]u8
+
+		for stream in ([]u32{1, 3}) {
+			clear(&wire)
+			post := [][2]string{{":method", "POST"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/echo"}}
+			if stream == 1 {
+				h2w_headers(&wire, stream, false, {post[0], post[1], post[2], post[3], {"content-length", "999999"}})
+			} else {
+				h2w_headers(&wire, stream, false, post)
+				for _ in 0 ..< 5 {
+					h2w_frame(&wire, 0, 0, stream, filler[:])
+				}
+			}
+			if !testing.expect(t, h2w_send(peer, wire[:])) {
+				return
+			}
+			rejected := false
+			for !rejected {
+				frame, ok := h2w_next(peer, true)
+				if !testing.expectf(t, ok && frame.kind != 7, "stream %d: connection ended before the 413", stream) {
+					return
+				}
+				rejected = frame.kind == 1 && frame.stream == stream
+			}
+
+			// Frames already in flight when the 413 arrived, then a PING to
+			// learn that the server has read them all.
+			clear(&wire)
+			for _ in 0 ..< LATE {
+				h2w_frame(&wire, 0, 0, stream, filler[:1])
+			}
+			h2w_frame(&wire, 6, 0, 0, []u8{1, 2, 3, 4, 5, 6, 7, u8(stream)})
+			if !testing.expect(t, h2w_send(peer, wire[:])) {
+				return
+			}
+			acknowledged := false
+			for !acknowledged {
+				frame, ok := h2w_next(peer, true)
+				if !testing.expectf(t, ok, "stream %d: connection ended after late DATA", stream) {
+					return
+				}
+				if !testing.expectf(t, frame.kind != 7, "stream %d: GOAWAY(%d) after late DATA", stream, h2w_code(frame)) {
+					return
+				}
+				acknowledged = frame.kind == 6 && frame.flags & 1 != 0 && frame.payload[7] == u8(stream)
+			}
+		}
+
+		// And the connection still serves.
+		clear(&wire)
+		h2w_get(&wire, 5, "/")
+		if !testing.expect(t, h2w_send(peer, wire[:])) {
+			return
+		}
+		answered := false
+		for !answered {
+			frame, ok := h2w_next(peer, true)
+			if !ok || frame.kind == 7 {
+				break
+			}
+			answered = frame.kind == 1 && frame.stream == 5 && h2w_status(frame) == 200
+		}
+		testing.expect(t, answered, "the connection did not serve a request after the rejected uploads")
+		testing.expect_value(t, sync.atomic_load(&state.handled), 1)
+	})
+}

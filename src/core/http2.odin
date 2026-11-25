@@ -494,6 +494,14 @@ h2_check_deadlines :: proc(task: ^Connection_Task) -> bool {
 	streams := h2_has_streams(task)
 	progress := false
 
+	// A connection still working through what the peer sent, or still sending
+	// what it owes, is not idle: a burst of small frames read in one go can take
+	// longer to answer than the idle timeout. Idleness starts when both are done.
+	// The write deadline bounds a peer that never reads.
+	if !streams && (session.ingress_len > 0 || h2_output_pending(session)) {
+		session.idle_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.idle)
+	}
+
 	if server_is_draining(task.runtime) {
 		h2_shutdown(task)
 	}

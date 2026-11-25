@@ -488,11 +488,38 @@ AWS_Credentials :: s3.AWS_Credentials
 S3_Result :: s3.S3_Result
 load_s3_config :: s3.load_s3_config
 s3_config_error :: s3.s3_config_error
+s3_download_url :: s3.s3_download_url
+
+// Servers lease credentials from a cache that refreshes ahead of expiry and
+// wipes what it held; a lease never blocks a request worker.
+Credential_Cache :: s3.Credential_Cache
+Credential_Lease :: s3.Credential_Lease
+Credential_Error :: s3.Credential_Error
+Credential_Error_Kind :: s3.Credential_Error_Kind
+Credential_Source :: s3.Credential_Source
+Credential_Clock :: s3.Credential_Clock
+credential_cache_init :: s3.credential_cache_init
+credential_cache_destroy :: s3.credential_cache_destroy
+credential_lease_cached :: s3.credential_lease_cached
+credential_lease_release :: s3.credential_lease_release
+credential_refresh :: s3.credential_refresh
+credential_clock_system :: s3.credential_clock_system
+lease_credentials :: s3.lease_credentials
+
+// Signing only, no I/O: send the request through an asynchronous client.
+S3_Request :: s3.S3_Request
+s3_put_request :: s3.s3_put_request
+s3_delete_request :: s3.s3_delete_request
+s3_get_request :: s3.s3_get_request
+s3_head_request :: s3.s3_head_request
+
+// For scripts and tools only. These block the calling thread on the network
+// (credential lookup up to several seconds, uploads up to 120 s) and must not
+// run on a request worker.
 aws_credentials :: s3.aws_credentials
 s3_put :: s3.s3_put
 s3_put_file :: s3.s3_put_file
 s3_delete :: s3.s3_delete
-s3_download_url :: s3.s3_download_url
 
 TLS_Peer_Identity :: tls.Peer_Identity
 

@@ -157,3 +157,15 @@ facade_http3_phase_configuration_remains_explicit :: proc(t: ^testing.T) {
 	)
 	testing.expect(t, !Server{}.http3.request_phases.enabled)
 }
+
+// The facade offers the server-safe S3 path, not only the blocking calls.
+@(test)
+facade_exposes_the_cached_s3_credential_path :: proc(t: ^testing.T) {
+	cache: Credential_Cache
+	lease, error := credential_lease_cached(&cache)
+	testing.expect(t, error.kind != .None)
+	credential_lease_release(&cache, &lease)
+	_ = s3_put_request
+	_ = credential_refresh
+	_ = credential_clock_system
+}

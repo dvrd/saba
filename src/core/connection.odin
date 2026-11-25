@@ -223,6 +223,9 @@ default_workers :: proc() -> int {
 }
 
 ACCEPT_BATCH_LIMIT :: 32
+// Matches the default of async.listen. The kernel may clamp larger values
+// (somaxconn on Linux, kern.ipc.somaxconn on Darwin).
+DEFAULT_LISTEN_BACKLOG :: 128
 ACCEPT_RETRY_INTERVAL :: 100 * time.Millisecond
 
 Server :: struct {
@@ -234,6 +237,9 @@ Server :: struct {
 	port:                int,
 	// Admission ceiling; zero selects DEFAULT_MAX_CONNECTIONS.
 	max_connections:     int,
+	// Completed TCP handshakes the kernel queues until the server accepts them.
+	// Zero selects DEFAULT_LISTEN_BACKLOG; values must be below max(i32).
+	backlog:             int,
 	// Startup capacity; zero selects min(64, ceiling). Grows at 80% occupancy.
 	initial_connections: int,
 	// Optional thread-safe allocator for runtime bookkeeping and worker setup.
@@ -249,6 +255,12 @@ Server :: struct {
 	// Zero selects default_workers(): one per logical core, at least four.
 	// serve participates as one worker. Handlers must not block; see default_workers.
 	workers:             int,
+	// Off by default. Runs the async reactor on one extra thread instead of on
+	// workers between callbacks, so accepts, timers and deadlines become ready
+	// on time while every worker is busy. A ready connection still waits for a
+	// free worker: this keeps deadline, accept and drain bookkeeping timely; it
+	// does not make blocking handlers safe. Each readiness costs a thread handoff.
+	dedicated_poller:    bool,
 	// SIGTERM/SIGINT start a graceful drain unless disabled; see Signal_Config.
 	signals:             Signal_Config,
 	// Optional caller-owned shutdown and endpoint control.
@@ -286,6 +298,8 @@ Server_Runtime :: struct {
 	// Owned by the accept task: rate limit for accept failure logging.
 	accept_log_at:                           time.Tick,
 	accept_errors_suppressed:                int,
+	// Owned by the accept task: the listener has accepted at least once.
+	accepted:                                bool,
 	// Guarded by the signal watch that lists this runtime.
 	signal_previous, signal_next:            ^Server_Runtime,
 	// Written before the server runs and after it stopped; nil when unlisted.
@@ -353,6 +367,12 @@ serve :: proc(config: Server) -> bool {
 		return false
 	}
 
+	backlog, backlog_ok := listen_backlog(config.backlog)
+	if !backlog_ok {
+		log.error("Invalid server backlog: it must be zero (the default) or between 1 and max(i32) - 1")
+		return false
+	}
+
 	address_text := config.address
 	if address_text == "" {
 		address_text = "127.0.0.1"
@@ -401,6 +421,7 @@ serve :: proc(config: Server) -> bool {
 			task_capacity = initial + workers + 2,
 			io_capacity = initial + 1,
 			allocator = config.runtime_allocator,
+			dedicated_poller = config.dedicated_poller,
 		},
 	); err.kind != .None {
 		log.error("Could not initialize server runtime:", err)
@@ -443,7 +464,7 @@ serve :: proc(config: Server) -> bool {
 		return false
 	}
 
-	listener, listen_error := async.listen(&runtime.executor, &runtime.accept_task, {address, config.port})
+	listener, listen_error := async.listen(&runtime.executor, &runtime.accept_task, {address, config.port}, backlog)
 
 	if listen_error.kind != .None {
 		log.error("Could not start server:", listen_error)
@@ -517,7 +538,7 @@ accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 		}
 
 		if err.kind != .None {
-			action := accept_error_action(err)
+			action := accept_error_action(err, runtime.accepted)
 
 			if action == .Fatal {
 				log.error("Could not accept connection; the listener cannot continue:", err)
@@ -542,10 +563,23 @@ accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 			return .Yield
 		}
 
+		runtime.accepted = true
 		server_admit_connection(runtime, client)
 	}
 
 	return .Yield
+}
+
+// Resolves the listen(2) backlog. core:net requires a value below max(i32).
+listen_backlog :: proc(requested: int) -> (int, bool) {
+	if requested == 0 {
+		return DEFAULT_LISTEN_BACKLOG, true
+	}
+	if requested < 0 || requested >= int(max(i32)) {
+		return 0, false
+	}
+
+	return requested, true
 }
 
 Accept_Action :: enum {
@@ -557,16 +591,29 @@ Accept_Action :: enum {
 	Backoff,
 }
 
-accept_error_action :: proc(err: async.Error) -> Accept_Action {
+// Linux reports an error already pending on the connection being accepted as
+// the error of accept itself, and accept(2) says to accept again: the listener
+// is fine. core:net maps those errors to Network_Unreachable, Aborted and
+// Unsupported_Socket.
+//
+// EOPNOTSUPP has a second meaning: the listener is not a SOCK_STREAM socket.
+// A descriptor's type is fixed when it is created, so once the listener has
+// accepted a connection that meaning is ruled out for its lifetime and the
+// error belongs to one pending connection. Before the first accept the two
+// cannot be told apart, and retrying a listener that can never accept would
+// spin, so the error stays fatal until listener_accepted is true.
+accept_error_action :: proc(err: async.Error, listener_accepted: bool) -> Accept_Action {
 	if err.kind != .Network_Error {
 		return .Fatal
 	}
 	cause, _ := err.network_cause.(net.Accept_Error)
 
 	#partial switch cause {
-	case .Invalid_Argument, .Unsupported_Socket, .Not_Listening:
+	case .Invalid_Argument, .Not_Listening:
 		return .Fatal
-	case .Aborted:
+	case .Unsupported_Socket:
+		return .Retry if listener_accepted else .Fatal
+	case .Aborted, .Network_Unreachable:
 		return .Retry
 	}
 

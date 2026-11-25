@@ -849,3 +849,85 @@ coded_response_drops_the_handler_content_length :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(handler_headers), 2)
 	testing.expect_value(t, handler_headers[1].name, "Content-Length")
 }
+
+// Bytes that neither gzip nor brotli can shrink, so the coded stream grows with its input.
+coding_noise :: proc(count: int, allocator: mem.Allocator) -> []u8 {
+	data, err := make([]u8, count, allocator)
+	if err != nil {
+		return nil
+	}
+	state := u32(0x9e3779b9)
+	for &value in data {
+		state ~= state << 13
+		state ~= state >> 17
+		state ~= state << 5
+		value = u8(state)
+	}
+
+	return data
+}
+
+@(test)
+coded_stream_past_its_output_ceiling_fails_instead_of_growing :: proc(t: ^testing.T) {
+	runtime := Server_Runtime {
+		timeouts = resolve_timeouts({}),
+	}
+
+	assert(async.init(&runtime.executor, {workers = 1, task_capacity = 1, io_capacity = 1}).kind == .None)
+	defer async.destroy(&runtime.executor)
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
+	defer mem.dynamic_arena_destroy(&arena)
+	allocator := mem.dynamic_arena_allocator(&arena)
+	plain := coding_noise(512 * 1024, allocator)
+	CEILING :: 8 * 1024
+
+	for accept in ([]string{"gzip", "br"}) {
+		task := Connection_Task {
+			runtime = &runtime,
+			phase = .Dispatch,
+			request = Request{allocator = allocator, method = "GET", headers = {{"Accept-Encoding", accept}}},
+		}
+
+		init_connection_arena(&task)
+		probe := Coding_Probe {
+			chunk   = 4096,
+			payload = plain,
+		}
+		headers := [1]Header{{"Content-Type", "application/json"}}
+		response := Response {
+			headers = headers[:],
+			stream = {
+				data = &probe,
+				next = coding_probe_next,
+				drop = coding_probe_drop,
+				content_length = i64(len(plain)),
+				max_chunk_bytes = 4096,
+			},
+		}
+
+		testing.expect(t, queue_response(&task, response))
+		state := cast(^Coding_Stream)task.streaming.producer.data
+		testing.expectf(t, task.streaming.producer.next == coding_next, "%s: stream is coded", accept)
+
+		// The encoder is built with the response ceiling. Lower it to one this
+		// input passes; the stream must then fail rather than keep emitting.
+		if state.coding == .Gzip {
+			testing.expect_value(t, state.encoder.gzip.max_output, i64(GZIP_MAX_OUTPUT))
+			reset := incremental.deflate_encoder_reset(&state.encoder.gzip, .Gzip, GZIP_DYNAMIC_LEVEL, CEILING)
+			testing.expect_value(t, reset, nil)
+		} else {
+			testing.expect_value(t, state.encoder.brotli.max_output, GZIP_MAX_OUTPUT)
+			brotli.stream_reset(&state.encoder.brotli, CEILING)
+		}
+
+		_, body, ok := coding_drive(&task)
+		testing.expectf(t, !ok && body == nil, "%s: a stream past its ceiling must fail", accept)
+		testing.expectf(t, state.failed, "%s: the coding layer records the failure", accept)
+		// Each encoder buffers at most a block or two, so it fails long before the input ends.
+		testing.expectf(t, probe.offset < len(plain) / 2, "%s: read %d of %d bytes before failing", accept, probe.offset, len(plain))
+		drop_response_stream(&task)
+		testing.expect_value(t, probe.drops, 1)
+		mem.dynamic_arena_destroy(&task.arena)
+	}
+}

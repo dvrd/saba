@@ -120,7 +120,7 @@ late_deferred_result_does_not_commit_its_status_and_drops_once :: proc(t: ^testi
 
 	assert(queue_response(&task, response))
 	testing.expect_value(t, await_response(&task), .Yield)
-	testing.expect(t, strings.contains(string(task.output[0]), "408 Request Timeout"))
+	testing.expect(t, strings.contains(string(task.output[0]), "504 Gateway Timeout"))
 	testing.expect_value(t, calls, 1)
 	testing.expect_value(t, drops, 1)
 	drop_deferred(&task)
@@ -128,7 +128,7 @@ late_deferred_result_does_not_commit_its_status_and_drops_once :: proc(t: ^testi
 }
 
 @(test)
-deferred_deadline_that_expires_during_setup_returns_408_without_polling :: proc(t: ^testing.T) {
+deferred_deadline_that_expires_during_setup_returns_504_without_polling :: proc(t: ^testing.T) {
 	fixture: Resource_Test
 	resource_test_init(&fixture)
 	defer resource_test_finish(&fixture)
@@ -138,7 +138,7 @@ deferred_deadline_that_expires_during_setup_returns_408_without_polling :: proc(
 	fixture.task.request.cancellation._state.deadline = time.tick_add(time.tick_now(), -time.Second)
 	assert(queue_response(&fixture.task, {deferred = {data = source, poll = deferred_poll, drop = deferred_drop}}))
 	testing.expect_value(t, await_response(&fixture.task), .Yield)
-	testing.expect(t, strings.contains(string(fixture.task.output[0]), "408 Request Timeout"))
+	testing.expect(t, strings.contains(string(fixture.task.output[0]), "504 Gateway Timeout"))
 	testing.expect_value(t, calls, 0)
 	testing.expect_value(t, drops, 1)
 }

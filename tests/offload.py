@@ -148,13 +148,14 @@ def check_retirement(binary, checks):
     checks.append('peer close retires owners/arenas before non-interruptible jobs finish')
     with Server(binary, budget=80) as server, server.connect() as conn:
         conn.sendall(request('/work', 'POST', b'expired owner'))
-        assert response(conn)[0] == 408
+        # The job may have run: a late deferred answer is 504, not a replayable 408.
+        assert response(conn)[0] == 504
         closed(conn)
         state = server.until(lambda s: s[5] == 1)
         assert state[:5] == (1, 0, 1, 1, 0), state
         server.exchange('/release')
         assert server.until(lambda s: s[2] == 0)[4] == 1
-    checks.append('deadline sends 408 and retires arena while blocked work retains its snapshot')
+    checks.append('deadline sends 504 and retires arena while blocked work retains its snapshot')
     with Server(binary) as server, contextlib.ExitStack() as sockets:
         clients = [sockets.enter_context(server.connect()) for _ in range(4)]
         for conn in clients:

@@ -346,6 +346,8 @@ Server :: struct {
 	address:                              string,
 	port:                                 int,
 	max_connections, initial_connections: int,
+	// Completed TCP handshakes queued until accepted; zero selects 128.
+	backlog:                              int,
 	runtime_allocator:                    mem.Allocator,
 	database:                             ^db.SQLite_DB,
 	handler:                              Handler,
@@ -365,6 +367,10 @@ Server :: struct {
 	// and when all are held the server stops accepting, reading and timing out
 	// connections. Return a deferred response for work that waits.
 	workers:                              int,
+	// Off by default. Polls sockets and timers on one extra thread so accepts,
+	// deadlines and drain stay timely while every worker is busy. A ready
+	// request still waits for a free worker; it does not make blocking safe.
+	dedicated_poller:                     bool,
 	// SIGTERM and SIGINT drain the server gracefully by default: the listener
 	// closes, admitted requests finish (bounded by drain_timeout, five seconds
 	// when zero) and serve returns; a second signal terminates the process.
@@ -402,10 +408,12 @@ serve :: proc(config: Server) -> bool {
 				port = config.port,
 				max_connections = config.max_connections,
 				initial_connections = config.initial_connections,
+				backlog = config.backlog,
 				runtime_allocator = config.runtime_allocator,
 				handler_data = &snapshot,
 				request_body_limit = config.request_body_limit,
 				workers = config.workers,
+				dedicated_poller = config.dedicated_poller,
 				signals = config.signals,
 				control = config.control,
 				timeouts = config.timeouts,

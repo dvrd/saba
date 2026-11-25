@@ -2227,8 +2227,11 @@ await_response :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	case .Cancelled:
 		expired := request_context_status(task.request.cancellation) == .Deadline
 		observe_failure(task, .Timeout if expired else .Cancelled)
+		// The request arrived and the handler accepted it, so the work behind the
+		// deferred response may already have had effects. 504 reports the late
+		// answer without the replay that 408 invites.
 		rejection := Response {
-			status           = .Request_Timeout if expired else .Service_Unavailable,
+			status           = .Gateway_Timeout if expired else .Service_Unavailable,
 			close_connection = true,
 		}
 		if !queue_response(task, rejection) {

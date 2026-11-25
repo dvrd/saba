@@ -255,6 +255,12 @@ Server :: struct {
 	// Zero selects default_workers(): one per logical core, at least four.
 	// serve participates as one worker. Handlers must not block; see default_workers.
 	workers:             int,
+	// Off by default. Runs the async reactor on one extra thread instead of on
+	// workers between callbacks, so accepts, timers and deadlines become ready
+	// on time while every worker is busy. A ready connection still waits for a
+	// free worker: this keeps deadline, accept and drain bookkeeping timely; it
+	// does not make blocking handlers safe. Each readiness costs a thread handoff.
+	dedicated_poller:    bool,
 	// SIGTERM/SIGINT start a graceful drain unless disabled; see Signal_Config.
 	signals:             Signal_Config,
 	// Optional caller-owned shutdown and endpoint control.
@@ -415,6 +421,7 @@ serve :: proc(config: Server) -> bool {
 			task_capacity = initial + workers + 2,
 			io_capacity = initial + 1,
 			allocator = config.runtime_allocator,
+			dedicated_poller = config.dedicated_poller,
 		},
 	); err.kind != .None {
 		log.error("Could not initialize server runtime:", err)

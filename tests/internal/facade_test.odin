@@ -4,6 +4,8 @@ import core "core"
 import application "application"
 import db "shared:kakunou"
 import "core:mem"
+import "core:sync"
+import "core:thread"
 import "core:testing"
 import "core:log"
 import "core:time"
@@ -99,6 +101,40 @@ facade_invalid_backlog_reaches_core_validation :: proc(t: ^testing.T) {
 	}
 
 	testing.expect(t, !serve(config))
+}
+
+Facade_Poller_Fixture :: struct {
+	config: Server,
+	ok:     bool,
+}
+
+@(test)
+facade_dedicated_poller_reaches_the_runtime :: proc(t: ^testing.T) {
+	context.logger = log.nil_logger()
+	control: Server_Control
+	fixture := Facade_Poller_Fixture {
+		config = {
+			address = "127.0.0.1",
+			control = &control,
+			dedicated_poller = true,
+			signals = {disabled = true},
+			handler = proc(_: ^Connection, _: ^Request) -> Response {return {status = .OK}},
+		},
+	}
+	worker := thread.create_and_start_with_poly_data(&fixture, proc(f: ^Facade_Poller_Fixture) {f.ok = serve(f.config)})
+	until := time.tick_add(time.tick_now(), 5 * time.Second)
+	for !server_ready(&control) && !thread.is_done(worker) && time.tick_diff(time.tick_now(), until) > 0 {
+		time.sleep(time.Millisecond)
+	}
+
+	sync.lock(&control._mutex)
+	dedicated := control._server != nil && control._server.executor.scheduler.dedicated
+	sync.unlock(&control._mutex)
+	stop_server(&control)
+	thread.join(worker)
+	thread.destroy(worker)
+	testing.expect(t, dedicated)
+	testing.expect(t, fixture.ok)
 }
 
 @(test)

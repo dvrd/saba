@@ -62,3 +62,30 @@ server_with_a_small_backlog_serves_requests :: proc(t: ^testing.T) {
 	sync.unlock(&fixture.control._mutex)
 	testing.expect(t, accepted)
 }
+
+server_runtime_polls_on_a_dedicated_thread :: proc(control: ^Server_Control) -> (dedicated, published: bool) {
+	sync.lock(&control._mutex)
+	defer sync.unlock(&control._mutex)
+	if control._server == nil {
+		return false, false
+	}
+
+	return control._server.executor.scheduler.dedicated, true
+}
+
+@(test)
+dedicated_poller_is_opt_in_and_reaches_the_runtime :: proc(t: ^testing.T) {
+	for enabled in ([]bool{false, true}) {
+		fixture: H1_Fixture
+		endpoint, ready := h1_start(t, &fixture, {dedicated_poller = enabled})
+		testing.expect(t, ready)
+		if ready {
+			dedicated, published := server_runtime_polls_on_a_dedicated_thread(&fixture.control)
+			testing.expectf(t, published && dedicated == enabled, "dedicated_poller=%v: runtime dedicated=%v", enabled, dedicated)
+			wire := h1_exchange(endpoint, "GET / HTTP/1.1\r\nHost: a\r\nConnection: close\r\n\r\n")
+			testing.expect(t, strings.has_prefix(string(wire[:]), "HTTP/1.1 200"))
+			delete(wire)
+		}
+		h1_stop(&fixture)
+	}
+}

@@ -65,9 +65,15 @@ Direct_Node :: struct {
 // the condition is followed exactly as a binding would follow it.
 // Templates keep the runtime path so their extracted HTML stays stable.
 emit_direct_hole :: proc(p: ^Emitter, el: ^k.JSXElement) -> bool {
+	// Only an element with a conditional among its own children can be a
+	// host. Looking for one first keeps a static subtree from being analysed
+	// again at every level on the way down.
+	if p.template || !has_conditional_child(el) {
+		return false
+	}
 	// Generated code reaches the document through globalThis, which no authored
 	// binding may then redefine.
-	if p.template || jsx_helper_name(p.source, "globalThis") != "globalThis" {
+	if !globals_unshadowed(p) {
 		return false
 	}
 	calls := false
@@ -94,6 +100,32 @@ emit_direct_hole :: proc(p: ^Emitter, el: ^k.JSXElement) -> bool {
 	jsx_emit(p, ";\n})()")
 	return p.error.message == ""
 }
+
+// Whether the source leaves globalThis alone. The whole source is searched,
+// so the answer is kept for the module.
+globals_unshadowed :: proc(p: ^Emitter) -> bool {
+	if p.globals == .Unknown {
+		p.globals = .Free if jsx_helper_name(p.source, "globalThis") == "globalThis" else .Named
+	}
+	return p.globals == .Free
+}
+
+has_conditional_child :: proc(el: ^k.JSXElement) -> bool {
+	for child in el.children {
+		container, held := child.(^k.JSXExpressionContainer)
+		if !held {
+			continue
+		}
+		if _, _, _, proved := proved_conditional(container.expression); proved {
+			return true
+		}
+	}
+	return false
+}
+
+// A static subtree nested deeper than the emitter accepts is not analysed.
+// The ordinary emitter then reports the nesting at the element that exceeds it.
+DIRECT_DEPTH_MAX :: JSX_DEPTH_MAX
 
 parse_hole_host :: proc(
 	p: ^Emitter,
@@ -126,7 +158,7 @@ parse_hole_host :: proc(
 			}
 			append(&node.children, Direct_Node{kind = .Text, raw = clean})
 		case ^k.JSXElement:
-			nested, parsed := parse_static_element(p, v)
+			nested, parsed := parse_static_element(p, v, 1)
 			if !parsed {
 				return
 			}
@@ -140,7 +172,7 @@ parse_hole_host :: proc(
 			if !proved || !plain_expr(cond, params, calls) {
 				return
 			}
-			inner, parsed := parse_branch_element(p, branch, params, calls)
+			inner, parsed := parse_branch_element(p, branch, params, calls, 1)
 			if !parsed {
 				return
 			}
@@ -162,7 +194,10 @@ parse_hole_host :: proc(
 	return node, true
 }
 
-parse_static_element :: proc(p: ^Emitter, el: ^k.JSXElement) -> (node: Direct_Node, ok: bool) {
+parse_static_element :: proc(p: ^Emitter, el: ^k.JSXElement, depth: int) -> (node: Direct_Node, ok: bool) {
+	if depth > DIRECT_DEPTH_MAX {
+		return
+	}
 	tag, intrinsic := el.opening_element.name.(k.JSXIdentifier)
 	if !intrinsic || !html_only_tag(tag.name) {
 		return
@@ -187,7 +222,7 @@ parse_static_element :: proc(p: ^Emitter, el: ^k.JSXElement) -> (node: Direct_No
 			if void_tag(tag.name) {
 				return
 			}
-			nested, parsed := parse_static_element(p, v)
+			nested, parsed := parse_static_element(p, v, depth + 1)
 			if !parsed {
 				return
 			}
@@ -209,10 +244,14 @@ parse_branch_element :: proc(
 	el: ^k.JSXElement,
 	params: []string,
 	calls: ^bool,
+	depth: int,
 ) -> (
 	node: Direct_Node,
 	ok: bool,
 ) {
+	if depth > DIRECT_DEPTH_MAX {
+		return
+	}
 	tag, intrinsic := el.opening_element.name.(k.JSXIdentifier)
 	if !intrinsic || !html_only_tag(tag.name) {
 		return
@@ -237,7 +276,7 @@ parse_branch_element :: proc(
 			if void_tag(tag.name) {
 				return
 			}
-			nested, parsed := parse_branch_element(p, v, params, calls)
+			nested, parsed := parse_branch_element(p, v, params, calls, depth + 1)
 			if !parsed {
 				return
 			}
@@ -349,53 +388,70 @@ void_tag :: proc(name: string) -> bool {
 		name == "wbr"
 }
 
+// Chains the parser builds left-deep, a + b + c and a.b.c, are followed with
+// a loop, so their length never becomes native stack depth.
 plain_expr :: proc(expr: ^k.Expression, params: []string, calls: ^bool) -> bool {
-	if expr == nil {
-		return false
-	}
-	#partial switch v in unwrap(expr)^ {
-	case ^k.StringLiteral, ^k.NumericLiteral, ^k.BooleanLiteral, ^k.NullLiteral, ^k.Identifier:
-		return true
-	case ^k.TemplateLiteral:
-		for hole in v.expressions {
-			if !plain_expr(hole, params, calls) {
+	current := expr
+	for {
+		if current == nil {
+			return false
+		}
+		#partial switch v in unwrap(current)^ {
+		case ^k.StringLiteral, ^k.NumericLiteral, ^k.BooleanLiteral, ^k.NullLiteral, ^k.Identifier:
+			return true
+		case ^k.TemplateLiteral:
+			for hole in v.expressions {
+				if !plain_expr(hole, params, calls) {
+					return false
+				}
+			}
+			return true
+		case ^k.UnaryExpression:
+			current = v.argument
+			continue
+		case ^k.BinaryExpression:
+			if !plain_expr(v.right, params, calls) {
 				return false
 			}
+			current = v.left
+			continue
+		case ^k.LogicalExpression:
+			if !plain_expr(v.right, params, calls) {
+				return false
+			}
+			current = v.left
+			continue
+		case ^k.ConditionalExpression:
+			if _, found := jsx_branch(v.consequent); found {
+				return false
+			}
+			if _, found := jsx_branch(v.alternate); found {
+				return false
+			}
+			if !plain_expr(v.test, params, calls) || !plain_expr(v.consequent, params, calls) {
+				return false
+			}
+			current = v.alternate
+			continue
+		case ^k.MemberExpression:
+			if v.computed || v.optional || !plain_expr(v.property, params, calls) {
+				return false
+			}
+			current = v.object
+			continue
+		case ^k.CallExpression:
+			if v.optional || len(v.arguments) != 0 {
+				return false
+			}
+			id, named := v.callee^.(^k.Identifier)
+			if !named || !slice.contains(params, id.name) {
+				return false
+			}
+			calls^ = true
+			return true
 		}
-		return true
-	case ^k.UnaryExpression:
-		return plain_expr(v.argument, params, calls)
-	case ^k.BinaryExpression:
-		return plain_expr(v.left, params, calls) && plain_expr(v.right, params, calls)
-	case ^k.LogicalExpression:
-		return plain_expr(v.left, params, calls) && plain_expr(v.right, params, calls)
-	case ^k.ConditionalExpression:
-		if _, found := jsx_branch(v.consequent); found {
-			return false
-		}
-		if _, found := jsx_branch(v.alternate); found {
-			return false
-		}
-		return plain_expr(v.test, params, calls) &&
-			plain_expr(v.consequent, params, calls) &&
-			plain_expr(v.alternate, params, calls)
-	case ^k.MemberExpression:
-		if v.computed || v.optional {
-			return false
-		}
-		return plain_expr(v.object, params, calls) && plain_expr(v.property, params, calls)
-	case ^k.CallExpression:
-		if v.optional || len(v.arguments) != 0 {
-			return false
-		}
-		id, named := v.callee^.(^k.Identifier)
-		if !named || !slice.contains(params, id.name) {
-			return false
-		}
-		calls^ = true
-		return true
+		return false
 	}
-	return false
 }
 
 assign_direct :: proc(node: ^Direct_Node, p: ^Emitter, index: ^int) {

@@ -4,7 +4,9 @@ import { mountSlotWindow, scalarRecord } from "/__saba/slot-window.js";
 // Every shape appears twice with identical row markup. The Direct mount has the
 // exact form the compiler lowers to a DOM loop. The Runtime mount carries one
 // more statement, so it stays on the signal runtime. observeLowered drives both
-// through the same records and requires the same DOM after every step.
+// through the same records and requires the same DOM after every step: on a
+// host of their own, on a shared host, under an owning component, and on hosts
+// that are not HTML elements.
 
 function FlatDirect(record) {
   return <div class="cell &amp; row" data-id={record().id} title={record().tip} aria-label={record().label}>{record().id + " · " + record().label}</div>;
@@ -66,23 +68,26 @@ export function boxRuntime(host, records) {
   return { replace: rows.set, dispose };
 }
 
-function SlotDirect(record) {
+// A slot window is not lowered: the runtime window owns its host, validates
+// ranges and recovers from foreign mutation. The first row is one the compiler
+// registers, so the window writes it directly. The second has one more child,
+// which keeps it on tracked bindings. Both must build the same DOM.
+function SlotRegistered(record) {
   return <div class="slot" data-id={record().id} title={record().text}>{record().element + " · " + record().text}</div>;
 }
-function SlotRuntime(record) {
-  return <div class="slot" data-id={record().id} title={record().text}>{record().element + " · " + record().text}</div>;
+function SlotTracked(record) {
+  return <div class="slot" data-id={record().id} title={record().text}>{record().element + " · " + record().text}{""}</div>;
 }
-export function slotDirect(host, records, first = 0) {
-  const view = mountSlotWindow(host, SlotDirect);
+export function slotRegistered(host, records, first = 0) {
+  const view = mountSlotWindow(host, SlotRegistered);
   const replace = (next, nextFirst = 0) => view.replace(nextFirst, next);
   replace(records, first);
   return { replace, dispose: view.dispose };
 }
-export function slotRuntime(host, records, first = 0) {
-  const view = mountSlotWindow(host, SlotRuntime);
+export function slotTracked(host, records, first = 0) {
+  const view = mountSlotWindow(host, SlotTracked);
   const replace = (next, nextFirst = 0) => view.replace(nextFirst, next);
   replace(records, first);
-  void 0;
   return { replace, dispose: view.dispose };
 }
 
@@ -136,9 +141,13 @@ function outcome(action) {
   }
 }
 
-function compare(label, host, direct, runtime, steps, detached) {
-  const left = document.createElement("div"), right = document.createElement("div");
+// setup, when given, prepares each host before its list is mounted. A step
+// may carry a fourth entry: a function run on both hosts before the step.
+function compare(label, host, direct, runtime, steps, detached, setup, make) {
+  const left = make ? make() : document.createElement("div"), right = make ? make() : document.createElement("div");
   if (!detached) host.append(left, right);
+  if (setup) { setup(left); setup(right); }
+  const empty = snapshot(left);
   let a, b;
   const check = (step, first, second) => {
     if (first !== second) throw new Error(label + " " + step + " outcome differs: " + first + " | " + second);
@@ -146,16 +155,18 @@ function compare(label, host, direct, runtime, steps, detached) {
       throw new Error(label + " " + step + " differs:\n" + snapshot(left) + "\n" + snapshot(right));
     }
   };
-  steps.forEach(([name, records, first], index) => {
+  steps.forEach(([name, records, first, poke], index) => {
+    if (poke) { poke(left); poke(right); }
     if (index === 0) {
       check(name, outcome(() => { a = direct(left, records, first); }), outcome(() => { b = runtime(right, records, first); }));
     } else {
       check(name, outcome(() => a.replace(records, first)), outcome(() => b.replace(records, first)));
     }
   });
-  if (!snapshot(left)) throw new Error(label + " rendered nothing before disposal");
+  if (snapshot(left) === empty) throw new Error(label + " rendered nothing before disposal");
   check("dispose", outcome(() => a.dispose()), outcome(() => b.dispose()));
-  if (snapshot(left)) throw new Error(label + " left nodes after disposal: " + snapshot(left));
+  check("dispose again", outcome(() => a.dispose()), outcome(() => b.dispose()));
+  check("replace after dispose", outcome(() => a.replace(steps[0][1], steps[0][2])), outcome(() => b.replace(steps[0][1], steps[0][2])));
   left.remove();
   right.remove();
 }
@@ -226,13 +237,111 @@ function comparePanels(host, detached) {
   right.remove();
 }
 
+// A host the list does not own alone: it has a child before the mount and
+// gains one after it. The rows stay where the list was mounted.
+function sharedSteps() {
+  const tail = (target) => {
+    const note = document.createElement("p");
+    note.className = "after";
+    note.textContent = "after";
+    target.append(note);
+  };
+  return [
+    ["create", [one, two]],
+    ["sibling added, then growth", [one, two, three], undefined, tail],
+    ["reorder", [three, one, two]],
+    ["empty", []],
+    ["refill beside siblings", [two, three]],
+    ["second sibling, then removal", [three], undefined, tail],
+  ];
+}
+
+// The user flips the second box. A reorder of the same records leaves that
+// state with its record, because an element follows its key.
+function toggledSteps() {
+  const flip = (target) => {
+    const box = target.querySelectorAll("input")[1];
+    box.checked = !box.checked;
+  };
+  const records = [one, two, three];
+  return [
+    ["create", records],
+    ["toggled, then reordered", [three, two, one], undefined, flip],
+    ["same order, same records", [three, two, one]],
+    ["same order, new records", [{ ...three }, { ...two }, { ...one }]],
+    ["toggled, then a key replaced", [{ ...three }, { ...two, id: "z" }, { ...one }], undefined, flip],
+    ["shrink", [{ ...one }]],
+  ];
+}
+
+// A list mounted while a component is constructed belongs to that component:
+// disposing the component releases the list.
+function Owner(props) {
+  const target = <div class="owned"></div>;
+  props.out.target = target;
+  props.out.list = props.mountList(target, props.records);
+  return target;
+}
+
+function compareOwned(label, host, direct, runtime) {
+  const sides = [direct, runtime].map((mountList) => {
+    const side = document.createElement("div");
+    host.append(side);
+    const out = {};
+    const dispose = mount(side, () => <Owner out={out} mountList={mountList} records={[one, two]} />);
+    return { side, out, dispose };
+  });
+  const check = (step) => {
+    const [a, b] = sides.map(({ out }) => snapshot(out.target));
+    if (a !== b) throw new Error(label + " " + step + " differs:\n" + a + "\n" + b);
+    return a;
+  };
+  if (!check("create")) throw new Error(label + " rendered nothing");
+  for (const { out } of sides) out.list.replace([two, three, one]);
+  check("replace");
+  for (const { dispose } of sides) dispose();
+  if (check("owner disposed")) throw new Error(label + " kept rows after its owner was disposed");
+  const outcomes = sides.map(({ out }) => outcome(() => out.list.replace([one])));
+  if (outcomes[0] !== outcomes[1]) throw new Error(label + " replace after owner disposal differs: " + outcomes.join(" | "));
+  check("replace after owner disposed");
+  for (const { side } of sides) side.remove();
+}
+
+// A host that is not an HTML element takes the authored statements, so the
+// runtime decides: its error for a value that is no element, its namespace
+// rules for an element outside HTML.
+function compareHosts(host) {
+  for (const value of [null, undefined, "#app", {}, document.createTextNode("x")]) {
+    for (const [direct, runtime] of [[flatDirect, flatRuntime], [treeDirect, treeRuntime], [boxDirect, boxRuntime]]) {
+      const a = outcome(() => direct(value, [one])), b = outcome(() => runtime(value, [one]));
+      if (a !== b || a === "ok") throw new Error("host " + String(value) + " differs: " + a + " | " + b);
+    }
+  }
+  const vector = () => document.createElementNS("http://www.w3.org/2000/svg", "g");
+  compare("svg host", host, flatDirect, flatRuntime, [["create", [one, two]], ["reorder", [two, one]]], false, undefined, vector);
+}
+
 export async function observeLowered(host) {
+  compareHosts(host);
+  compareOwned("owned flat", host, flatDirect, flatRuntime);
+  compareOwned("owned tree", host, treeDirect, treeRuntime);
+  compareOwned("owned checkbox", host, boxDirect, boxRuntime);
   for (const detached of [false, true]) {
     const where = detached ? " (detached)" : "";
     compare("flat" + where, host, flatDirect, flatRuntime, keyedSteps(), detached);
     compare("tree" + where, host, treeDirect, treeRuntime, keyedSteps(), detached);
     compare("checkbox" + where, host, boxDirect, boxRuntime, keyedSteps(), detached);
-    compare("slot" + where, host, slotDirect, slotRuntime, slotSteps(), detached);
+    compare("slot" + where, host, slotRegistered, slotTracked, slotSteps(), detached);
+    const sibling = (target) => {
+      const note = document.createElement("p");
+      note.className = "before";
+      note.textContent = "before";
+      target.append(note);
+    };
+    compare("shared flat" + where, host, flatDirect, flatRuntime, sharedSteps(), detached, sibling);
+    compare("shared tree" + where, host, treeDirect, treeRuntime, sharedSteps(), detached, sibling);
+    compare("shared checkbox" + where, host, boxDirect, boxRuntime, sharedSteps(), detached, sibling);
+    compare("toggled checkbox" + where, host, boxDirect, boxRuntime, toggledSteps(), detached);
     comparePanels(host, detached);
     compare(
       "hole rows" + where,

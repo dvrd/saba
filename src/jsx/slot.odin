@@ -6,19 +6,15 @@ import k "shared:kessel"
 
 // Only hoisted, module-scope declarations can be registered before user code
 // runs. Imported row functions carry their registration through their identity.
-emit_slot_rows :: proc(p: ^Emitter, program: ^k.Program, skip: map[string]bool = nil) {
+emit_slot_rows :: proc(p: ^Emitter, program: ^k.Program) {
 	for statement in program.body {
 		#partial switch s in statement^ {
 		case ^k.FunctionDeclaration:
-			if !slot_lowered(s.id, skip) {
-				emit_slot_row(p, &s.expr)
-			}
+			emit_slot_row(p, &s.expr)
 		case ^k.ExportNamedDeclaration:
 			if d, ok := s.declaration.?; ok {
 				if fn, found := d^.(^k.FunctionDeclaration); found {
-					if !slot_lowered(fn.id, skip) {
-						emit_slot_row(p, &fn.expr)
-					}
+					emit_slot_row(p, &fn.expr)
 				}
 			}
 		case ^k.ExportDefaultDeclaration:
@@ -36,11 +32,6 @@ emit_slot_rows :: proc(p: ^Emitter, program: ^k.Program, skip: map[string]bool =
 			}
 		}
 	}
-}
-
-slot_lowered :: proc(id: Maybe(k.BindingIdentifier), skip: map[string]bool) -> bool {
-	name, named := id.?
-	return named && skip[name.name]
 }
 
 slot_attribute :: proc(name: string) -> bool {
@@ -70,7 +61,31 @@ slot_reads :: proc(expr: ^k.Expression, param: string, reads: ^[dynamic]Slot_Rea
 	case ^k.ParenthesizedExpression:
 		return slot_reads(v.expression, param, reads)
 	case ^k.BinaryExpression:
-		return v.operator == .Add && slot_reads(v.left, param, reads) && slot_reads(v.right, param, reads)
+		// a + b + c is left-deep. Walk down the left operands in a loop, then
+		// read the operands in source order, so a long chain costs no stack
+		// and the reads stay ordered for emit_slot_expression.
+		operands: [dynamic]^k.Expression
+		current := expr
+		for {
+			binary, is_binary := current^.(^k.BinaryExpression)
+			if !is_binary {
+				break
+			}
+			if binary.operator != .Add {
+				return false
+			}
+			append(&operands, binary.right)
+			current = binary.left
+		}
+		if !slot_reads(current, param, reads) {
+			return false
+		}
+		for i := len(operands) - 1; i >= 0; i -= 1 {
+			if !slot_reads(operands[i], param, reads) {
+				return false
+			}
+		}
+		return true
 	case ^k.TemplateLiteral:
 		for hole in v.expressions {
 			if !slot_reads(hole, param, reads) {return false}
@@ -177,11 +192,32 @@ emit_slot_row :: proc(p: ^Emitter, fn: ^k.FunctionExpression) {
 			jsx_entity_string(&static_attrs, p.source[v.loc.start + 1:v.loc.end - 1])
 			jsx_emit(&static_attrs, ",")
 		case ^k.JSXExpressionContainer:
-			jsx_emit(&writer, "element.setAttribute(")
-			jsx_quoted(&writer, key.name)
-			jsx_emit(&writer, ", ")
+			if produces_string(v.expression) {
+				jsx_emit(&writer, "element.setAttribute(")
+				jsx_quoted(&writer, key.name)
+				jsx_emit(&writer, ", ")
+				if !emit_slot_expression(&writer, v.expression, param.name, &fields) {return}
+				jsx_emit(&writer, "); ")
+				continue
+			}
+			// Any other value follows the runtime's attribute rules, as the
+			// closed rows do: nullish removes the attribute, false removes it
+			// unless the name is data-* or aria-*, and true is the empty string.
+			// The write reaches String through globalThis, so a module that
+			// names globalThis keeps its row on tracked bindings.
+			if !globals_unshadowed(p) {return}
+			jsx_emit(&writer, "{ const value = ")
 			if !emit_slot_expression(&writer, v.expression, param.name, &fields) {return}
-			jsx_emit(&writer, "); ")
+			jsx_emit(&writer, "; if (value == null")
+			if !strict_attribute(key.name) {
+				jsx_emit(&writer, " || value === false")
+			}
+			jsx_emit(&writer, ") element.removeAttribute(")
+			jsx_quoted(&writer, key.name)
+			jsx_emit(&writer, "); else element.setAttribute(")
+			jsx_quoted(&writer, key.name)
+			jsx_emit(&writer, ", globalThis.String(value));" if strict_attribute(key.name) else ", value === true ? \"\" : globalThis.String(value));")
+			jsx_emit(&writer, " } ")
 		case:
 			return
 		}

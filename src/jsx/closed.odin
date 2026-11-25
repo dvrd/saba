@@ -6,8 +6,6 @@ import "core:slice"
 import "core:strings"
 import k "shared:kessel"
 
-SLOT_WINDOW_URL :: "/__saba/slot-window.js"
-
 // A proved-closed row lowers to a direct DOM loop. The signal runtime stays
 // for every row this analysis rejects. Lowering is declined, not approximated,
 // wherever the direct loop could differ from the runtime path.
@@ -33,17 +31,17 @@ Closed_Dynamic :: struct {
 	expr: ^k.Expression,
 }
 
-// The runtime bindings a lowered mount replaces. Each must be imported under
-// its own name from the Saba runtime, so a look-alike from another module or a
-// renamed import keeps its authored behavior.
+// The runtime bindings a lowered mount stands in for. Each must be imported
+// under its own name from the Saba runtime, so a look-alike from another
+// module or a renamed import keeps its authored behavior.
 Runtime_Imports :: struct {
-	signal, keyed, mount, slot_window: bool,
+	signal, keyed, mount: bool,
 }
 
 runtime_imports :: proc(program: ^k.Program) -> (found: Runtime_Imports) {
 	for statement in program.body {
 		imp, ok := statement^.(^k.ImportDeclaration)
-		if !ok || len(imp.attributes) != 0 || imp.phase != "" {
+		if !ok || len(imp.attributes) != 0 || imp.phase != "" || imp.source.value != JSX_RUNTIME_URL {
 			continue
 		}
 		for spec in imp.specifiers {
@@ -51,20 +49,13 @@ runtime_imports :: proc(program: ^k.Program) -> (found: Runtime_Imports) {
 			if !is_named || named.local.name != named.imported.name {
 				continue
 			}
-			switch imp.source.value {
-			case JSX_RUNTIME_URL:
-				switch named.local.name {
-				case "signal":
-					found.signal = true
-				case "keyed":
-					found.keyed = true
-				case "mount":
-					found.mount = true
-				}
-			case SLOT_WINDOW_URL:
-				if named.local.name == "mountSlotWindow" {
-					found.slot_window = true
-				}
+			switch named.local.name {
+			case "signal":
+				found.signal = true
+			case "keyed":
+				found.keyed = true
+			case "mount":
+				found.mount = true
 			}
 		}
 	}
@@ -74,7 +65,7 @@ runtime_imports :: proc(program: ^k.Program) -> (found: Runtime_Imports) {
 // Every function a lowered mount adds at module scope. The names are reserved
 // against the whole source, and the generated code reads no authored binding.
 Lowered_Names :: struct {
-	impl, create, move, text, attr, allocate, place, make_slot, write, fresh: string,
+	impl, create, update, move, text, attr, own: string,
 }
 
 lowered_names :: proc(p: ^Emitter, index: int) -> Lowered_Names {
@@ -84,34 +75,44 @@ lowered_names :: proc(p: ^Emitter, index: int) -> Lowered_Names {
 	return {
 		impl = name(p, "list", index),
 		create = name(p, "create", index),
+		update = name(p, "update", index),
 		move = name(p, "move", index),
 		text = name(p, "textOf", index),
 		attr = name(p, "attr", index),
-		allocate = name(p, "allocate", index),
-		place = name(p, "place", index),
-		make_slot = name(p, "makeSlot", index),
-		write = name(p, "write", index),
-		fresh = name(p, "mountFresh", index),
+		own = jsx_helper_name(p.source, fmt.tprintf("__saba_%s", helper_exports[Helper.Own])),
 	}
 }
 
-lower_closed :: proc(p: ^Emitter, program: ^k.Program, nodes: ^[dynamic]Syntax) -> map[string]bool {
-	removed: map[string]bool
+// A lowered mount keeps its authored body. The direct loop runs only for a
+// host it is proved equal on: an HTML element. Any other host, a ref(name)
+// reference or an element in another namespace, takes the authored statements
+// and so the runtime's own handling, errors included.
+//
+// The direct loop places its rows before an end marker it appends to the host,
+// so a host that has or later gains other children keeps the list where it was
+// mounted. The list is registered with the scope that is active when it is
+// mounted, as the runtime registers a mount, so disposing that scope releases
+// it.
+//
+// A slot window is not lowered. The runtime's window enforces an empty,
+// exclusive host, validates every range, recovers from foreign mutation of the
+// host and gives a record with accessors tracked bindings; none of that can be
+// proved here. A registered row already takes the runtime's direct writer.
+lower_closed :: proc(p: ^Emitter, program: ^k.Program, nodes: ^[dynamic]Syntax) {
 	// Generated code reaches the platform through globalThis, which no module
 	// or local binding may then redefine.
-	if jsx_helper_name(p.source, "globalThis") != "globalThis" {
-		return removed
+	if !globals_unshadowed(p) {
+		return
 	}
 	imports := runtime_imports(program)
-	if !(imports.signal && imports.keyed && imports.mount) && !imports.slot_window {
-		return removed
+	if !(imports.signal && imports.keyed && imports.mount) {
+		return
 	}
 	rows := collect_closed_rows(p, program)
 	if len(rows) == 0 {
-		return removed
+		return
 	}
-	lowered: [dynamic]k.Loc
-	used: map[string]bool
+	lowered := 0
 	for statement in program.body {
 		fn, loc, found := top_function(statement)
 		if !found {
@@ -120,11 +121,8 @@ lower_closed :: proc(p: ^Emitter, program: ^k.Program, nodes: ^[dynamic]Syntax) 
 		if _, named := fn.id.?; !named {
 			continue
 		}
-		names := lowered_names(p, len(lowered))
-		helpers, call, row, ok := keyed_body(p, fn, rows[:], imports, names)
-		if !ok {
-			helpers, call, row, ok = slot_body(p, fn, rows[:], imports, names)
-		}
+		names := lowered_names(p, lowered)
+		helpers, host, call, row, ok := keyed_body(p, fn, rows[:], imports, names)
 		if !ok {
 			continue
 		}
@@ -135,132 +133,43 @@ lower_closed :: proc(p: ^Emitter, program: ^k.Program, nodes: ^[dynamic]Syntax) 
 		if strings.contains_rune(signature, '<') {
 			continue
 		}
-		body := strings.concatenate({helpers, signature, "{\n  return ", call, ";\n}"})
+		// The authored statements, compiled as they would be without lowering.
+		inner: [dynamic]Syntax
+		for item in nodes^ {
+			if item.loc.start >= fn.body.loc.start && item.loc.end <= fn.body.loc.end {
+				append(&inner, item)
+			}
+		}
+		main := p.output
+		line, column := p.gen_line, p.gen_col
+		p.output = strings.builder_make()
+		p.unmapped += 1
+		emit_span(p, {fn.body.loc.start + 1, fn.body.loc.end}, inner[:])
+		authored := strings.to_string(p.output)
+		p.output = main
+		p.gen_line, p.gen_col = line, column
+		p.unmapped -= 1
+		if p.error.message != "" {
+			return
+		}
+		body := strings.concatenate(
+			{
+				helpers,
+				signature,
+				"{\n  if (",
+				host,
+				" instanceof globalThis.Element && ",
+				host,
+				".namespaceURI === \"http://www.w3.org/1999/xhtml\") return ",
+				call,
+				";",
+				authored,
+			},
+		)
 		append(nodes, Syntax{loc, body, row_origin(rows[:], row)})
-		append(&lowered, loc)
-		used[row] = true
+		p.aliases[Helper.Own] = names.own
+		lowered += 1
 	}
-	if len(lowered) == 0 {
-		return removed
-	}
-	excluded: [dynamic]k.Loc
-	append(&excluded, ..lowered[:])
-	for &row in rows {
-		if !used[row.name] || row.exported {
-			continue
-		}
-		// Another reader of the row keeps its declaration and registration.
-		own := make([dynamic]k.Loc, 0, len(lowered) + 1)
-		append(&own, ..lowered[:])
-		append(&own, row.decl_loc)
-		if word_used(p.source, row.name, own[:]) {
-			continue
-		}
-		append(nodes, Syntax{row.decl_loc, "", {}})
-		append(&excluded, row.decl_loc)
-		removed[row.name] = true
-	}
-	for statement in program.body {
-		imp, ok := statement^.(^k.ImportDeclaration)
-		if ok && runtime_source(imp) {
-			append(&excluded, imp.loc)
-		}
-	}
-	for statement in program.body {
-		imp, ok := statement^.(^k.ImportDeclaration)
-		if !ok || !runtime_source(imp) || len(imp.specifiers) == 0 {
-			continue
-		}
-		prune_import(p, imp, excluded[:], nodes)
-	}
-	return removed
-}
-
-runtime_source :: proc(imp: ^k.ImportDeclaration) -> bool {
-	if len(imp.attributes) != 0 || imp.phase != "" {
-		return false
-	}
-	return imp.source.value == JSX_RUNTIME_URL || imp.source.value == SLOT_WINDOW_URL
-}
-
-// Drop only the specifiers no remaining code names. An import the lowered
-// mounts alone used disappears, and one with other readers keeps those names.
-prune_import :: proc(p: ^Emitter, imp: ^k.ImportDeclaration, excluded: []k.Loc, nodes: ^[dynamic]Syntax) {
-	kept: [dynamic]string
-	named: [dynamic]string
-	dropped := 0
-	for spec in imp.specifiers {
-		switch v in spec^ {
-		case k.ImportDefaultSpecifier:
-			if word_used(p.source, v.local.name, excluded) {
-				append(&kept, v.local.name)
-			} else {
-				dropped += 1
-			}
-		case k.ImportNamespaceSpecifier:
-			if word_used(p.source, v.local.name, excluded) {
-				append(&kept, js_format("* as %s", v.local.name))
-			} else {
-				dropped += 1
-			}
-		case k.ImportSpecifier:
-			if word_used(p.source, v.local.name, excluded) {
-				append(&named, p.source[v.loc.start:v.loc.end])
-			} else {
-				dropped += 1
-			}
-		}
-	}
-	if dropped == 0 {
-		return
-	}
-	if len(named) > 0 {
-		append(&kept, js_format("{ %s }", strings.join(named[:], ", ")))
-	}
-	if len(kept) == 0 {
-		append(nodes, Syntax{imp.loc, "", {}})
-		return
-	}
-	text := js_format(
-		"import %s from %s;",
-		strings.join(kept[:], ", "),
-		p.source[imp.source.loc.start:imp.source.loc.end],
-	)
-	append(nodes, Syntax{imp.loc, text, {}})
-}
-
-// A textual search is deliberately generous. A name inside a string, a comment
-// or a property access counts as a use, and so does any escaped identifier.
-word_used :: proc(source, name: string, excluded: []k.Loc) -> bool {
-	if strings.contains(source, "\\u") {
-		return true
-	}
-	part :: proc(c: u8) -> bool {
-		return c == '_' || c == '$' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= 0x80
-	}
-	for at := 0; at < len(source); {
-		found := strings.index(source[at:], name)
-		if found < 0 {
-			return false
-		}
-		start := at + found
-		end := start + len(name)
-		at = start + 1
-		if start > 0 && part(source[start - 1]) || end < len(source) && part(source[end]) {
-			continue
-		}
-		inside := false
-		for loc in excluded {
-			if u32(start) >= loc.start && u32(end) <= loc.end {
-				inside = true
-				break
-			}
-		}
-		if !inside {
-			return true
-		}
-	}
-	return false
 }
 
 collect_closed_rows :: proc(p: ^Emitter, program: ^k.Program) -> [dynamic]Closed_Row {
@@ -431,7 +340,7 @@ remember_fields :: proc(expr: ^k.Expression, param: string, fields: ^[dynamic]st
 shadows_runtime :: proc(names: ..string) -> bool {
 	for name in names {
 		switch name {
-		case "signal", "keyed", "mount", "mountSlotWindow":
+		case "signal", "keyed", "mount":
 			return true
 		}
 	}
@@ -455,7 +364,7 @@ keyed_body :: proc(
 	imports: Runtime_Imports,
 	names: Lowered_Names,
 ) -> (
-	helpers, call, row_name: string,
+	helpers, host_name, call, row_name: string,
 	ok: bool,
 ) {
 	if !(imports.signal && imports.keyed && imports.mount) {
@@ -516,62 +425,7 @@ keyed_body :: proc(
 	if b.error.message != "" {
 		return
 	}
-	return strings.to_string(b.output), js_format("%s(%s, %s)", names.impl, host, records), row.name, true
-}
-
-slot_body :: proc(
-	p: ^Emitter,
-	fn: ^k.FunctionExpression,
-	rows: []Closed_Row,
-	imports: Runtime_Imports,
-	names: Lowered_Names,
-) -> (
-	helpers, call, row_name: string,
-	ok: bool,
-) {
-	if !imports.slot_window {
-		return
-	}
-	if fn.async || fn.generator || len(fn.params) < 3 || len(fn.body.body) != 4 || !simple_params(fn) {
-		return
-	}
-	host, _ := param_ident(fn.params[0])
-	records, _ := param_ident(fn.params[1])
-	first, _ := param_ident(fn.params[2])
-	view, window_call, view_ok := const_init(fn.body.body[0])
-	replace_name, replace_arrow, replace_ok := const_init(fn.body.body[1])
-	if !view_ok || !replace_ok || shadows_runtime(view, replace_name) {
-		return
-	}
-	window_name, window_args, window_ok := named_call(window_call)
-	if !window_ok || window_name != "mountSlotWindow" || len(window_args.arguments) != 2 {
-		return
-	}
-	window_host, window_host_ok := ident_name(window_args.arguments[0])
-	tile, tile_ok := ident_name(window_args.arguments[1])
-	if !window_host_ok || window_host != host || !tile_ok {
-		return
-	}
-	row := find_row(rows, tile)
-	if row == nil || row.tree || row.text == nil || row_dotted(row) {
-		return
-	}
-	fallback, swapped := swap_arrow(p, replace_arrow, view)
-	if !swapped || !call_stmt(fn.body.body[2], replace_name, records, first) {
-		return
-	}
-	if !slot_return(fn.body.body[3], replace_name, view) {
-		return
-	}
-	b := Emitter{source = p.source, output = strings.builder_make()}
-	slot_loop(&b, row^, fallback, names)
-	if b.error.message != "" {
-		return
-	}
-	return strings.to_string(b.output),
-		js_format("%s(%s, %s, %s)", names.impl, host, records, first),
-		row.name,
-		true
+	return strings.to_string(b.output), host, js_format("%s(%s, %s)", names.impl, host, records), row.name, true
 }
 
 find_row :: proc(rows: []Closed_Row, name: string) -> ^Closed_Row {
@@ -706,26 +560,6 @@ keyed_return :: proc(statement: ^k.Statement, rows, dispose: string) -> bool {
 	return object_ok && property_ok && object.name == rows && property.name == "set" && value_ok && value == dispose
 }
 
-slot_return :: proc(statement: ^k.Statement, replace, view: string) -> bool {
-	obj, ok := return_object(statement)
-	if !ok || len(obj.properties) != 2 {
-		return false
-	}
-	rep := prop_named(obj, "replace")
-	done := prop_named(obj, "dispose")
-	if rep == nil || done == nil || !rep.shorthand {
-		return false
-	}
-	rep_name, rep_ok := ident_name(rep.value)
-	member, is_member := unwrap(done.value)^.(^k.MemberExpression)
-	if !is_member || member.computed || member.optional {
-		return false
-	}
-	object, object_ok := member.object^.(^k.Identifier)
-	property, property_ok := member.property^.(^k.Identifier)
-	return rep_ok && rep_name == replace && object_ok && property_ok && object.name == view && property.name == "dispose"
-}
-
 return_object :: proc(statement: ^k.Statement) -> (^k.ObjectExpression, bool) {
 	ret, ok := statement^.(^k.ReturnStatement)
 	if !ok {
@@ -747,80 +581,6 @@ prop_named :: proc(obj: ^k.ObjectExpression, name: string) -> ^k.Property {
 		}
 	}
 	return nil
-}
-
-// (next, nextFirst = 0) => view.replace(nextFirst, next). The default must be a
-// numeric literal, which is copied into the lowered replace unchanged.
-swap_arrow :: proc(p: ^Emitter, expr: ^k.Expression, view: string) -> (fallback: string, ok: bool) {
-	arrow, is_arrow := unwrap(expr)^.(^k.ArrowFunctionExpression)
-	if !is_arrow || arrow.async || len(arrow.params) != 2 {
-		return
-	}
-	if _, defaulted := arrow.params[0].default_val.?; defaulted {
-		return
-	}
-	first, first_ok := arrow.params[0].pattern.(^k.Identifier)
-	if !first_ok {
-		return
-	}
-	second: string
-	initial: ^k.Expression
-	#partial switch pattern in arrow.params[1].pattern {
-	case ^k.Identifier:
-		second = pattern.name
-		initial, _ = arrow.params[1].default_val.?
-	case ^k.AssignmentPattern:
-		id, simple := pattern.left.(^k.Identifier)
-		if !simple {
-			return
-		}
-		second = id.name
-		initial = pattern.right
-	case:
-		return
-	}
-	if initial == nil {
-		return
-	}
-	number, numeric := initial^.(^k.NumericLiteral)
-	if !numeric {
-		return
-	}
-	body, is_expr := arrow.body.(^k.Expression)
-	if !is_expr {
-		return
-	}
-	call, is_call := unwrap(body)^.(^k.CallExpression)
-	if !is_call || call.optional || len(call.arguments) != 2 {
-		return
-	}
-	member, is_member := unwrap(call.callee)^.(^k.MemberExpression)
-	if !is_member || member.computed || member.optional {
-		return
-	}
-	object, object_ok := member.object^.(^k.Identifier)
-	property, property_ok := member.property^.(^k.Identifier)
-	left, left_ok := ident_name(call.arguments[0])
-	right, right_ok := ident_name(call.arguments[1])
-	if !object_ok || !property_ok || object.name != view || property.name != "replace" ||
-	   !left_ok || !right_ok || left != second || right != first.name {
-		return
-	}
-	return p.source[number.loc.start:number.loc.end], true
-}
-
-call_stmt :: proc(statement: ^k.Statement, name, left, right: string) -> bool {
-	expr, ok := statement^.(^k.ExpressionStatement)
-	if !ok {
-		return false
-	}
-	call_name, call, called := named_call(expr.expression)
-	if !called || call_name != name || len(call.arguments) != 2 {
-		return false
-	}
-	arg0, ok0 := ident_name(call.arguments[0])
-	arg1, ok1 := ident_name(call.arguments[1])
-	return ok0 && ok1 && arg0 == left && arg1 == right
 }
 
 // fmt reads braces as its own placeholders. Generated JavaScript is full of
@@ -890,9 +650,6 @@ emit_attr_helper :: proc(b: ^Emitter, names: Lowered_Names) {
 	)
 }
 
-HOST_GUARD :: `  if (!(host instanceof globalThis.Element)) throw new globalThis.TypeError("Expected a DOM element or a ref(name) reference.");
-`
-
 // The same key rules, order and messages as the runtime's keyed list.
 emit_key_check :: proc(b: ^Emitter, key: string) {
 	jsx_emit(
@@ -913,8 +670,7 @@ emit_key_check :: proc(b: ^Emitter, key: string) {
 
 // Shared by the flat and the tree row. update holds the statements that bring
 // an existing cell up to date with a different record object.
-emit_keyed_list :: proc(b: ^Emitter, names: Lowered_Names, key, update: string) {
-	quoted := js_string(key)
+emit_move_helper :: proc(b: ^Emitter, names: Lowered_Names) {
 	jsx_emit(
 		b,
 		js_format(
@@ -925,20 +681,28 @@ emit_keyed_list :: proc(b: ^Emitter, names: Lowered_Names, key, update: string) 
     else parent.insertBefore(element, before);
   }
 }
-function %s(host, records) {
 `,
 			names.move,
-			names.impl,
 		),
 	)
-	jsx_emit(b, HOST_GUARD)
+}
+
+emit_keyed_list :: proc(b: ^Emitter, names: Lowered_Names, key, update: string) {
+	quoted := js_string(key)
+	emit_move_helper(b, names)
 	jsx_emit(
 		b,
-		`  const cells = new globalThis.Map();
+		js_format(
+			`function %s(host, records) {
+  const end = globalThis.document.createComment("");
+  host.append(end);
+  const cells = new globalThis.Map();
   let current = records, disposed = false;
   function render() {
     const next = globalThis.Array.from(current);
 `,
+			names.impl,
+		),
 	)
 	emit_key_check(b, key)
 	jsx_emit(
@@ -950,7 +714,7 @@ function %s(host, records) {
         cells.delete(id);
       }
     }
-    let before = null;
+    let before = end;
     for (let i = next.length - 1; i >= 0; i--) {
       const row = next[i];
       let cell = cells.get(row[%s]);
@@ -974,23 +738,30 @@ function %s(host, records) {
       before = cell.element;
     }
   }
-  render();
+  const release = %s(end, () => {
+    disposed = true;
+    for (const cell of cells.values()) cell.element.remove();
+    cells.clear();
+    end.remove();
+  });
+  try {
+    render();
+  } catch (error) {
+    release();
+    throw error;
+  }
   return {
     replace(items) {
       if (disposed || globalThis.Object.is(items, current)) return;
       current = items;
       render();
     },
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      for (const cell of cells.values()) cell.element.remove();
-      cells.clear();
-    },
+    dispose: release,
   };
 }
 `,
 			names.move,
+			names.own,
 		),
 	)
 }
@@ -1037,11 +808,15 @@ keyed_loop :: proc(b: ^Emitter, row: Closed_Row, key: string, names: Lowered_Nam
 	emit_keyed_list(b, names, key, strings.to_string(update.output))
 }
 
-// The million-row checkbox list updates by position. Keys are still validated
-// as the runtime validates them, and every dynamic attribute is rewritten,
-// including one that reads only the key, because a position can change record.
+// The million-row checkbox list keeps its elements in an array. While the
+// keys arrive in the order they are mounted in, a record is written to the
+// element at its position and nothing is looked up. When the keys change, the
+// elements are matched by key, as the runtime matches them, so an element
+// keeps its record, and with it focus and anything the user toggled.
 checkbox_loop :: proc(b: ^Emitter, row: Closed_Row, key: string, names: Lowered_Names) {
+	quoted := js_string(key)
 	emit_attr_helper(b, names)
+	emit_move_helper(b, names)
 	jsx_emit(
 		b,
 		js_format(
@@ -1054,232 +829,113 @@ checkbox_loop :: proc(b: ^Emitter, row: Closed_Row, key: string, names: Lowered_
 	for attr in row.dynamics {
 		emit_attr_write(b, "  ", "element", attr, row.param, key, names)
 	}
-	jsx_emit(b, js_format("  return element;\n}\nfunction %s(host, records) {\n", names.impl))
-	jsx_emit(b, HOST_GUARD)
+	jsx_emit(b, js_format("  return element;\n}\nfunction %s(element, row) {\n", names.update))
+	for attr in row.dynamics {
+		// An element keeps its key for life.
+		if reads_only(attr.expr, row.param, key) {
+			continue
+		}
+		if attr.name == "checked" {
+			emit_checked_update(b, "  ", "element", attr, row.param)
+		} else {
+			emit_attr_write(b, "  ", "element", attr, row.param, key, names)
+		}
+	}
 	jsx_emit(
 		b,
-		`  let boxes = [], current = records, disposed = false;
+		js_format(
+			`}
+function %s(host, records) {
+  const end = globalThis.document.createComment("");
+  host.append(end);
+  let boxes = [], keys = [], rows = [], current = records, disposed = false;
   function render() {
     const next = globalThis.Array.from(current);
 `,
+			names.impl,
+		),
 	)
 	emit_key_check(b, key)
 	jsx_emit(
 		b,
 		js_format(
-			`    if (boxes.length !== next.length) {
-      const fragment = globalThis.document.createDocumentFragment();
-      const created = new globalThis.Array(next.length);
+			`    let same = next.length === boxes.length;
+    for (let i = 0; same && i < next.length; i++) same = next[i][%s] === keys[i];
+    if (same) {
       for (let i = 0; i < next.length; i++) {
-        const element = %s(next[i]);
-        created[i] = element;
-        fragment.append(element);
+        if (rows[i] !== next[i]) %s(boxes[i], next[i]);
       }
-      const anchor = boxes.length ? boxes[boxes.length - 1].nextSibling : null;
-      for (const box of boxes) box.remove();
-      host.insertBefore(fragment, anchor);
-      boxes = created;
+      rows = next;
       return;
     }
-    for (let i = 0; i < next.length; i++) {
-      const row = next[i];
-      const element = boxes[i];
-`,
-			names.create,
-		),
-	)
-	for attr in row.dynamics {
-		if attr.name == "checked" {
-			emit_checked_update(b, "      ", "element", attr, row.param)
-		} else {
-			emit_attr_write(b, "      ", "element", attr, row.param, key, names)
-		}
-	}
-	jsx_emit(
-		b,
-		`    }
+    const created = new globalThis.Array(next.length);
+    const ids = new globalThis.Array(next.length);
+    if (boxes.length === 0) {
+      const fragment = globalThis.document.createDocumentFragment();
+      for (let i = 0; i < next.length; i++) {
+        ids[i] = next[i][%s];
+        created[i] = %s(next[i]);
+        fragment.append(created[i]);
+      }
+      host.insertBefore(fragment, end);
+    } else {
+      const old = new globalThis.Map();
+      for (let i = 0; i < keys.length; i++) old.set(keys[i], i);
+      for (let i = 0; i < next.length; i++) {
+        const row = next[i];
+        const id = row[%s];
+        const at = old.get(id);
+        ids[i] = id;
+        if (at === undefined) {
+          created[i] = %s(row);
+        } else {
+          old.delete(id);
+          created[i] = boxes[at];
+          if (rows[at] !== row) %s(created[i], row);
+        }
+      }
+      for (const at of old.values()) boxes[at].remove();
+      let before = end;
+      for (let i = next.length - 1; i >= 0; i--) {
+        %s(host, created[i], before);
+        before = created[i];
+      }
+    }
+    boxes = created;
+    keys = ids;
+    rows = next;
   }
-  render();
+  const release = %s(end, () => {
+    disposed = true;
+    for (const box of boxes) box.remove();
+    boxes = [];
+    end.remove();
+  });
+  try {
+    render();
+  } catch (error) {
+    release();
+    throw error;
+  }
   return {
     replace(items) {
       if (disposed || globalThis.Object.is(items, current)) return;
       current = items;
       render();
     },
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      for (const box of boxes) box.remove();
-      boxes = [];
-    },
+    dispose: release,
   };
 }
 `,
-	)
-}
-
-// A slot remembers the last value of each field under an index, so a record
-// field named element or text cannot replace the slot's own nodes.
-slot_same :: proc(index: int, field: string) -> string {
-	return js_format(
-		`(slot.f%d === row[%s] && (typeof slot.f%d !== "object" || slot.f%d === null) && typeof slot.f%d !== "function")`,
-		index,
-		js_string(field),
-		index,
-		index,
-		index,
-	)
-}
-
-slot_loop :: proc(b: ^Emitter, row: Closed_Row, fallback: string, names: Lowered_Names) {
-	emit_attr_helper(b, names)
-	jsx_emit(
-		b,
-		js_format(
-			`function %s(old, start, first, count, make) {
-  const low = globalThis.Math.max(start, first);
-  const high = globalThis.Math.min(start + old.length, first + count);
-  if (high <= low || start === first) {
-    const kept = globalThis.Math.min(count, old.length);
-    if (old.length === count) return { next: old, prefix: 0, suffix: count, retired: [] };
-    const next = old.slice(0, kept);
-    while (next.length < count) next.push(make());
-    return { next, prefix: 0, suffix: kept, retired: old.slice(kept) };
-  }
-  const prefix = low - first;
-  const suffix = high - first;
-  const free = [...old.slice(0, low - start), ...old.slice(high - start)];
-  const next = new globalThis.Array(count);
-  let used = 0;
-  for (let i = 0; i < count; i++) {
-    if (i >= prefix && i < suffix) next[i] = old[first + i - start];
-    else next[i] = used < free.length ? free[used++] : make();
-  }
-  return { next, prefix, suffix, retired: free.slice(used) };
-}
-function %s(parent, plan) {
-  const { next, prefix, suffix } = plan;
-  for (let i = 0; i < prefix; i++) {
-    const element = next[i].element;
-    const before = next[prefix].element;
-    if (element.parentNode === parent && typeof parent.moveBefore === "function") parent.moveBefore(element, before);
-    else parent.insertBefore(element, before);
-  }
-  for (let i = suffix; i < next.length; i++) {
-    const element = next[i].element;
-    if (element.parentNode === parent && typeof parent.moveBefore === "function") parent.moveBefore(element, null);
-    else parent.insertBefore(element, null);
-  }
-}
-function %s() {
-  const element = globalThis.document.createElement(%s);
-`,
-			names.allocate,
-			names.place,
-			names.make_slot,
-			js_string(row.tag),
-		),
-	)
-	emit_static_attrs(b, row, "element", "  ")
-	jsx_emit(b, "  const text = globalThis.document.createTextNode(\"\");\n  element.append(text);\n  return { element, text")
-	for _, index in row.fields {
-		jsx_emit(b, js_format(", f%d: globalThis.NaN", index))
-	}
-	jsx_emit(
-		b,
-		js_format(
-			" };\n}\nfunction %s(rows, view) {\n  for (let i = 0; i < rows.length; i++) {\n    const row = rows[i];\n    const slot = view[i];\n",
-			names.write,
-		),
-	)
-	if len(row.fields) > 0 {
-		// Only an unchanged primitive proves the written values are current.
-		jsx_emit(b, "    if (")
-		for field, index in row.fields {
-			if index > 0 {
-				jsx_emit(b, " && ")
-			}
-			jsx_emit(b, slot_same(index, field))
-		}
-		jsx_emit(b, ") continue;\n")
-	}
-	for attr in row.dynamics {
-		emit_attr_write(b, "    ", "slot.element", attr, row.param, "", names)
-	}
-	jsx_emit(b, "    const value = ")
-	emit_row_expr(b, row.text, row.param)
-	jsx_emit(b, ";\n    if (slot.text.data !== value) slot.text.data = value;\n")
-	for field, index in row.fields {
-		jsx_emit(b, js_format("    slot.f%d = row[%s];\n", index, js_string(field)))
-	}
-	jsx_emit(
-		b,
-		js_format(
-			"  }\n}\nfunction %s(parent, next) {\n  const view = new globalThis.Array(next.length);\n  for (let i = 0; i < next.length; i++) {\n    const row = next[i];\n    const element = globalThis.document.createElement(%s);\n",
-			names.fresh,
-			js_string(row.tag),
-		),
-	)
-	emit_static_attrs(b, row, "element", "    ")
-	for attr in row.dynamics {
-		emit_attr_write(b, "    ", "element", attr, row.param, "", names)
-	}
-	jsx_emit(b, "    const text = globalThis.document.createTextNode(")
-	emit_row_expr(b, row.text, row.param)
-	jsx_emit(b, ");\n    element.append(text);\n    parent.insertBefore(element, null);\n    view[i] = { element, text")
-	for field, index in row.fields {
-		jsx_emit(b, js_format(", f%d: row[%s]", index, js_string(field)))
-	}
-	jsx_emit(
-		b,
-		js_format(
-			` };
-  }
-  return view;
-}
-function %s(host, records, first) {
-  if (!(host instanceof globalThis.Element)) throw new globalThis.TypeError("mountSlotWindow expects a host element and a JSX row function.");
-  let slots = [];
-  let start = 0;
-  let disposed = false;
-  function replace(next, nextFirst = %s) {
-    if (disposed) return;
-    if (slots.length === 0) {
-      slots = %s(host, next);
-      start = nextFirst;
-      return;
-    }
-    if (nextFirst === start && next.length === slots.length) {
-      %s(next, slots);
-      return;
-    }
-    const plan = %s(slots, start, nextFirst, next.length, %s);
-    for (const slot of plan.retired) slot.element.remove();
-    %s(next, plan.next);
-    %s(host, plan);
-    slots = plan.next;
-    start = nextFirst;
-  }
-  replace(records, first);
-  return {
-    replace,
-    dispose() {
-      if (disposed) return;
-      disposed = true;
-      for (const slot of slots) slot.element.remove();
-      slots = [];
-    },
-  };
-}
-`,
-			names.impl,
-			fallback,
-			names.fresh,
-			names.write,
-			names.allocate,
-			names.make_slot,
-			names.write,
-			names.place,
+			quoted,
+			names.update,
+			quoted,
+			names.create,
+			quoted,
+			names.create,
+			names.update,
+			names.move,
+			names.own,
 		),
 	)
 }

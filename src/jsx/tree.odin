@@ -45,15 +45,6 @@ row_origin :: proc(rows: []Closed_Row, name: string) -> k.Loc {
 	return row.element_loc
 }
 
-row_dotted :: proc(row: ^Closed_Row) -> bool {
-	for field in row.fields {
-		if strings.contains(field, ".") {
-			return true
-		}
-	}
-	return false
-}
-
 // Elements that exist only in the HTML namespace. The runtime chooses a
 // namespace from the rendered position and switches at svg and math, and names
 // such as a, title, script and style exist in more than one namespace. A tag
@@ -103,7 +94,7 @@ analyze_tree_row :: proc(p: ^Emitter, fn: ^k.FunctionExpression, loc: k.Loc) -> 
 		return
 	}
 	fields: [dynamic]string
-	node, parsed := analyze_element(p, el, param.name, &fields, true)
+	node, parsed := analyze_element(p, el, param.name, &fields, true, 1)
 	if !parsed || !tree_shape(node) {
 		return
 	}
@@ -139,10 +130,16 @@ analyze_element :: proc(
 	param: string,
 	fields: ^[dynamic]string,
 	allow_holes: bool,
+	depth: int,
 ) -> (
 	node: Closed_Node,
 	ok: bool,
 ) {
+	// A row nested deeper than the emitter accepts is not a closed row. The
+	// ordinary emitter reports the nesting at the element that exceeds it.
+	if depth > JSX_DEPTH_MAX {
+		return
+	}
 	tag, intrinsic := el.opening_element.name.(k.JSXIdentifier)
 	if !intrinsic || !html_only_tag(tag.name) {
 		return
@@ -202,7 +199,7 @@ analyze_element :: proc(
 			}
 			append(&node.children, Closed_Node{kind = .Text, raw = decoded})
 		case ^k.JSXElement:
-			nested, parsed := analyze_element(p, v, param, fields, allow_holes)
+			nested, parsed := analyze_element(p, v, param, fields, allow_holes, depth + 1)
 			if !parsed {
 				return {}, false
 			}
@@ -216,7 +213,7 @@ analyze_element :: proc(
 				if !allow_holes || !remember_fields(cond, param, fields) {
 					return {}, false
 				}
-				inner, parsed := analyze_element(p, branch, param, fields, false)
+				inner, parsed := analyze_element(p, branch, param, fields, false, depth + 1)
 				if !parsed {
 					return {}, false
 				}

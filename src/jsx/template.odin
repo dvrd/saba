@@ -513,6 +513,13 @@ write_static_attributes :: proc(b: ^Template_Build, attrs: []k.JSXAttributeItem)
 
 template_element :: proc(b: ^Template_Build, el: ^k.JSXElement, parent: int) {
 	p := b.p
+	p.depth += 1
+	defer p.depth -= 1
+	if p.depth > JSX_DEPTH_MAX {
+		p.position = int(el.loc.start)
+		jsx_fail(p, JSX_DEPTH_MESSAGE)
+		return
+	}
 	tag := tag_of(el)
 	target := len(b.targets)
 	local := b.next_local

@@ -1,12 +1,14 @@
 package saba_jsx
 
 import "core:fmt"
+import "core:mem/virtual"
 import "core:reflect"
 import "core:slice"
 import "core:strings"
 import k "shared:kessel"
 
 JSX_RUNTIME_URL :: "/__saba/dom.js"
+JSX_DEPTH_MESSAGE :: "JSX nesting exceeds 128 levels"
 
 JSX_Error :: struct {
 	file:         string,
@@ -25,6 +27,7 @@ Helper :: enum {
 	Register_Slot_Row,
 	Effect,
 	Paint,
+	Own,
 }
 helper_exports := [Helper]string {
 	.Factory           = "jsx",
@@ -37,10 +40,16 @@ helper_exports := [Helper]string {
 	.Register_Slot_Row = "registerSlotRow",
 	.Effect            = "effect",
 	.Paint             = "paint",
+	.Own               = "ownSlotWindow",
 }
 
 Emitter :: struct {
 	component_children: int,
+	globals:            enum {
+		Unknown,
+		Free,
+		Named,
+	},
 	source, file:    string,
 	position, depth: int,
 	output:          strings.Builder,
@@ -63,6 +72,13 @@ Emitter :: struct {
 // carries its own, larger frame budget.
 MAX_BRACKET_DEPTH :: 256
 MAX_VISIT_DEPTH :: 2500
+// Elements below one another in the emitted tree.
+JSX_DEPTH_MAX :: 128
+// Operators in one expression at one bracket level. Kessel v0.4.1 parses a
+// chain such as a + b + c in a loop but checks it by recursion; an optimized
+// build overflows near 28,000 links. An unoptimized build overflows from about
+// 4,200, which this limit does not cover.
+MAX_CHAIN_LENGTH :: 20000
 
 Visit_Guard :: struct {
 	depth:    int,
@@ -71,43 +87,296 @@ Visit_Guard :: struct {
 	at:       k.Loc,
 }
 
-// An estimate that never needs a tokenizer. Quoted strings that close on their
-// own line are skipped. A line that starts with a letter in column zero is taken
-// as a new top-level statement and resets the count, so stray brackets in
-// comments, regular expressions or JSX text cannot accumulate across a file.
-bracket_depth_exceeded :: proc(source: string) -> (at: int, exceeded: bool) {
-	depth := 0
+Nesting :: enum {
+	Accepted,
+	Brackets,
+	Elements,
+	Chain,
+}
+
+Scan_Mode :: enum {
+	Code,
+	Tag,
+	Text,
+	Template,
+}
+
+Bracket_Frame :: struct {
+	depth, text_depth, elements: int,
+	resume:                      Scan_Mode,
+}
+
+// An estimate that never needs a tokenizer. It follows four states: code, an
+// opening or closing tag, the text between tags, and the text of a template
+// literal. Text is not code, so a bracket, an operator or an apostrophe in it
+// says nothing about nesting. Brackets in one run of JSX text are counted on
+// their own and forgotten at the next tag. Quoted strings that close on their
+// own line and comments are skipped in code. A line that starts with a letter
+// in column zero is taken as a new top-level statement and resets everything,
+// so a wrong guess cannot accumulate across a file.
+//
+// Operators are counted per bracket level to bound the length of one chained
+// expression. A comma, a semicolon or a line break that neither follows nor
+// precedes an operator starts a new count.
+bracket_depth_exceeded :: proc(source: string) -> (at: int, nesting: Nesting) {
+	letter :: proc(c: u8) -> bool {
+		return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+	}
+	// A `<` opens a tag when a name, a slash or `>` follows it.
+	tag_follows :: proc(source: string, i: int) -> bool {
+		if i + 1 >= len(source) {
+			return false
+		}
+		c := source[i + 1]
+		return letter(c) || c == '/' || c == '>'
+	}
+	// In code, `a < b` is a comparison: a tag never follows an operand.
+	tag_position :: proc(source: string, i: int) -> bool {
+		j := i - 1
+		for j >= 0 && (source[j] == ' ' || source[j] == '\t' || source[j] == '\n' || source[j] == '\r') {
+			j -= 1
+		}
+		if j < 0 {
+			return true
+		}
+		c := source[j]
+		if c == ')' || c == ']' || c == '`' || c == '"' || c == '\'' {
+			return false
+		}
+		if !(letter(c) || c >= '0' && c <= '9' || c == '_' || c == '$') {
+			return true
+		}
+		start := j
+		for start > 0 {
+			d := source[start - 1]
+			if !(letter(d) || d >= '0' && d <= '9' || d == '_' || d == '$') {
+				break
+			}
+			start -= 1
+		}
+		switch source[start:j + 1] {
+		case "return", "yield", "default", "await", "else", "do", "in", "of", "typeof", "void", "delete", "case":
+			return true
+		}
+		return false
+	}
+	operator :: proc(c: u8) -> bool {
+		switch c {
+		case '+', '-', '*', '/', '%', '&', '|', '^', '<', '>', '=', '!', '?', ':', '.':
+			return true
+		}
+		return false
+	}
+	// A line break ends an expression unless an operator or an opening
+	// bracket sits on either side of it.
+	line_continues :: proc(source: string, i: int) -> bool {
+		j := i - 1
+		for j >= 0 && (source[j] == ' ' || source[j] == '\t' || source[j] == '\r') {
+			j -= 1
+		}
+		if j >= 0 && (operator(source[j]) || source[j] == ',' || source[j] == '(' || source[j] == '[' || source[j] == '{') {
+			return true
+		}
+		n := i + 1
+		for n < len(source) && (source[n] == ' ' || source[n] == '\t' || source[n] == '\r' || source[n] == '\n') {
+			n += 1
+		}
+		return n < len(source) && (operator(source[n]) || source[n] == '(' || source[n] == '[')
+	}
+
+	mode := Scan_Mode.Code
+	depth, text_depth, elements, open_elements, tag_base, tag_start := 0, 0, 0, 0, 0, 0
+	tag_closing := false
+	// An expression inside JSX text or a template literal returns to that
+	// text at its closing brace.
+	frames: [64]Bracket_Frame
+	open_frames := 0
+	// The mode each open template literal was entered from.
+	templates: [64]Scan_Mode
+	open_templates := 0
+	// links[d] counts the operators of the expression open at bracket level d.
+	links: [MAX_BRACKET_DEPTH + 2]int
+
 	for i := 0; i < len(source); i += 1 {
-		switch source[i] {
+		c := source[i]
+		switch mode {
+		case .Template:
+			// Template text often starts in column zero, so it never resets.
+			switch c {
+			case '\\':
+				i += 1
+			case '`':
+				open_templates -= 1
+				mode = templates[open_templates]
+			case '$':
+				if i + 1 < len(source) && source[i + 1] == '{' {
+					i += 1
+					if open_frames < len(frames) {
+						frames[open_frames] = {depth, 0, elements, .Template}
+						open_frames += 1
+						depth += 1
+						if depth > MAX_BRACKET_DEPTH {
+							return i, .Brackets
+						}
+						links[depth] = 0
+						elements = 0
+						mode = .Code
+					}
+				}
+			}
+			continue
+		case .Text:
+			switch c {
+			case '\n':
+				if i + 1 < len(source) && letter(source[i + 1]) {
+					depth, text_depth, elements, open_elements, open_frames, open_templates = 0, 0, 0, 0, 0, 0
+					mode = .Code
+					links[0] = 0
+				}
+			case '(', '[':
+				text_depth += 1
+				if depth + text_depth > MAX_BRACKET_DEPTH {
+					return i, .Brackets
+				}
+			case ')', ']':
+				if text_depth > 0 {
+					text_depth -= 1
+				} else {
+					depth = max(depth - 1, 0)
+				}
+			case '{':
+				if open_frames < len(frames) {
+					frames[open_frames] = {depth, text_depth, elements, .Text}
+					open_frames += 1
+				}
+				depth += text_depth + 1
+				if depth > MAX_BRACKET_DEPTH {
+					return i, .Brackets
+				}
+				links[depth] = 0
+				text_depth, elements = 0, 0
+				mode = .Code
+			case '}':
+				// Text cannot hold a closing brace, so this was code after all.
+				depth = max(depth - 1, 0)
+				text_depth, elements = 0, 0
+				mode = .Code
+			case '<':
+				if tag_follows(source, i) {
+					mode = .Tag
+					tag_start = i
+					tag_base = depth
+					tag_closing = source[i + 1] == '/'
+					text_depth = 0
+				}
+			}
+			continue
+		case .Code, .Tag:
+		}
+
+		if c == '\n' {
+			if i + 1 < len(source) && letter(source[i + 1]) {
+				depth, text_depth, elements, open_elements, open_frames, open_templates = 0, 0, 0, 0, 0, 0
+				mode = .Code
+				links[0] = 0
+			} else if !line_continues(source, i) {
+				links[depth] = 0
+			}
+			continue
+		}
+		// Tags are not operators: only code, and the expressions inside a
+		// tag's braces, extend a chain.
+		opens_tag := mode == .Code && c == '<' && tag_follows(source, i) && tag_position(source, i)
+		in_code := mode == .Code && !opens_tag || mode == .Tag && depth > tag_base
+		if in_code && (operator(c) || c == '(' || c == '[') {
+			// A call or an index is a link of the chain it extends.
+			links[depth] += 1
+			if links[depth] > MAX_CHAIN_LENGTH {
+				return i, .Chain
+			}
+		}
+		switch c {
+		case ',', ';':
+			links[depth] = 0
+		case '/':
+			// `://` is a URL, not a comment.
+			if i + 1 < len(source) && source[i + 1] == '/' && (i == 0 || source[i - 1] != ':') {
+				for i + 1 < len(source) && source[i + 1] != '\n' {
+					i += 1
+				}
+			} else if i + 1 < len(source) && source[i + 1] == '*' {
+				close := strings.index(source[i + 2:], "*/")
+				if close < 0 {
+					return 0, .Accepted
+				}
+				i += close + 3
+			}
 		case '(', '[', '{':
 			depth += 1
 			if depth > MAX_BRACKET_DEPTH {
-				return i, true
+				return i, .Brackets
 			}
-		case ')', ']', '}':
+			links[depth] = 0
+		case ')', ']':
 			depth = max(depth - 1, 0)
+		case '}':
+			if open_frames > 0 {
+				frame := frames[open_frames - 1]
+				if depth == frame.depth + frame.text_depth + 1 {
+					open_frames -= 1
+					depth, text_depth, elements = frame.depth, frame.text_depth, frame.elements
+					mode = frame.resume
+					continue
+				}
+			}
+			depth = max(depth - 1, 0)
+		case '`':
+			if open_templates < len(templates) {
+				templates[open_templates] = mode
+				open_templates += 1
+				mode = .Template
+			}
 		case '\'', '"':
-			quote, opened := source[i], i
+			quote, opened := c, i
 			for i += 1; i < len(source) && source[i] != quote && source[i] != '\n'; i += 1 {
 				if source[i] == '\\' {
 					i += 1
 				}
 			}
-			// No closing quote on this line: an apostrophe in JSX text or a
-			// template literal. The brackets after it still count.
+			// No closing quote on this line: the quote is an ordinary
+			// character, and what follows it still counts.
 			if i >= len(source) || source[i] == '\n' {
 				i = opened
 			}
-		case '\n':
-			if i + 1 < len(source) {
-				c := source[i + 1]
-				if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' {
-					depth = 0
+		case '<':
+			if opens_tag {
+				mode = .Tag
+				tag_start = i
+				tag_base = depth
+				tag_closing = source[i + 1] == '/'
+			}
+		case '>':
+			if mode != .Tag || depth != tag_base || source[i - 1] == '=' {
+				continue
+			}
+			if tag_closing {
+				elements = max(elements - 1, 0)
+				open_elements = max(open_elements - 1, 0)
+			} else if source[i - 1] != '/' {
+				elements += 1
+				open_elements += 1
+				// The emitter reports the same element. Refusing it here
+				// keeps a parser without a depth limit from seeing it, and
+				// gives one message whichever parser is in use.
+				if open_elements > JSX_DEPTH_MAX {
+					return tag_start, .Elements
 				}
 			}
+			text_depth = 0
+			mode = .Text if elements > 0 else .Code
 		}
 	}
-	return 0, false
+	return 0, .Accepted
 }
 
 use_helper :: proc(p: ^Emitter, kind: Helper) {
@@ -158,16 +427,31 @@ compile_module :: proc(
 		source_type_override = k.SourceType.Module,
 		preserve_parens      = true,
 	}
-	if at, deep := bracket_depth_exceeded(source); deep {
+	if at, nesting := bracket_depth_exceeded(source); nesting != .Accepted {
 		limit := Emitter{source = source, file = file, position = at}
-		jsx_fail(&limit, "Nesting exceeds 256 levels of brackets")
+		message := JSX_DEPTH_MESSAGE
+		#partial switch nesting {
+		case .Brackets:
+			message = "Nesting exceeds 256 levels of brackets"
+		case .Chain:
+			message = "Expression nesting is too deep to compile"
+		}
+		jsx_fail(&limit, message)
 		return {}, limit.error
 	}
+	// Everything the compiler allocates while it works lives in its own
+	// arena, which grows as needed and is released on return. The parser's
+	// arena is a fixed reservation sized for the syntax tree alone.
+	scratch: virtual.Arena
+	if virtual.arena_init_growing(&scratch) != nil {
+		return {}, {file, 1, 1, "Could not allocate memory for the JSX compiler"}
+	}
+	defer virtual.arena_destroy(&scratch)
 	if !k.parse_job_open_inline(&job, source, config, file) {
 		return {}, {file, 1, 1, "Could not initialize the JSX parser"}
 	}
 	defer k.parse_job_close(&job)
-	context.allocator = job.arena_alloc
+	context.allocator = virtual.arena_allocator(&scratch)
 	k.parse_job_run(&job)
 	if len(job.parser.errors) == 0 {
 		k.checker_run_for_job(&job)
@@ -213,11 +497,11 @@ compile_module :: proc(
 	if len(nodes) == 0 {
 		return Page_Template{javascript = strings.clone(source, allocator)}, {}
 	}
-	lowered := lower_closed(&p, job.program, &nodes)
+	lower_closed(&p, job.program, &nodes)
 	if p.error.message != "" {
 		return {}, p.error
 	}
-	emit_slot_rows(&p, job.program, lowered)
+	emit_slot_rows(&p, job.program)
 	emit_span(&p, {u32(header_end), u32(len(source))}, nodes[:])
 	if p.error.message != "" {
 		return {}, p.error
@@ -474,6 +758,10 @@ prepare_hole :: proc(p: ^Emitter, expr: ^k.Expression, force_snapshot := false) 
 }
 
 emit_value :: proc(p: ^Emitter, hole: Hole) {
+	// Nothing is emitted for an expression that already failed.
+	if p.error.message != "" {
+		return
+	}
 	jsx_emit(p, "(")
 	emit_span(p, k.get_expression_loc(hole.expr), hole.nodes[:])
 	jsx_emit(p, ")")
@@ -482,22 +770,42 @@ emit_value :: proc(p: ^Emitter, hole: Hole) {
 // On success these expressions always produce a primitive string. Keep the
 // original expression in the reader: coercions and getters can read signals.
 produces_string :: proc(expr: ^k.Expression) -> bool {
-	#partial switch v in expr^ {
-	case ^k.StringLiteral, ^k.TemplateLiteral:
-		return true
-	case ^k.ParenthesizedExpression:
-		return produces_string(v.expression)
-	case ^k.BinaryExpression:
-		return v.operator == .Add && (produces_string(v.left) || produces_string(v.right))
-	case ^k.ConditionalExpression:
-		return produces_string(v.consequent) && produces_string(v.alternate)
-	case ^k.UnaryExpression:
-		return v.operator == .Typeof
+	// A long a + b + c is left-deep. Following the left operand in a loop
+	// keeps the length of the chain off the native stack.
+	current := expr
+	for {
+		#partial switch v in current^ {
+		case ^k.StringLiteral, ^k.TemplateLiteral:
+			return true
+		case ^k.ParenthesizedExpression:
+			current = v.expression
+			continue
+		case ^k.BinaryExpression:
+			if v.operator != .Add {
+				return false
+			}
+			if produces_string(v.right) {
+				return true
+			}
+			current = v.left
+			continue
+		case ^k.ConditionalExpression:
+			if !produces_string(v.consequent) {
+				return false
+			}
+			current = v.alternate
+			continue
+		case ^k.UnaryExpression:
+			return v.operator == .Typeof
+		}
+		return false
 	}
-	return false
 }
 
 emit_binding :: proc(p: ^Emitter, hole: Hole, sole_intrinsic_child := false) {
+	if p.error.message != "" {
+		return
+	}
 	if hole.live {
 		if sole_intrinsic_child && produces_string(hole.expr) {
 			use_helper(p, .Text_Binding)
@@ -517,13 +825,18 @@ emit_element :: proc(p: ^Emitter, el: ^k.JSXElement, deferred: bool) {
 	defer p.depth -= 1
 	p.position = int(el.loc.start)
 	note_origin(p, el.loc)
+	// Checked before any analysis of the element, so nothing below the limit
+	// is ever walked.
+	if p.depth > JSX_DEPTH_MAX {
+		jsx_fail(p, JSX_DEPTH_MESSAGE); return
+	}
 	// A component decides whether and when its children are built, so an
 	// element below one is never built ahead of that decision.
 	if p.component_children == 0 && emit_direct_hole(p, el) {
 		return
 	}
-	if p.depth > 128 {
-		jsx_fail(p, "JSX nesting exceeds 128 levels"); return
+	if p.error.message != "" {
+		return
 	}
 	opening := el.opening_element
 	tag := k.jsx_element_name_string(opening.name)
@@ -563,8 +876,8 @@ emit_fragment :: proc(p: ^Emitter, el: ^k.JSXFragment, deferred: bool) {
 	defer p.depth -= 1
 	p.position = int(el.loc.start)
 	note_origin(p, el.loc)
-	if p.depth > 128 {
-		jsx_fail(p, "JSX nesting exceeds 128 levels"); return
+	if p.depth > JSX_DEPTH_MAX {
+		jsx_fail(p, JSX_DEPTH_MESSAGE); return
 	}
 	use_helper(p, .Child if deferred else .Factory)
 	jsx_emit(p, "(")

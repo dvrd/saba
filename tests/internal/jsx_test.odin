@@ -23,7 +23,7 @@ export function Tile(record) {
 	testing.expect_value(t, err.message, "")
 	testing.expect(t, strings.has_prefix(output, "#!/usr/bin/env node\nimport {"))
 	testing.expect(t, strings.contains(output, "registerSlotRow as __saba_registerSlotRow_1"))
-	testing.expect(t, strings.contains(output, `__saba_registerSlotRow_1(Tile, {tag:"div", attrs:{"class":"tile & cell",}, fields:["id","score"], write(element, text, row) { element.setAttribute("data-id", row["id"]); text.data = row["id"] + ' · ' + (row["score"] + 1); }});`))
+	testing.expect(t, strings.contains(output, `__saba_registerSlotRow_1(Tile, {tag:"div", attrs:{"class":"tile & cell",}, fields:["id","score"], write(element, text, row) { { const value = row["id"]; if (value == null) element.removeAttribute("data-id"); else element.setAttribute("data-id", globalThis.String(value)); } text.data = row["id"] + ' · ' + (row["score"] + 1); }});`))
 	registration := strings.index(output, "__saba_registerSlotRow_1(Tile,")
 	testing.expect(t, registration >= 0 && registration < strings.index(output, "const firstUse"))
 	testing.expect(t, strings.contains(output, `"data-id": __saba_binding(() => (record().id))`))
@@ -552,16 +552,18 @@ jsx_lowered :: proc(output: string) -> bool {
 	return strings.contains(output, "function __saba_list0(")
 }
 
-// A row the proof accepts: the mount is a thin wrapper over a direct loop and
-// nothing of the keyed runtime is left.
+// A row the proof accepts: the mount runs a direct loop for an HTML element
+// host and keeps its authored statements for every other host.
 jsx_expect_lowered :: proc(t: ^testing.T, source, label: string) -> string {
 	output := jsx_compiled(t, source, label)
 	testing.expectf(t, jsx_lowered(output), "%s was not lowered", label)
-	testing.expectf(t, !strings.contains(output, "keyed("), "%s still calls keyed", label)
-	testing.expectf(t, !strings.contains(output, "mountSlotWindow("), "%s still calls mountSlotWindow", label)
-	testing.expectf(t, !strings.contains(output, "function Row("), "%s kept its unused row", label)
+	testing.expectf(t, strings.contains(output, HTML_HOST_GUARD), "%s does not test its host", label)
+	testing.expectf(t, strings.contains(output, "keyed(rows, record => record.id, Row)"), "%s lost its authored statements", label)
+	testing.expectf(t, strings.contains(output, "function Row("), "%s lost its row", label)
 	return output
 }
+
+HTML_HOST_GUARD :: `instanceof globalThis.Element && host.namespaceURI === "http://www.w3.org/1999/xhtml") return __saba_list0(host, records);`
 
 // A row the proof rejects keeps every authored statement on the signal runtime.
 jsx_expect_runtime :: proc(t: ^testing.T, source, label: string) -> string {
@@ -612,10 +614,18 @@ jsx_lowers_a_proved_keyed_row :: proc(t: ^testing.T) {
 		),
 		"keyed.jsx",
 	)
-	testing.expect(t, !strings.contains(output, "/__saba/dom.js"))
-	testing.expect(t, !strings.contains(output, "registerSlotRow"))
-	// The authored signature survives and delegates.
-	testing.expect(t, strings.contains(output, "export function mountBand(host, records) {\n  return __saba_list0(host, records);\n}"))
+	// The authored signature survives. An HTML element takes the direct loop;
+	// a ref(name) reference, an element of another namespace or anything else
+	// takes the authored statements, and with them the runtime's handling.
+	testing.expect(
+		t,
+		strings.contains(
+			output,
+			"export function mountBand(host, records) {\n  if (host instanceof globalThis.Element && host.namespaceURI === \"http://www.w3.org/1999/xhtml\") return __saba_list0(host, records);\n  const rows = signal(records);\n  const list = keyed(rows, record => record.id, Row);\n  const dispose = mount(host, () => __saba_jsx(__saba_Fragment, null, (list)));\n  return { replace: rows.set, dispose };\n}",
+		),
+	)
+	testing.expect(t, strings.contains(output, "import { keyed, mount, signal } from '/__saba/dom.js';"))
+	testing.expect(t, !strings.contains(output, "throw new globalThis.TypeError(\"Expected a DOM element"))
 	create := jsx_between(output, "function __saba_create0(", "function __saba_move0(")
 	testing.expect(t, strings.contains(create, `element.className = "cell & row";`))
 	// The validated key and a proven string are written directly. Any other
@@ -633,14 +643,32 @@ jsx_lowers_a_proved_keyed_row :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(output, `"Duplicate row key: "`))
 	testing.expect(t, strings.contains(output, "globalThis.Array.from(current)"))
 	testing.expect(t, strings.contains(output, "globalThis.Object.is(items, current)"))
+
+	// Rows are placed before an end marker, never at the end of the host, so
+	// a host with other children keeps the list where it was mounted.
+	list := jsx_between(output, "function __saba_list0(", "export function mountBand")
+	testing.expect(t, strings.contains(list, "const end = globalThis.document.createComment(\"\");\n  host.append(end);"))
+	testing.expect(t, strings.contains(list, "let before = end;"))
+	testing.expect(t, !strings.contains(list, "let before = null;"))
+	// The list belongs to the scope it is mounted in, as a runtime mount does,
+	// and a failed first render leaves nothing behind.
+	testing.expect(t, strings.contains(output, "ownSlotWindow as __saba_ownSlotWindow"))
+	testing.expect(t, strings.contains(list, "const release = __saba_ownSlotWindow(end, () => {"))
+	testing.expect(t, strings.contains(list, "end.remove();"))
+	testing.expect(t, strings.contains(list, "} catch (error) {\n    release();\n    throw error;"))
+	testing.expect(t, strings.contains(list, "dispose: release,"))
 }
 
 @(test)
-jsx_lowers_a_proved_slot_window :: proc(t: ^testing.T) {
-	output := jsx_expect_lowered(
+jsx_keeps_a_slot_window_on_the_runtime :: proc(t: ^testing.T) {
+	// The runtime's window enforces an empty, exclusive host, validates every
+	// range, recovers from foreign mutation and tracks records with accessors.
+	// None of that is provable here, so the mount is left as written. The row
+	// is registered, which gives the window its direct writer.
+	output := jsx_compiled(
 		t,
 		slot_module(
-			`<div class="cell" data-id={record().element} title={record().text + ''}>{record().text + ' · ' + record().element}</div>`,
+			`<div class="cell" data-id={record().element} title={record().text + ''} aria-label={record().label}>{record().text + ' · ' + record().element}</div>`,
 			`export function mountBand(host, records, first = 5) {
   const view = mountSlotWindow(host, Row);
   const replace = (next, nextFirst = 7) => view.replace(nextFirst, next);
@@ -650,39 +678,42 @@ jsx_lowers_a_proved_slot_window :: proc(t: ^testing.T) {
 		),
 		"slot.jsx",
 	)
-	testing.expect(t, !strings.contains(output, "/__saba/slot-window.js"))
-	// The author's defaults are kept, not rewritten.
-	testing.expect(t, strings.contains(output, "export function mountBand(host, records, first = 5) {\n  return __saba_list0(host, records, first);\n}"))
-	testing.expect(t, strings.contains(output, "function replace(next, nextFirst = 7) {"))
-	// Record fields named like the slot's own members are stored by index.
-	testing.expect(t, strings.contains(output, "return { element, text, f0: globalThis.NaN, f1: globalThis.NaN };"))
-	testing.expect(t, strings.contains(output, `view[i] = { element, text, f0: row["element"], f1: row["text"] };`))
-	testing.expect(t, !strings.contains(output, "element: row"))
-	testing.expect(t, !strings.contains(output, "text: row"))
-	write := jsx_between(output, "function __saba_write0(", "function __saba_mountFresh0(")
-	testing.expect(t, strings.contains(write, `__saba_attr0(slot.element, "data-id", row["element"], true);`))
-	testing.expect(t, strings.contains(write, `slot.element.setAttribute("title", row["text"] + '');`))
-	testing.expect(t, strings.contains(write, `slot.f0 = row["element"];`))
+	testing.expect(t, !jsx_lowered(output))
+	testing.expect(t, !strings.contains(output, "globalThis.document"))
+	testing.expect(t, strings.contains(output, "import { mountSlotWindow } from '/__saba/slot-window.js';"))
+	testing.expect(t, strings.contains(output, "const view = mountSlotWindow(host, Row);"))
+	testing.expect(t, strings.contains(output, "const replace = (next, nextFirst = 7) => view.replace(nextFirst, next);"))
+	testing.expect(t, strings.contains(output, "export function mountBand(host, records, first = 5) {"))
 
-	// A replace without a literal default, or a checkbox row, stays on the
-	// runtime window.
-	jsx_expect_runtime(
+	// The registered writer follows the runtime's attribute rules: nullish
+	// removes the attribute, and false removes it unless the name is data-*
+	// or aria-*. A proven string is written as it is.
+	testing.expect(
 		t,
-		slot_module(
-			`<div class="cell">{record().id + ''}</div>`,
-			`export function mountBand(host, records, first = 0) {
-  const view = mountSlotWindow(host, Row);
-  const replace = (next, nextFirst) => view.replace(nextFirst, next);
-  replace(records, first);
-  return { replace, dispose: view.dispose };
-}`,
+		strings.contains(
+			output,
+			`write(element, text, row) { { const value = row["element"]; if (value == null) element.removeAttribute("data-id"); else element.setAttribute("data-id", globalThis.String(value)); } element.setAttribute("title", row["text"] + ''); { const value = row["label"]; if (value == null) element.removeAttribute("aria-label"); else element.setAttribute("aria-label", globalThis.String(value)); } text.data = row["text"] + ' · ' + row["element"]; }`,
 		),
-		"slot-no-default.jsx",
 	)
+	plain := jsx_compiled(t, `function Row(r) { return <div class={r().kind} title={r().tip}>{r().id + ''}</div> }`, "slot-plain.jsx")
+	testing.expect(
+		t,
+		strings.contains(
+			plain,
+			`{ const value = row["tip"]; if (value == null || value === false) element.removeAttribute("title"); else element.setAttribute("title", value === true ? "" : globalThis.String(value)); }`,
+		),
+	)
+	testing.expect(t, !strings.contains(plain, `element.setAttribute("title", row["tip"])`))
+	// The writer reaches String through globalThis. A module that names it
+	// keeps the row on tracked bindings.
+	shadowed := jsx_compiled(t, `const g = globalThis; function Row(r) { return <div title={r().tip}>{r().id + ''}</div> }`, "slot-shadowed.jsx")
+	testing.expect(t, !strings.contains(shadowed, "registerSlotRow"))
+	strings_only := jsx_compiled(t, `const g = globalThis; function Row(r) { return <div title={r().tip + ''}>{r().id + ''}</div> }`, "slot-strings.jsx")
+	testing.expect(t, strings.contains(strings_only, `element.setAttribute("title", row["tip"] + '');`))
 }
 
 @(test)
-jsx_lowers_a_positional_checkbox_row :: proc(t: ^testing.T) {
+jsx_lowers_a_checkbox_row_that_follows_its_key :: proc(t: ^testing.T) {
 	output := jsx_expect_lowered(
 		t,
 		keyed_module(`<input type="checkbox" checked={record().on} data-id={record().id} title={record().label} />`),
@@ -692,14 +723,27 @@ jsx_lowers_a_positional_checkbox_row :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(output, `element.checked = row["on"];`))
 	testing.expect(t, !strings.contains(output, `setAttribute("checked"`))
 	testing.expect(t, strings.contains(output, "globalThis.document.createDocumentFragment()"))
-	// A position can change record, so the key attribute is rewritten too, and
-	// the keys are validated although no cell map is kept.
-	update := jsx_between(output, "const element = boxes[i];", "render();")
-	testing.expect(t, strings.contains(update, `element.setAttribute("data-id", row["id"]);`))
-	testing.expect(t, strings.contains(update, `__saba_attr0(element, "title", row["label"], false);`))
-	testing.expect(t, strings.contains(update, "element.checked !== on"))
 	testing.expect(t, strings.contains(output, `"Duplicate row key: "`))
 	testing.expect(t, !strings.contains(output, "replaceChildren"))
+	list := jsx_between(output, "function __saba_list0(", "export function mountBand")
+	// While the keys arrive in mounted order nothing is looked up, and a
+	// record that is the same object is not written again.
+	testing.expect(t, strings.contains(list, `for (let i = 0; same && i < next.length; i++) same = next[i]["id"] === keys[i];`))
+	testing.expect(t, strings.contains(list, "if (rows[i] !== next[i]) __saba_update0(boxes[i], next[i]);"))
+	// When the keys change the elements are matched by key, so an element
+	// keeps its record, and with it focus and what the user toggled.
+	testing.expect(t, strings.contains(list, "const at = old.get(id);"))
+	testing.expect(t, strings.contains(list, "created[i] = boxes[at];"))
+	testing.expect(t, strings.contains(list, "for (const at of old.values()) boxes[at].remove();"))
+	testing.expect(t, strings.contains(list, "__saba_move0(host, created[i], before);"))
+	testing.expect(t, strings.contains(list, "host.insertBefore(fragment, end);"))
+	testing.expect(t, strings.contains(list, "const release = __saba_ownSlotWindow(end, () => {"))
+	// An element keeps its key for life, so only the other attributes are
+	// written again.
+	update := jsx_between(output, "function __saba_update0(element, row) {", "function __saba_list0(")
+	testing.expect(t, !strings.contains(update, `"data-id"`))
+	testing.expect(t, strings.contains(update, `__saba_attr0(element, "title", row["label"], false);`))
+	testing.expect(t, strings.contains(update, "element.checked !== on"))
 	// The runtime writes a quoted checked through the live property.
 	jsx_expect_runtime(t, keyed_module(`<input type="checkbox" checked="yes" data-id={record().id} />`), "checked-literal.jsx")
 }
@@ -816,16 +860,16 @@ jsx_lowers_only_mounts_built_on_the_saba_runtime :: proc(t: ^testing.T) {
 }
 
 @(test)
-jsx_lowering_keeps_what_other_code_still_uses :: proc(t: ^testing.T) {
+jsx_lowering_leaves_the_rest_of_the_module_alone :: proc(t: ^testing.T) {
 	row :: `<div data-id={record().id}>{record().id + ''}</div>`
-	// An exported row is another module's import.
+	// The authored statements stay in the mount, so the row, its registration
+	// and every import stay exactly as written.
 	exported, _ := strings.replace_all(keyed_module(row), "function Row(", "export function Row(", context.temp_allocator)
 	kept := jsx_compiled(t, exported, "exported-row.jsx")
 	testing.expect(t, jsx_lowered(kept))
 	testing.expect(t, strings.contains(kept, "export function Row(record)"))
 	testing.expect(t, strings.contains(kept, "__saba_registerSlotRow(Row,"))
 
-	// A second reader of the row, and of signal, in code that is not lowered.
 	shared := strings.concatenate(
 		{
 			"import { keyed, mount, signal, effect } from '/__saba/dom.js';\nimport * as dom from '/__saba/dom.js';\nimport Default, { computed as derived } from '/__saba/dom.js';\n",
@@ -838,13 +882,11 @@ jsx_lowering_keeps_what_other_code_still_uses :: proc(t: ^testing.T) {
 	output := jsx_compiled(t, shared, "shared.jsx")
 	testing.expect(t, jsx_lowered(output))
 	testing.expect(t, strings.contains(output, "function Row(record)"))
-	// Only the specifiers no remaining code names are dropped.
-	testing.expect(t, strings.contains(output, "import { signal } from '/__saba/dom.js';"))
-	testing.expect(t, strings.contains(output, "import { computed as derived } from '/__saba/dom.js';"))
-	testing.expect(t, !strings.contains(output, "import * as dom"))
-	testing.expect(t, !strings.contains(output, "Default"))
-	testing.expect(t, !strings.contains(output, "effect"))
+	testing.expect(t, strings.contains(output, "import { keyed, mount, signal, effect } from '/__saba/dom.js';"))
+	testing.expect(t, strings.contains(output, "import * as dom from '/__saba/dom.js';"))
+	testing.expect(t, strings.contains(output, "import Default, { computed as derived } from '/__saba/dom.js';"))
 	testing.expect(t, strings.contains(output, "export const total = signal(0);"))
+	testing.expect(t, strings.contains(output, "export function other() { return Row; }"))
 
 	// Two mounts on one row, one of them outside the proof.
 	second := strings.concatenate(
@@ -857,7 +899,7 @@ jsx_lowering_keeps_what_other_code_still_uses :: proc(t: ^testing.T) {
 	both := jsx_compiled(t, second, "two-readers.jsx")
 	testing.expect(t, jsx_lowered(both))
 	testing.expect(t, strings.contains(both, "function Row(record)"))
-	testing.expect(t, strings.contains(both, "import { keyed, mount, signal } from '/__saba/dom.js';"))
+	testing.expect_value(t, strings.count(both, "function __saba_list"), 1)
 }
 
 @(test)
@@ -883,7 +925,13 @@ jsx_lowered_names_avoid_authored_bindings :: proc(t: ^testing.T) {
 	output := jsx_compiled(t, source, "collisions.jsx")
 	testing.expect(t, strings.contains(output, "function __saba_list0_1(host, records)"))
 	testing.expect(t, strings.contains(output, "function __saba_create0_1(row)"))
-	testing.expect(t, strings.contains(output, "export function mountBand(before, cells = [], next) {\n  return __saba_list0_1(before, cells);\n}"))
+	testing.expect(
+		t,
+		strings.contains(
+			output,
+			"export function mountBand(before, cells = [], next) {\n  if (before instanceof globalThis.Element && before.namespaceURI === \"http://www.w3.org/1999/xhtml\") return __saba_list0_1(before, cells);\n  const rows = signal(cells);",
+		),
+	)
 	testing.expect(t, strings.contains(output, `row["create"] + ' create'`))
 	testing.expect(t, strings.contains(output, "new globalThis.Map()"))
 	testing.expect(t, strings.contains(output, "globalThis.Number.isFinite"))
@@ -909,12 +957,11 @@ export function mountTasks(host, tasks) {
   return { replace: rows.set, dispose };
 }`
 	pair := jsx_compiled(t, two, "two-mounts.jsx")
-	testing.expect(t, !strings.contains(pair, "/__saba/dom.js"))
 	for name in ([]string{"__saba_list0(host", "__saba_list1(host", "__saba_create0(row)", "__saba_create1(row)", "__saba_move0(parent", "__saba_move1(parent"}) {
 		testing.expect_value(t, strings.count(pair, fmt.tprintf("function %s", name)), 1)
 	}
-	testing.expect(t, strings.contains(pair, "return __saba_list0(host, people);"))
-	testing.expect(t, strings.contains(pair, "return __saba_list1(host, tasks);"))
+	testing.expect(t, strings.contains(pair, ") return __saba_list0(host, people);"))
+	testing.expect(t, strings.contains(pair, ") return __saba_list1(host, tasks);"))
 }
 
 @(test)
@@ -988,27 +1035,42 @@ jsx_differential_fixture_takes_every_lowered_path :: proc(t: ^testing.T) {
 		return
 	}
 	output := jsx_compiled(t, string(source), "lowered.jsx")
-	for name in ([]string{"flatDirect", "treeDirect", "boxDirect"}) {
+	// Each Direct mount runs its own loop for an HTML host and keeps its
+	// authored statements for any other.
+	for name, index in ([]string{"flatDirect", "treeDirect", "boxDirect"}) {
 		body := jsx_between(output, fmt.tprintf("export function %s(", name), "\n}")
-		testing.expectf(t, strings.contains(body, "return __saba_list"), "%s is not lowered: %s", name, body)
+		guard := fmt.tprintf(
+			"if (host instanceof globalThis.Element && host.namespaceURI === \"http://www.w3.org/1999/xhtml\") return __saba_list%d(host, records);",
+			index,
+		)
+		testing.expectf(t, strings.contains(body, guard), "%s is not lowered: %s", name, body)
+		testing.expectf(t, strings.contains(body, "const list = keyed(rows, record => record.id,"), "%s lost its authored statements", name)
 	}
-	testing.expect(t, strings.contains(output, "export function slotDirect(host, records, first = 0) {\n  return __saba_list3(host, records, first);"))
-	testing.expect_value(t, strings.count(output, "function __saba_list"), 4)
+	testing.expect_value(t, strings.count(output, "function __saba_list"), 3)
+	testing.expect_value(t, strings.count(output, "(end, () => {"), 3)
 	testing.expect(t, strings.contains(output, "let boxes = []"))
-	testing.expect(t, strings.contains(output, "let slots = []"))
+	testing.expect(t, strings.contains(output, "const at = old.get(id);"))
 	testing.expect(t, strings.contains(output, "cell.h0"))
 	testing.expect_value(t, strings.count(output, "__saba_paint(__saba_swap);"), 2)
-	for name in ([]string{"flatRuntime", "treeRuntime", "boxRuntime", "slotRuntime"}) {
+	for name in ([]string{"flatRuntime", "treeRuntime", "boxRuntime"}) {
 		body := jsx_between(output, fmt.tprintf("export function %s(", name), "\n}")
 		testing.expectf(t, !strings.contains(body, "__saba_list") && strings.contains(body, "void 0;"), "%s left the runtime", name)
 	}
-	for name in ([]string{"FlatDirect", "TreeDirect", "BoxDirect", "SlotDirect"}) {
-		testing.expectf(t, !strings.contains(output, fmt.tprintf("function %s(", name)), "%s was kept", name)
+	// Slot windows are never lowered. One row is registered for the window's
+	// direct writer and its twin, with a second child, is tracked.
+	for name in ([]string{"slotRegistered", "slotTracked"}) {
+		body := jsx_between(output, fmt.tprintf("export function %s(", name), "\n}")
+		testing.expectf(t, !strings.contains(body, "__saba_list") && strings.contains(body, "mountSlotWindow(host,"), "%s left the runtime", name)
 	}
-	for name in ([]string{"FlatRuntime", "TreeRuntime", "BoxRuntime", "SlotRuntime", "PanelRuntime", "CardRuntime"}) {
+	testing.expect(t, strings.contains(output, "__saba_registerSlotRow(SlotRegistered,"))
+	testing.expect(t, !strings.contains(output, "__saba_registerSlotRow(SlotTracked,"))
+	for name in ([]string {
+			"FlatDirect", "TreeDirect", "BoxDirect", "FlatRuntime", "TreeRuntime", "BoxRuntime",
+			"SlotRegistered", "SlotTracked", "PanelRuntime", "CardRuntime", "Owner",
+		}) {
 		testing.expectf(t, strings.contains(output, fmt.tprintf("function %s(", name)), "%s is missing", name)
 	}
-	// The runtime twins still read every import.
+	testing.expect(t, strings.contains(output, `import { keyed, mount, signal } from "/__saba/dom.js";`))
 	testing.expect(t, strings.contains(output, `import { mountSlotWindow, scalarRecord } from "/__saba/slot-window.js";`))
 	again, _ := transform_jsx(string(source), "lowered.jsx", context.temp_allocator)
 	testing.expect(t, again == output, "lowered output is not deterministic")
@@ -1445,4 +1507,154 @@ jsx_text_lines_end_at_any_newline_and_keep_no_break_spaces :: proc(t: ^testing.T
 	testing.expect_value(t, jsx.jsx_clean_text("\n  Hello\n  \u00a0\n"), "Hello \u00a0")
 	testing.expect_value(t, jsx.jsx_clean_text("  one line  "), "  one line  ")
 	testing.expect_value(t, jsx.jsx_clean_text("\n\t \n"), "")
+}
+
+@(test)
+jsx_reports_deep_element_nesting_at_the_element :: proc(t: ^testing.T) {
+	nest :: proc(open: string, count: int, inner, close: string) -> string {
+		return strings.concatenate(
+			{strings.repeat(open, count, context.temp_allocator), inner, strings.repeat(close, count, context.temp_allocator)},
+			context.temp_allocator,
+		)
+	}
+	// 128 levels compile. One more is reported at the element that exceeds
+	// the limit, however much deeper the source goes: the analyses that run
+	// before emission stop at the same depth, and their working memory is
+	// not the parser's fixed arena.
+	fine := jsx_compiled(t, strings.concatenate({"const a = ", nest("<div>", 128, "x", "</div>"), ";"}, context.temp_allocator), "nest-128.jsx")
+	testing.expect_value(t, strings.count(fine, `("div", {}`), 128)
+	for count in ([]int{129, 300, 600, 1000}) {
+		for shape in ([][3]string {
+				{"const a = ", "x", ";"},
+				// A row function: the closed-row analysis walks it first.
+				{"import { keyed, mount, signal } from '/__saba/dom.js';\nfunction Row(record) { return ", "{record().id + ''}", "; }\n"},
+				// Every level could host a direct hole.
+				{"function C(on) { return ", "{on() ? <b>x</b> : null}", "; }"},
+			}) {
+			source := strings.concatenate({shape[0], nest("<div>", count, shape[1], "</div>"), shape[2]}, context.temp_allocator)
+			_, err := transform_jsx(source, "nest.jsx", context.temp_allocator)
+			testing.expectf(t, err.message == "JSX nesting exceeds 128 levels", "%d levels after %q: %s", count, shape[0], err.message)
+			lines := strings.count(shape[0], "\n")
+			column := len(shape[0]) - (strings.last_index(shape[0], "\n") + 1) + 5 * 128 + 1
+			testing.expect_value(t, err.line, lines + 1)
+			testing.expect_value(t, err.column, column)
+		}
+		// A hole at every level, which made every element a host candidate.
+		holes := strings.concatenate(
+			{"function C(on) { return ", nest("<div>{on() ? <b>x</b> : null}", count, "", "</div>"), "; }"},
+			context.temp_allocator,
+		)
+		_, err := transform_jsx(holes, "nest-holes.jsx", context.temp_allocator)
+		testing.expectf(t, err.message == "JSX nesting exceeds 128 levels", "%d hole levels: %s", count, err.message)
+		// A page template walks its root element by itself.
+		_, failure := jsx.compile_page_template(
+			strings.concatenate({"export default function Page() { return ", nest("<div>", count, "x", "</div>"), "; }"}, context.temp_allocator),
+			"nest-page.jsx",
+			context.temp_allocator,
+		)
+		testing.expectf(t, failure.message == "JSX nesting exceeds 128 levels", "%d template levels: %s", count, failure.message)
+	}
+	// Text that starts in column zero resets the estimate that runs before
+	// the parser, so these reach the emitter and its analyses with the whole
+	// tree. They stop at the same element: as plain elements, and below a
+	// direct-hole host whose static children are analysed first.
+	for count in ([]int{129, 300, 500}) {
+		plain := strings.concatenate({"const a = (\n", nest("<div>\nx\n", count, "", "</div>\n"), ");"}, context.temp_allocator)
+		_, err := transform_jsx(plain, "nest-text.jsx", context.temp_allocator)
+		testing.expectf(t, err.message == "JSX nesting exceeds 128 levels", "%d text levels: %s", count, err.message)
+		testing.expect_value(t, err.line, 2 + 2 * 128)
+		testing.expect_value(t, err.column, 1)
+		hosted := strings.concatenate(
+			{"function C(on) { return (\n<section>{on() ? <b>y</b> : null}\n", nest("<div>\nx\n", count, "", "</div>\n"), "</section>); }"},
+			context.temp_allocator,
+		)
+		_, held := transform_jsx(hosted, "nest-host.jsx", context.temp_allocator)
+		testing.expectf(t, held.message == "JSX nesting exceeds 128 levels", "%d hosted levels: %s", count, held.message)
+		testing.expect_value(t, held.line, 3 + 2 * 127)
+	}
+	// Far deeper input is refused the same way, at the same element.
+	for count in ([]int{5000, 10000, 100000}) {
+		source := strings.concatenate({"const a = ", nest("<div>", count, "x", "</div>"), ";"}, context.temp_allocator)
+		_, err := transform_jsx(source, "nest-deep.jsx", context.temp_allocator)
+		testing.expectf(t, err.message == "JSX nesting exceeds 128 levels", "%d levels: %s", count, err.message)
+		testing.expect_value(t, err.line, 1)
+		testing.expect_value(t, err.column, len("const a = ") + 5 * 128 + 1)
+		multiline := strings.concatenate({"const a = (\n", nest("  <div>\n", count, "x\n", "  </div>\n"), ");"}, context.temp_allocator)
+		_, lined := transform_jsx(multiline, "nest-lines.jsx", context.temp_allocator)
+		testing.expectf(t, lined.message == "JSX nesting exceeds 128 levels", "%d lines: %s", count, lined.message)
+		testing.expect_value(t, lined.line, 130)
+		testing.expect_value(t, lined.column, 3)
+	}
+}
+
+@(test)
+jsx_reports_a_long_chain_without_overflow :: proc(t: ^testing.T) {
+	// 150,000 terms as an element's only child, in a row function and in a
+	// hole's condition. Each used to reach a helper that recursed once per
+	// term; the pinned parser's checker overflows on such a chain as well, so
+	// the source is refused before it is parsed.
+	for shape in ([][3]string {
+			{"const a = <p>{", "1+", "1}</p>;"},
+			{"const a = <p title={", "x.y+", "''}>z</p>;"},
+			{"function Row(record) { return <div>{", "record().a+", "''}</div>; }"},
+			{"function C(on) { return <div>{", "on.a&&", "on() ? <b>x</b> : null}</div>; }"},
+			{"const total = ", "a.b.c(1)+", "1;\nconst a = <p/>;"},
+		}) {
+		source := strings.concatenate({shape[0], strings.repeat(shape[1], 150000, context.temp_allocator), shape[2]}, context.temp_allocator)
+		_, err := transform_jsx(source, "chain.jsx", context.temp_allocator)
+		testing.expectf(t, err.message == "Expression nesting is too deep to compile", "%s: %s", shape[1], err.message)
+		testing.expect_value(t, err.line, 1)
+		testing.expect(t, err.column > len(shape[0]))
+	}
+}
+
+@(test)
+jsx_nesting_estimate_ignores_text_templates_and_comments :: proc(t: ^testing.T) {
+	b := strings.builder_make(context.temp_allocator)
+	// JSX text is not code. Apostrophes and unbalanced brackets in it, on
+	// hundreds of lines of one expression, say nothing about nesting.
+	strings.write_string(&b, "function Notes(props) {\n  return <ul>\n")
+	for i in 0 ..< 400 {
+		fmt.sbprintf(&b, "    <li>Don't (really [ask :( #%d {{props.items.map(item => <b>it's {{item.name}} [</b>)}} and so on (</li>\n", i)
+	}
+	strings.write_string(&b, "  </ul>;\n}\n")
+	// Neither is the text of a template literal, nor a comment.
+	strings.write_string(&b, "function sql(id) {\n  return [\n")
+	for i in 0 ..< 400 {
+		fmt.sbprintf(&b, "    `select ((( from t%d where a > [ and b = ${{id}} -- it's (`, // ((( [[[ {{{{ don't\n", i)
+		strings.write_string(&b, "    /* ((( [[[ */ 1,\n")
+	}
+	strings.write_string(&b, "  ];\n}\n")
+	// Thousands of tags and comparisons in one expression are not a chain.
+	strings.write_string(&b, "function Table(rows) {\n  return <table><tbody>\n")
+	for i in 0 ..< 6000 {
+		fmt.sbprintf(&b, "    <tr><td>%d</td><td>{{rows.a > rows.b ? rows.a : rows.b}}</td></tr>\n", i)
+	}
+	strings.write_string(&b, "  </tbody></table>;\n}\n")
+	// A long text and a long template literal full of operator characters.
+	strings.write_string(&b, "const prose = <p>")
+	strings.write_string(&b, strings.repeat("a - b / c. d = e + f: ", 3000, context.temp_allocator))
+	strings.write_string(&b, "</p>;\nconst blob = `")
+	strings.write_string(&b, strings.repeat("+/=-.<>", 6000, context.temp_allocator))
+	strings.write_string(&b, "`;\n")
+	output, err := transform_jsx(strings.to_string(b), "text.jsx", context.temp_allocator)
+	testing.expect_value(t, err.message, "")
+	testing.expect(t, strings.contains(output, `"Don't (really [ask :( #399 "`))
+	jsx_node_check(t, "text.jsx", output)
+
+	// Real nesting is still counted where text and code meet: inside an
+	// expression among the children, inside a template's interpolation, after
+	// an apostrophe, and after a comparison.
+	deep := strings.repeat("(", 300, context.temp_allocator)
+	shut := strings.repeat(")", 300, context.temp_allocator)
+	for source in ([]string {
+			strings.concatenate({"const a = <p>Don't {", deep, "1", shut, "}</p>;"}, context.temp_allocator),
+			strings.concatenate({"const a = `it's ${", deep, "1", shut, "}`;\nconst b = <p/>;"}, context.temp_allocator),
+			strings.concatenate({"const a = b > ", deep, "1", shut, ";\nconst c = <p/>;"}, context.temp_allocator),
+			strings.concatenate({"const a = <p title={", deep, "1", shut, "}>x</p>;"}, context.temp_allocator),
+			strings.concatenate({"const a = <p>(</p>;\nconst b = <i>{", deep, "1", shut, "}</i>;"}, context.temp_allocator),
+		}) {
+		_, deep_err := transform_jsx(source, "deep.jsx", context.temp_allocator)
+		testing.expectf(t, deep_err.message == "Nesting exceeds 256 levels of brackets", "%s: %s", source[:24], deep_err.message)
+	}
 }

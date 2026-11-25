@@ -884,3 +884,89 @@ h2w_cpu_time :: proc() -> time.Duration {
 	micro := usage.ru_utime.tv_usec + usage.ru_stime.tv_usec
 	return time.Duration(total) * time.Second + time.Duration(micro) * time.Microsecond
 }
+
+// A DATA event a full tunnel cannot take yet used to stay borrowed across owner
+// turns. It is now deferred: no borrow outlives the pass, the engine queue
+// keeps the event at its head and its credit stays withheld.
+@(test)
+h2_event_for_a_full_tunnel_is_deferred_not_held :: proc(t: ^testing.T) {
+	session: HTTP2_Session
+	session.limits = h2_make_limits(8)
+	if !testing.expect(
+		t,
+		h2.connection_init(&session.engine, {role = .Server, limits = session.limits}, {max_stream_capacity = 16}, context.allocator).kind ==
+		.None,
+	) {
+		return
+	}
+	session.engine_ready = true
+	defer h2.connection_destroy(&session.engine)
+	upgrades: [1]^H2_Upgrade
+	session.upgrades = upgrades[:]
+	task: Connection_Task
+	task.http2 = &session
+
+	wire: [dynamic]u8
+	defer delete(wire)
+	append(&wire, "PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n")
+	h2w_frame(&wire, 4, 0, 0, nil)
+	h2w_headers(&wire, 1, false, {{":method", "POST"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/"}})
+	h2w_frame(&wire, 0, 0, 1, []u8{'a', 'b', 'c'})
+	at := 0
+	for _ in 0 ..< 64 {
+		fed := h2.connection_feed(&session.engine, wire[at:], 0)
+		if !testing.expect_value(t, fed.error.kind, h2.Error_Kind.None) {
+			return
+		}
+		at += fed.consumed
+		for {
+			view, borrowed := h2.connection_output_front(&session.engine)
+			if !borrowed {
+				break
+			}
+			_ = h2.connection_output_advance(&session.engine, view.token, len(view.bytes))
+		}
+		if at == len(wire) && fed.status != .Yield {
+			break
+		}
+	}
+	if !testing.expect_value(t, at, len(wire)) {
+		return
+	}
+
+	// Everything ahead of the DATA event, the stream's HEADERS among it.
+	handle: h2.Stream_Handle
+	for handle.stream_id == 0 {
+		event, polled := h2.connection_poll(&session.engine)
+		if !testing.expect(t, polled, "no HEADERS event") {
+			return
+		}
+		if headers, is_headers := event.payload.(h2.Headers_Event); is_headers {
+			handle = headers.stream
+		}
+		_ = h2.connection_event_release(&session.engine, event.token)
+	}
+
+	// A tunnel on that stream whose input queue is full.
+	tunnel := H2_Upgrade {
+		handle      = handle,
+		accepted    = true,
+		input_count = H2_BODY_CHUNKS,
+	}
+	upgrades[0] = &tunnel
+	defer upgrades[0] = nil
+
+	for _ in 0 ..< 2 {
+		h2_pump_events(&task)
+		stats, _ := h2.connection_stats(&session.engine)
+		testing.expect(t, !stats.event_borrowed, "the event stays borrowed after the owner pass")
+	}
+
+	// Once the tunnel has room the same event is next.
+	event, polled := h2.connection_poll(&session.engine)
+	if testing.expect(t, polled, "the deferred event was lost") {
+		data, is_data := event.payload.(h2.Data_Event)
+		testing.expect(t, is_data && data.stream == handle, "the deferred event is not the tunnel's DATA")
+		_ = h2.connection_event_release(&session.engine, event.token)
+	}
+}

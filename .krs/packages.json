@@ -16,13 +16,6 @@
       "hash": "e3ec355fdd31df1e8006012144aa333877392102b93f217d6b6af734efe4bfbf"
     },
     {
-      "name": "http",
-      "source": "local",
-      "tag": "v0.3.0",
-      "commit": "285eee3ca6ad7f0155eb19721a5aa667343add83",
-      "hash": "e71b5b59ab487ac692ff5ffd06dd217a6b7fe5a4d0edb6a90003c29b84ae80f9"
-    },
-    {
       "name": "kakunou",
       "source": "local",
       "tag": "v0.2.0",

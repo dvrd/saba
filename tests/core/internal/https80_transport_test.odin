@@ -1,7 +1,8 @@
 package saba_core
 
 import async "shared:async"
-import tls "core:crypto/tls"
+import tls "shared:async/tls"
+import "core:net"
 import "core:testing"
 import "core:time"
 
@@ -54,7 +55,7 @@ https80_phase_change_preserves_authenticated_staging_and_clears_only_internal_ca
 		}
 
 		if cancelled {
-			state.read.result.err.kind = .Cancelled
+			state.read.result.err = net.Connection_Error.Cancelled
 		}
 
 		copy(state.input[:], "abcdef")
@@ -79,7 +80,7 @@ https80_phase_change_preserves_authenticated_staging_and_clears_only_internal_ca
 		testing.expect_value(t, string(second[:]), "def")
 		testing.expect(t, !state.read_started && !state.read_done && !state.read_retarget)
 		testing.expect_value(t, state.input_at, 0)
-		testing.expect_value(t, state.error.kind, .None)
+		testing.expect_value(t, state.error, nil)
 	}
 }
 
@@ -89,7 +90,7 @@ https80_retarget_never_hides_peer_close_or_protocol_failure :: proc(t: ^testing.
 		read_started = true,
 		read_done = true,
 		read_phase = .Await_Response,
-		read = {result = {count = 0, err = {kind = .Peer_Closed}}},
+		read = {result = {count = 0, err = net.Connection_Error.Peer_Closed}},
 	}
 
 	task := Connection_Task {
@@ -101,7 +102,7 @@ https80_retarget_never_hides_peer_close_or_protocol_failure :: proc(t: ^testing.
 	n, error := transport_read(&task, data[:], {})
 	testing.expect_value(t, n, 0)
 	testing.expect_value(t, error.kind, .Peer_Closed)
-	testing.expect_value(t, state.error.kind, .Peer_Closed)
+	testing.expect_value(t, state.error, net.Network_Error(net.Connection_Error.Peer_Closed))
 	testing.expect(t, !state.read_started && !state.read_done)
 }
 
@@ -112,11 +113,11 @@ https80_old_empty_cancel_or_timeout_retires_before_fresh_read_submission :: proc
 			read_started = true,
 			read_done = true,
 			read_phase = .Await_Response,
-			read = {result = {err = {kind = .Cancelled}}},
+			read = {result = {err = net.Connection_Error.Cancelled}},
 		}
 
 		if timeout {
-			state.read.result.err.kind = .Timeout
+			state.read.result.err = net.TCP_Recv_Error.Timeout
 		}
 
 		task := Connection_Task {
@@ -175,7 +176,7 @@ https80_transport_deadlines_reject_foreign_epochs_before_consuming_completions :
 		testing.expect(t, state.read_started && state.read_done && !state.read_retarget)
 		testing.expect(t, state.write_started && state.write_done)
 		testing.expect_value(t, state.input_at, 0)
-		testing.expect_value(t, state.error.kind, .None)
+		testing.expect_value(t, state.error, nil)
 		testing.expect_value(t, data[0], u8(0))
 	}
 
@@ -209,25 +210,25 @@ https80_transport_deadlines_reject_foreign_epochs_before_consuming_completions :
 @(test)
 https80_handshake_callback_preserves_first_failure_and_retains_new_protocol_error :: proc(t: ^testing.T) {
 	state := TLS_State {
-		error = {kind = .Cancelled},
+		error = net.Connection_Error.Cancelled,
 	}
 
 	op := tls.Server_Async_Handshake_Operation {
 		user_data = &state,
-		err = {kind = .Closed},
+		err = net.Connection_Error.Closed,
 	}
 
 	tls_handshake_done(&op)
 	testing.expect(t, state.handshake_done)
-	testing.expect_value(t, state.error.kind, .Cancelled)
+	testing.expect_value(t, state.error, net.Network_Error(net.Connection_Error.Cancelled))
 	state = {}
 	op = {
 		user_data = &state,
-		err = {kind = .Protocol_Failed},
+		err = net.Connection_Error.Protocol_Failed,
 		result = {kind = .Handshake, engine = .Finished_Failed},
 	}
 
 	tls_handshake_done(&op)
 	testing.expect(t, state.handshake_done)
-	testing.expect_value(t, state.error.kind, .Protocol_Failed)
+	testing.expect_value(t, state.error, net.Network_Error(net.Connection_Error.Protocol_Failed))
 }

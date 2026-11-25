@@ -2,13 +2,13 @@ package saba_core
 
 import surf "shared:surf"
 import "core:crypto"
-import "core:crypto/tls"
-import tlscredentials "core:crypto/tls/credentials"
-import credential_store "core:crypto/tls/credentials/store"
+import "shared:async/tls"
+import tlscredentials "shared:async/tls/credentials"
+import credential_store "shared:async/tls/credentials/store"
 import "core:fmt"
 import "core:net"
-import "core:net/quic"
-import http3 "shared:http/v3"
+import "shared:async/quic"
+import http3 "shared:async/http/v3"
 import "core:testing"
 import "core:thread"
 import "core:time"
@@ -98,7 +98,7 @@ http3_retry_normal_serve_uses_explicit_store_before_dispatch :: proc(t: ^testing
 	url_buffer: [96]u8
 	url := fmt.bprintf(url_buffer[:], "https://127.0.0.1:%d/retry", endpoint.port)
 	roots: tls.Root_Pool
-	assert(tls.root_pool_parse(&roots, #load("../../tests/testdata/tls/localhost.pem")).kind == .None)
+	assert(tls.root_pool_parse(&roots, #load("../../tests/testdata/tls/localhost.pem")) == nil)
 	defer tls.root_pool_destroy(&roots)
 	native := http3.client_exchange_request(
 		endpoint, "127.0.0.1", {method = "GET", target = "/retry", authority = "127.0.0.1"},

@@ -1,10 +1,10 @@
 package main
 import server "shared:saba"
-import credentials "core:crypto/tls/credentials"
-import store "core:crypto/tls/credentials/store"
+import credentials "shared:async/tls/credentials"
+import store "shared:async/tls/credentials/store"
 import "core:fmt"
 import "core:mem"
-import owned "core:mem/owned"
+import owned "shared:async/mem/owned"
 import "core:net"
 import "core:os"
 import "core:sync"

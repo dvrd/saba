@@ -1,8 +1,8 @@
 package http_parity_tests
 
 import server "shared:saba"
-import http "shared:http"
-import http1 "shared:http/v1"
+import http "shared:async/http"
+import http1 "shared:async/http/v1"
 import "core:testing"
 import "core:log"
 

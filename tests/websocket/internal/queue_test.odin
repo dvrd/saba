@@ -1,7 +1,7 @@
 package saba_websocket
 
 import rt "base:runtime"
-import budget "core:sync/budget"
+import budget "shared:async/sync/budget"
 import "core:testing"
 
 ws79_queue_fixture :: proc(config: Config) -> (^Session, budget.Scope) {

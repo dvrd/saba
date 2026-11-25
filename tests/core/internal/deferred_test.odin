@@ -5,7 +5,7 @@ import "core:mem"
 import "core:strings"
 import "core:testing"
 import "core:time"
-import http3 "shared:http/v3"
+import http3 "shared:async/http/v3"
 import async "shared:async"
 import signal "shared:async/signal"
 

@@ -1,9 +1,9 @@
 package saba_offload_test
 
 import receipts "../../testdata/ui_store"
-import "core:crypto/tls"
-import "core:crypto/tls/credentials"
-import store "core:crypto/tls/credentials/store"
+import "shared:async/tls"
+import "shared:async/tls/credentials"
+import store "shared:async/tls/credentials/store"
 import "core:fmt"
 import "core:mem"
 import "core:net"
@@ -14,9 +14,9 @@ import "core:testing"
 import "core:thread"
 import "core:time"
 import pool "shared:async/offload"
-import h2 "shared:http/v2"
-import "shared:http/v2/hpack"
-import h3 "shared:http/v3"
+import h2 "shared:async/http/v2"
+import "shared:async/http/v2/hpack"
+import h3 "shared:async/http/v3"
 import server "shared:saba/core"
 import adapter "shared:saba/offload"
 
@@ -99,7 +99,7 @@ progress_fixture :: proc(
 	assert(allocated.kind == .None && store.replace(identity, &credential).kind == .None)
 	defer store.destroy(&identity)
 	roots: tls.Root_Pool
-	assert(tls.root_pool_parse(&roots, cert).kind == .None)
+	assert(tls.root_pool_parse(&roots, cert) == nil)
 	defer tls.root_pool_destroy(&roots)
 
 	assert(pool.init(&state.pool, {workers = 1, capacity = 1}) == .None)
@@ -225,7 +225,7 @@ one_worker_serves_fast_h3_peer_while_offload_is_running :: proc(t: ^testing.T) {
 
 h2_send :: proc(conn: ^tls.Conn, bytes: []u8) -> bool {
 	n, error := tls.write(conn, bytes)
-	return error.kind == .None && n == len(bytes)
+	return error == nil && n == len(bytes)
 }
 
 h2_request :: proc(
@@ -268,7 +268,7 @@ h2_request :: proc(
 h2_read_exact :: proc(conn: ^tls.Conn, bytes: []u8) -> bool {
 	for at := 0; at < len(bytes); {
 		n, error := tls.read(conn, bytes[at:])
-		if error.kind != .None || n == 0 {
+		if error != nil || n == 0 {
 			return false
 		}
 		at += n
@@ -340,12 +340,12 @@ h2_progress_exchange :: proc(
 			handshake_timeout = PROGRESS_TIMEOUT,
 		},
 	)
-	if !testing.expect_value(t, dialed.kind, .None) {
+	if !testing.expect_value(t, dialed, nil) {
 		return
 	}
 	defer _ = tls.abort(&conn)
 	deadline := time.time_add(time.now(), 2 * PROGRESS_TIMEOUT)
-	assert(tls.set_deadline(&conn, deadline).kind == .None)
+	assert(tls.set_deadline(&conn, deadline) == nil)
 	if !testing.expect_value(t, tls.connection_state(&conn).negotiated_protocol, "h2") {
 		return
 	}

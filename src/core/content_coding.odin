@@ -1,11 +1,12 @@
 package saba_core
 
-import exchange "shared:http/exchange"
+import exchange "shared:async/http/exchange"
 import rt "base:runtime"
-import "core:compress/brotli"
+import "shared:async/compress/brotli"
+import incremental "shared:async/compress/step"
 import "core:compress/deflate"
 import "core:mem"
-import owned "core:mem/owned"
+import owned "shared:async/mem/owned"
 import "core:strings"
 
 // Identity is always acceptable. Gzip (x-gzip is an alias) and Brotli (br) are the
@@ -59,7 +60,7 @@ encode_smaller :: proc(coding: Content_Coding, src: []u8, level: brotli.Level, a
 		encoded, error = packed[:], brotli_error != nil
 	case .Gzip:
 		packed: [dynamic]u8
-		gzip_error := deflate.deflate_gzip(&packed, src, GZIP_PREPARED_LEVEL, scratch)
+		gzip_error := deflate.compress_gzip(&packed, src, GZIP_PREPARED_LEVEL, allocator = scratch)
 		encoded, error = packed[:], gzip_error != nil
 	case .Identity:
 		return nil
@@ -89,7 +90,7 @@ brotli_compress :: proc(src: []u8, allocator: mem.Allocator) -> []u8 {
 gzip_compress :: proc(src: []u8, allocator: mem.Allocator) -> []u8 {
 	// Scratch is heap-owned so a request arena, which cannot free individuals, is
 	// only charged the exact encoded body.
-	bound := deflate.deflate_gzip_bound(len(src))
+	bound := deflate.compress_gzip_bound(len(src))
 	scratch := rt.heap_allocator()
 
 	if bound <= 0 || bound > GZIP_MAX_OUTPUT || allocator.procedure == nil {
@@ -112,7 +113,7 @@ gzip_compress :: proc(src: []u8, allocator: mem.Allocator) -> []u8 {
 
 	defer delete(staged, scratch)
 
-	written, error := deflate.deflate_gzip(state, staged, src, GZIP_DYNAMIC_LEVEL)
+	written, error := deflate.compress_gzip(state, staged, src, GZIP_DYNAMIC_LEVEL)
 
 	if error != nil || written <= 0 || written >= len(src) {
 		return nil
@@ -447,7 +448,7 @@ coding_eligible :: proc(response: Response, plain: int) -> bool {
 		return false
 	}
 
-	if plain < GZIP_MIN_BYTES || plain > GZIP_MAX_INPUT || deflate.deflate_stream_bound(plain) > GZIP_MAX_OUTPUT {
+	if plain < GZIP_MIN_BYTES || plain > GZIP_MAX_INPUT || deflate.compress_gzip_bound(plain) > GZIP_MAX_OUTPUT {
 		return false
 	}
 
@@ -532,7 +533,7 @@ Coding_Stream :: struct {
 	side:                           exchange.Exchange,
 	coding:                         Content_Coding,
 	encoder:                        struct #raw_union {
-		gzip:   deflate.Deflate_Stream,
+		gzip:   incremental.Deflate_Encoder,
 		brotli: brotli.Stream_Encoder,
 	},
 	held:                           []u8,
@@ -547,6 +548,9 @@ coding_stream_free :: proc(state: ^Coding_Stream) {
 	}
 	exchange.destroy(&state.side)
 	delete(state.wire, state.allocator)
+	if state.coding == .Gzip {
+		incremental.deflate_encoder_destroy(&state.encoder.gzip)
+	}
 	free(state, state.allocator)
 }
 
@@ -570,7 +574,7 @@ coding_encoder_pull :: proc(state: ^Coding_Stream, dst: []u8) -> int {
 		return brotli.stream_pull(&state.encoder.brotli, dst)
 	}
 
-	return deflate.deflate_stream_pull(&state.encoder.gzip, dst)
+	return incremental.deflate_encoder_pull(&state.encoder.gzip, dst)
 }
 
 coding_encoder_write :: proc(state: ^Coding_Stream, src: []u8) -> int {
@@ -578,14 +582,15 @@ coding_encoder_write :: proc(state: ^Coding_Stream, src: []u8) -> int {
 		return brotli.stream_write(&state.encoder.brotli, src)
 	}
 
-	return deflate.deflate_stream_write(&state.encoder.gzip, src)
+	return incremental.deflate_encoder_write(&state.encoder.gzip, src)
 }
 
 coding_encoder_finish :: proc(state: ^Coding_Stream) {
 	if state.coding == .Brotli {
 		brotli.stream_finish(&state.encoder.brotli)
 	} else {
-		deflate.deflate_stream_finish(&state.encoder.gzip)
+		// False while output waits to be pulled: the polling loop pulls and asks again.
+		_ = incremental.deflate_encoder_finish(&state.encoder.gzip)
 	}
 }
 
@@ -602,7 +607,8 @@ coding_encoder_overflow :: proc(state: ^Coding_Stream) -> bool {
 		return state.encoder.brotli.overflow
 	}
 
-	return state.encoder.gzip.overflow
+	// An encoder that failed for another reason can make no more progress either.
+	return state.encoder.gzip.overflow || incremental.deflate_encoder_error(&state.encoder.gzip) != nil
 }
 
 // A write that took nothing is a stall only when pulling cannot help: the output
@@ -616,7 +622,7 @@ coding_encoder_stalled :: proc(state: ^Coding_Stream) -> bool {
 		return state.encoder.brotli.out_len == state.encoder.brotli.out_off
 	}
 
-	return deflate.deflate_stream_pending(&state.encoder.gzip) == 0
+	return incremental.deflate_encoder_pending(&state.encoder.gzip) == 0
 }
 
 coding_fail :: proc(state: ^Coding_Stream) -> Stream_Step {
@@ -766,13 +772,17 @@ coding_stream_attach :: proc(request: ^Request, response: ^Response, coding: Con
 
 	if coding == .Brotli {
 		brotli.stream_reset(&state.encoder.brotli, GZIP_MAX_OUTPUT)
-	} else {
-		deflate.deflate_stream_reset(&state.encoder.gzip, .Gzip, GZIP_DYNAMIC_LEVEL, GZIP_MAX_OUTPUT)
+	} else if incremental.deflate_encoder_init(&state.encoder.gzip, .Gzip, GZIP_DYNAMIC_LEVEL, GZIP_MAX_OUTPUT, allocator) != nil {
+		free(state, allocator)
+		return false
 	}
 
 	wire, wire_error := make([]u8, chunk_cap, allocator)
 
 	if wire_error != nil {
+		if coding == .Gzip {
+			incremental.deflate_encoder_destroy(&state.encoder.gzip)
+		}
 		free(state, allocator)
 		return false
 	}

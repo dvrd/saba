@@ -4,18 +4,18 @@ import "core:log"
 import "core:mem"
 import "core:net"
 import "core:os"
-import "core:crypto/tls"
+import "shared:async/tls"
 import "core:sys/posix"
 import "core:time"
 import rt "base:runtime"
-import budget "core:sync/budget"
+import budget "shared:async/sync/budget"
 import "core:sync"
 import async "shared:async"
-import store "core:crypto/tls/credentials/store"
+import store "shared:async/tls/credentials/store"
 import bridge "shared:async/connection"
 import "core:strings"
-import http "shared:http"
-import http3 "shared:http/v3"
+import http "shared:async/http"
+import http3 "shared:async/http/v3"
 
 Connection :: struct {
 	_task:          ^Connection_Task,
@@ -706,8 +706,8 @@ TLS_Event :: struct {
 	handshake_complete:                               bool,
 	peer_identity:                                    tls.Peer_Identity,
 	resumed:                                          bool,
-	error, close_error:                               net.Connection_Error,
-	failure:                                          tls.Server_Async_Failure,
+	error, close_error:                               net.Network_Error,
+	failure:                                          tls.Error,
 	negotiated_protocol:                              string,
 	stats:                                            tls.Server_Async_Stats,
 	callbacks, write_waits, transport_partial_writes: u64,
@@ -732,7 +732,7 @@ TLS_State :: struct {
 	protocol_len:                                            int,
 	negotiated:                                              bool,
 	input_at:                                                int,
-	error:                                                   net.Connection_Error,
+	error:                                                   net.Network_Error,
 	handshake_deadline:                                      async.Deadline,
 }
 
@@ -796,7 +796,7 @@ tls_begin :: proc(task: ^Connection_Task) -> bool {
 		   settings,
 		   allocator,
 	   ) !=
-	   .None {
+	   nil {
 		return false
 	}
 
@@ -829,18 +829,21 @@ tls_begin :: proc(task: ^Connection_Task) -> bool {
 	if bridge.set_request_budget(&state.executor, state.handshake_deadline).kind != .None {
 		return false
 	}
-	state.error = tls.server_async_handshake(&state.owner, &state.handshake, bridge.wall_budget(&state.executor))
+	// A handshake that could not be started; why is in the TLS event's failure.
+	if tls.server_async_handshake(&state.owner, &state.handshake, bridge.wall_budget(&state.executor)) != nil {
+		state.error = net.Connection_Error.Invalid_Operation
+	}
 
-	return state.error.kind == .None
+	return state.error == nil
 }
 
 tls_handshake_done :: proc(op: ^tls.Server_Async_Handshake_Operation) {
 	state := cast(^TLS_State)op.user_data
 	state.handshake_done = true
-	if state.error.kind == .None {
+	if state.error == nil {
 		state.error = op.err
 	}
-	if state.error.kind == .None {
+	if state.error == nil {
 		state.error = bridge.budget_error(&state.executor)
 	}
 }
@@ -853,7 +856,7 @@ tls_write_done :: proc(op: ^net.Async_Operation) {
 tls_close_done :: proc(op: ^net.Async_Operation) {
 	state := cast(^TLS_State)op.user_data
 	state.close_done = true
-	if state.error.kind == .None && op.result.err.kind != .None {
+	if state.error == nil && op.result.err != nil {
 		state.error = op.result.err
 	}
 }
@@ -894,18 +897,16 @@ tls_start_close :: proc(task: ^Connection_Task, abort: bool) {
 	state.closing = true
 
 	if abort {
-		if state.error.kind == .None {
-			state.error = {
-				kind = .Cancelled,
-			}
+		if state.error == nil {
+			state.error = net.Connection_Error.Cancelled
 		}
 
-		tls.server_async_cancel_handshake(&state.owner)
+		_ = tls.server_async_cancel_handshake(&state.owner)
 	}
 
 	error := net.async_close(tls.server_async_connection(&state.owner), &state.close)
 
-	if error.kind != .None {
+	if error != nil {
 		state.error = error
 		// Core's stable owner accepts exactly one close after successful init.
 		// A rejection is an invariant failure; never free pending TLS callbacks.
@@ -937,7 +938,7 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 	}
 
 	if !state.closing && state.handshake_done && !state.ready {
-		if state.error.kind != .None {
+		if state.error != nil {
 			tls_event(task, .Handshake)
 			tls_start_close(task, false)
 		} else if bridge.set_request_budget(&state.executor, {}).kind == .None {
@@ -1017,21 +1018,33 @@ begin_http_headers :: proc(task: ^Connection_Task) {
 	task.phase = .Headers
 }
 
-tls_translate :: proc(error: net.Connection_Error) -> async.Error {
-	#partial switch error.kind {
-	case .None:
+tls_translate :: proc(error: net.Network_Error) -> async.Error {
+	if error == nil {
 		return {}
-	case .Timeout:
-		return {kind = .Timeout}
-	case .Cancelled:
-		return {kind = .Cancelled}
-	case .Peer_Closed:
-		return {kind = .Peer_Closed}
-	case .Closed:
-		return {kind = .Closed}
-	case:
-		return {kind = .Network_Error}
 	}
+
+	if tls_timed_out(error) {
+		return {kind = .Timeout}
+	}
+
+	#partial switch cause in error {
+	case net.Connection_Error:
+		#partial switch cause {
+		case .Cancelled:
+			return {kind = .Cancelled}
+		case .Peer_Closed:
+			return {kind = .Peer_Closed}
+		case .Closed:
+			return {kind = .Closed}
+		}
+	}
+
+	return {kind = .Network_Error}
+}
+
+// A deadline that passed is the socket's own timeout, for a read or a write.
+tls_timed_out :: proc(error: net.Network_Error) -> bool {
+	return error == net.TCP_Recv_Error.Timeout || error == net.TCP_Send_Error.Timeout
 }
 
 tls_deadline_valid :: proc(task: ^Connection_Task, deadline: async.Deadline) -> bool {
@@ -1043,13 +1056,14 @@ tls_deadline_valid :: proc(task: ^Connection_Task, deadline: async.Deadline) -> 
 	return deadline.epoch == now.epoch
 }
 
-tls_wall_deadline :: proc(task: ^Connection_Task, deadline: async.Deadline) -> time.Time {
+// The connection takes its deadline as a monotonic tick.
+tls_tick_deadline :: proc(task: ^Connection_Task, deadline: async.Deadline) -> time.Tick {
 	if deadline.epoch == 0 {
 		return {}
 	}
 	now := async.deadline_after(&task.runtime.executor, 0)
 
-	return time.time_add(time.now(), time.Duration(max(i64(0), deadline.at - now.at)))
+	return time.tick_add(time.tick_now(), time.Duration(max(i64(0), deadline.at - now.at)))
 }
 
 // A pending plaintext read uses stable staging. Retire its old phase deadline
@@ -1078,7 +1092,7 @@ transport_read :: proc(task: ^Connection_Task, destination: []u8, deadline: asyn
 	}
 
 	if state.read_done && state.read_retarget {
-		if state.read.result.err.kind == .Cancelled || state.read.result.err.kind == .Timeout {
+		if state.read.result.err == net.Connection_Error.Cancelled || tls_timed_out(state.read.result.err) {
 			state.read.result.err = {}
 			if state.read.result.count == 0 {
 				state.read_started, state.read_done = false, false
@@ -1096,7 +1110,7 @@ transport_read :: proc(task: ^Connection_Task, destination: []u8, deadline: asyn
 			return count, {}
 		}
 		state.read_started, state.read_done, state.input_at = false, false, 0
-		if state.read.result.err.kind != .None {
+		if state.read.result.err != nil {
 			state.error = state.read.result.err
 		}
 		return count, tls_translate(state.read.result.err)
@@ -1109,10 +1123,10 @@ transport_read :: proc(task: ^Connection_Task, destination: []u8, deadline: asyn
 			tls.server_async_connection(&state.owner),
 			&state.read,
 			state.input[:min(len(destination), len(state.input))],
-			tls_wall_deadline(task, deadline),
+			tls_tick_deadline(task, deadline),
 		)
 
-		if error.kind != .None {
+		if error != nil {
 			state.read_started = false
 			return 0, tls_translate(error)
 		}
@@ -1132,7 +1146,7 @@ transport_write :: proc(task: ^Connection_Task, source: []u8, deadline: async.De
 
 	if state.write_done {
 		state.write_started, state.write_done = false, false
-		if state.write.result.err.kind != .None {
+		if state.write.result.err != nil {
 			state.error = state.write.result.err
 		}
 		return state.write.result.count, tls_translate(state.write.result.err)
@@ -1144,10 +1158,10 @@ transport_write :: proc(task: ^Connection_Task, source: []u8, deadline: async.De
 			tls.server_async_connection(&state.owner),
 			&state.write,
 			source,
-			tls_wall_deadline(task, deadline),
+			tls_tick_deadline(task, deadline),
 		)
 
-		if error.kind != .None {
+		if error != nil {
 			state.write_started = false
 			return 0, tls_translate(error)
 		}

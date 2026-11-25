@@ -1,6 +1,6 @@
 package saba_core
-import http3 "shared:http/v3"
-import credential_store "core:crypto/tls/credentials/store"
+import http3 "shared:async/http/v3"
+import credential_store "shared:async/tls/credentials/store"
 import "core:log"
 import "core:net"
 import "core:testing"

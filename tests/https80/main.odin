@@ -3,10 +3,10 @@ package main
 import server "shared:saba/core"
 import application "shared:saba/application"
 import facade "shared:saba"
-import credentials "core:crypto/tls/credentials"
-import store "core:crypto/tls/credentials/store"
+import credentials "shared:async/tls/credentials"
+import store "shared:async/tls/credentials/store"
 import signal "shared:async/signal"
-import owned "core:mem/owned"
+import owned "shared:async/mem/owned"
 import rt "base:runtime"
 import "core:fmt"
 import "core:log"
@@ -154,7 +154,7 @@ tls_event :: proc(data: rawptr, event: ^server.TLS_Event) {
 		"TLS %v %v %v %d %d %d %d\n",
 		event.kind,
 		event.handshake_complete,
-		event.error.kind,
+		event.error,
 		event.stats.live_bytes,
 		event.callbacks,
 		event.write_waits,

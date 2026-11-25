@@ -2,15 +2,15 @@ package saba_core
 
 import async "shared:async"
 import rt "base:runtime"
-import "core:crypto/tls/credentials"
+import "shared:async/tls/credentials"
 import "core:encoding/hex"
 import "core:fmt"
 import "core:mem"
-import charged "core:mem/budget"
-import credential_store "core:crypto/tls/credentials/store"
+import charged "shared:async/mem/budget"
+import credential_store "shared:async/tls/credentials/store"
 import "core:net"
 import "core:sync"
-import budget "core:sync/budget"
+import budget "shared:async/sync/budget"
 import "core:testing"
 import "core:thread"
 import "core:time"
@@ -151,7 +151,7 @@ https80_lifecycle_run :: proc(
 	if hello {
 		hello_hex := HTTPS80_TEST_CLIENT_HELLO
 		message, decoded := hex.decode(transmute([]u8)hello_hex)
-		assert(decoded)
+		assert(decoded == nil)
 		wire: [1024]u8
 		wire[0], wire[1], wire[2] = 22, 3, 3
 		wire[3], wire[4] = u8(len(message) >> 8), u8(len(message))

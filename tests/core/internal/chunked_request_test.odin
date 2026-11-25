@@ -1,6 +1,6 @@
 package saba_core
 
-import http "shared:http"
+import http "shared:async/http"
 import "core:mem"
 import "core:testing"
 

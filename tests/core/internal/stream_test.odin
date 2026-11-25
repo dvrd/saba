@@ -1,8 +1,8 @@
 package saba_core
 
-import exchange "shared:http/exchange"
+import exchange "shared:async/http/exchange"
 import "core:mem"
-import owned "core:mem/owned"
+import owned "shared:async/mem/owned"
 import "core:strings"
 import "core:testing"
 import "core:time"

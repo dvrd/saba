@@ -1,11 +1,12 @@
 package saba_core
 
-import "core:compress/brotli"
+import "shared:async/compress/brotli"
+import incremental "shared:async/compress/step"
 import "core:compress/deflate"
 import "core:bytes"
 import "core:fmt"
 import "core:mem"
-import owned "core:mem/owned"
+import owned "shared:async/mem/owned"
 import "core:net"
 import "core:strings"
 import "core:testing"
@@ -39,41 +40,42 @@ coding_field :: proc(headers: []Header, name: string) -> (string, bool) {
 coding_decode :: proc(t: ^testing.T, encoded, expected: []u8) {
 	output: [dynamic]u8
 	defer delete(output)
-	error := deflate.inflate_gzip(&output, encoded, len(expected))
+	error := deflate.decompress_gzip(&output, encoded, options = {max_output_size = len(expected)})
 	testing.expect_value(t, error, nil)
 	testing.expect(t, string(output[:]) == string(expected))
 }
 
 @(test)
 gzip_round_trip_and_short_writes_match_limits :: proc(t: ^testing.T) {
-	testing.expect(t, deflate.deflate_stream_bound(GZIP_MAX_INPUT) <= GZIP_MAX_OUTPUT)
+	testing.expect(t, deflate.compress_gzip_bound(GZIP_MAX_INPUT) <= GZIP_MAX_OUTPUT)
 	plain := coding_repeat(4096, context.allocator)
 	defer delete(plain)
-	encoder, alloc_error := new(deflate.Deflate_Stream)
+	encoder, alloc_error := new(incremental.Deflate_Encoder)
 	testing.expect(t, alloc_error == nil && encoder != nil)
 	defer free(encoder)
-	deflate.deflate_stream_reset(encoder, .Gzip, GZIP_DYNAMIC_LEVEL, GZIP_MAX_OUTPUT)
-	encoded, encode_error := make([]u8, deflate.deflate_stream_bound(len(plain)))
+	testing.expect_value(t, incremental.deflate_encoder_init(encoder, .Gzip, GZIP_DYNAMIC_LEVEL, GZIP_MAX_OUTPUT), nil)
+	defer incremental.deflate_encoder_destroy(encoder)
+	encoded, encode_error := make([]u8, deflate.compress_gzip_bound(len(plain)))
 	testing.expect(t, encode_error == nil)
 	defer delete(encoded)
 	offset, written := 0, 0
 
 	for offset < len(plain) {
 		step := min(5, len(plain) - offset)
-		count := deflate.deflate_stream_write(encoder, plain[offset:offset + step])
+		count := incremental.deflate_encoder_write(encoder, plain[offset:offset + step])
 		testing.expect(t, count > 0 && count <= step)
 		offset += count
-		written += deflate.deflate_stream_pull(encoder, encoded[written:])
+		written += incremental.deflate_encoder_pull(encoder, encoded[written:])
 	}
 
-	for !deflate.deflate_stream_finish(encoder) {
-		count := deflate.deflate_stream_pull(encoder, encoded[written:])
+	for !incremental.deflate_encoder_finish(encoder) {
+		count := incremental.deflate_encoder_pull(encoder, encoded[written:])
 		testing.expect(t, count > 0)
 		written += count
 	}
 
-	for deflate.deflate_stream_pending(encoder) > 0 {
-		written += deflate.deflate_stream_pull(encoder, encoded[written:])
+	for incremental.deflate_encoder_pending(encoder) > 0 {
+		written += incremental.deflate_encoder_pull(encoder, encoded[written:])
 	}
 
 	testing.expect(t, encoder.finished && !encoder.overflow && written > 0 && written < len(plain))

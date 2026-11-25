@@ -1,20 +1,20 @@
 package saba_core
 
-import http3 "shared:http/v3"
-import http "shared:http"
-import exchange "shared:http/exchange"
+import http3 "shared:async/http/v3"
+import http "shared:async/http"
+import exchange "shared:async/http/exchange"
 import rt "base:runtime"
 import "core:mem"
-import charged "core:mem/budget"
-import budget "core:sync/budget"
+import charged "shared:async/mem/budget"
+import budget "shared:async/sync/budget"
 import "core:net"
-import "core:crypto/tls"
-import "core:net/quic"
+import "shared:async/tls"
+import "shared:async/quic"
 import "core:strings"
 import "core:strconv"
 import "core:sync"
 import "core:time"
-import credential_store "core:crypto/tls/credentials/store"
+import credential_store "shared:async/tls/credentials/store"
 import async "shared:async"
 
 // Optional UDP listener on the ordinary server runtime. Credentials are borrowed

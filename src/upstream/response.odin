@@ -2,12 +2,13 @@ package saba_upstream
 
 import server "../core"
 import "core:mem"
+import "core:net"
 import "core:sync"
-import budget "core:sync/budget"
+import budget "shared:async/sync/budget"
 import "core:time"
 import async "shared:async"
 import signal "shared:async/signal"
-import http "shared:http"
+import http "shared:async/http"
 import surf "shared:surf"
 import client "shared:surf/async"
 
@@ -192,7 +193,8 @@ response :: proc(
 
 @(private)
 failure_status :: proc(error: client.Client_Error) -> server.HTTP_Status {
-	if error.http.kind == .Deadline_Failed || error.http.transport.kind == .Timeout {
+	transport := error.http.transport
+	if error.http.kind == .Deadline_Failed || transport == net.TCP_Recv_Error.Timeout || transport == net.TCP_Send_Error.Timeout {
 		return .Gateway_Timeout
 	}
 	if error.kind == .Closed ||

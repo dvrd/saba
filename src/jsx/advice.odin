@@ -107,7 +107,7 @@ advise_child :: proc(a: ^Snapshot_Advice, props: ^map[string]string, child: k.JS
 				continue
 			}
 			if value, present := attr.value.?; present {
-				if hole, ok := value^.(^k.JSXExpressionContainer); ok {
+				if hole, held := value^.(^k.JSXExpressionContainer); held {
 					advise_child(a, props, hole)
 				}
 			}

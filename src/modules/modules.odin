@@ -34,7 +34,7 @@ serve_modules :: proc(
 	if response_error || module_excluded(exclude, relative) {
 		return not_found(request), true
 	}
-	root, root_error := filepath.abs(directory, request.allocator)
+	root, root_error := root_directory(directory, request.allocator)
 	if root_error != nil {
 		log.errorf("Could not resolve module directory %s: %v", directory, root_error)
 		return Response{status = .Internal_Server_Error}, true
@@ -335,7 +335,7 @@ prepare_module_mounts :: proc(
 			return nil, false
 		}
 
-		root, error := filepath.abs(mount.directory, allocator)
+		root, error := root_directory(mount.directory, allocator)
 
 		if error != nil {
 			log.errorf("Could not resolve module directory %s: %v", mount.directory, error)

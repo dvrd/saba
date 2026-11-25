@@ -2,6 +2,7 @@ package saba_core
 
 import "core:log"
 import "core:strings"
+import "core:sync"
 import "core:testing"
 
 @(test)
@@ -55,4 +56,9 @@ server_with_a_small_backlog_serves_requests :: proc(t: ^testing.T) {
 		defer delete(wire)
 		testing.expect(t, strings.has_prefix(string(wire[:]), "HTTP/1.1 200"))
 	}
+	// A later Unsupported_Socket is a pending connection's error, not the listener's.
+	sync.lock(&fixture.control._mutex)
+	accepted := fixture.control._server != nil && fixture.control._server.accepted
+	sync.unlock(&fixture.control._mutex)
+	testing.expect(t, accepted)
 }

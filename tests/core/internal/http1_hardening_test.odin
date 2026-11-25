@@ -761,17 +761,25 @@ accept_errors_are_classified_and_logged_at_a_bounded_rate :: proc(t: ^testing.T)
 	context.logger = log.nil_logger()
 
 	for item in ([]struct {
-			error:  async.Error,
-			action: Accept_Action,
+			error:            async.Error,
+			before, accepted: Accept_Action,
 		} {
-			{{kind = .Network_Error, network_cause = net.Accept_Error.Aborted}, .Retry},
-			{{kind = .Network_Error, network_cause = net.Accept_Error.Insufficient_Resources}, .Backoff},
-			{{kind = .Network_Error, network_cause = net.Accept_Error.Unknown}, .Backoff},
-			{{kind = .Network_Error, network_cause = net.Accept_Error.Not_Listening}, .Fatal},
-			{{kind = .Network_Error, network_cause = net.Accept_Error.Invalid_Argument}, .Fatal},
-			{{kind = .System_Error}, .Fatal},
+			{{kind = .Network_Error, network_cause = net.Accept_Error.Aborted}, .Retry, .Retry},
+			// Linux: a pending connection's ENETDOWN, ENETUNREACH, EHOSTDOWN,
+			// EHOSTUNREACH or ENONET. The listener is fine.
+			{{kind = .Network_Error, network_cause = net.Accept_Error.Network_Unreachable}, .Retry, .Retry},
+			// Linux: a pending connection's EOPNOTSUPP once the listener has
+			// proven it is a stream socket; before that, a listener of the wrong type.
+			{{kind = .Network_Error, network_cause = net.Accept_Error.Unsupported_Socket}, .Fatal, .Retry},
+			{{kind = .Network_Error, network_cause = net.Accept_Error.Insufficient_Resources}, .Backoff, .Backoff},
+			{{kind = .Network_Error, network_cause = net.Accept_Error.Timeout}, .Backoff, .Backoff},
+			{{kind = .Network_Error, network_cause = net.Accept_Error.Unknown}, .Backoff, .Backoff},
+			{{kind = .Network_Error, network_cause = net.Accept_Error.Not_Listening}, .Fatal, .Fatal},
+			{{kind = .Network_Error, network_cause = net.Accept_Error.Invalid_Argument}, .Fatal, .Fatal},
+			{{kind = .System_Error}, .Fatal, .Fatal},
 		}) {
-		testing.expect_value(t, accept_error_action(item.error), item.action)
+		testing.expectf(t, accept_error_action(item.error, false) == item.before, "%v before an accept", item.error)
+		testing.expectf(t, accept_error_action(item.error, true) == item.accepted, "%v after an accept", item.error)
 	}
 
 	runtime: Server_Runtime

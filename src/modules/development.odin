@@ -27,7 +27,7 @@ serve_development_modules :: proc(
 	bool,
 ) {
 	for mount in mounts {
-		relative, invalid, matched := module_request(request, mount.mount.prefix)
+		relative, invalid, matched := module_request(request, mount.mount.prefix, true)
 		if !matched {
 			continue
 		}

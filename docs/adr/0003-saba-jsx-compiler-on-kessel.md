@@ -4,7 +4,7 @@ status: accepted
 
 # Saba's JSX compiler is built on Kessel's syntax tree
 
-Saba's JSX transform was a self-contained lexical scanner of about 900 lines with no dependencies. The current compiler parses each module with Kessel. Saba uses that tree for reactive expression emission, SVG, spread children and static extraction. The transform can return a version 3 source map structure to an Odin caller that asks for one, but no served module or build generation carries a source map or a `sourceMappingURL`. Delivering source maps and general linting remain future work. [Mapping](../../src/jsx/map.odin)
+Saba's JSX transform was a self-contained lexical scanner of about 900 lines with no dependencies. The current compiler parses each module with Kessel. Saba uses that tree for reactive expression emission, SVG, spread children and static extraction. The transform can return a version 3 source map structure to an Odin caller that asks for one. In development, a module compiled from JSX ends with a `//# sourceMappingURL` comment naming `<module>.js.map` beside it, and that route compiles the source again to answer with the map. The map names its file and source relative to its own URL, so no filesystem path reaches the browser, and embeds the JSX source because the module route never serves `.jsx`. Production never serves or advertises a map, and compiled page templates and their build generations have no maps yet. General linting remains future work. [Mapping](../../src/jsx/map.odin) · [Development map route](../../src/modules/modules.odin)
 
 ## Considered options
 

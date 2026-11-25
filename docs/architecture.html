@@ -1986,13 +1986,13 @@ const compilerLens = (() => {
     surf: {
       title: "Surf client", region: "Server · optional adapter",
       design: "An application can fetch inbox data from another service. Surf owns the outbound HTTP exchange. Saba resumes the downstream exchange when the response becomes available.",
-      current: "The buffered Surf adapter uses a shared completion dispatcher. A downstream disconnect cancels its upstream request, and the job stays charged until physical retirement.",
+      current: "The buffered Surf adapter builds its client from a configuration and uses a shared completion dispatcher. By default the client refuses non-public upstream addresses, and a refused upstream answers 502. An expired request answers 504. A downstream disconnect cancels its upstream request, and the job stays charged until physical retirement.",
       links: ["network", "distribution", "surfSource"]
     },
     pool: {
       title: "Blocking worker pool", region: "Server · optional adapter",
       design: "A handler can hand blocking work to a bounded pool. The job owns its inputs across the wait. A disconnect releases the request’s interest while a running job may finish later.",
-      current: "Development module reads and JSX transforms share a pool with two workers and capacity for sixteen outstanding jobs. Admission pressure can return HTTP 503.",
+      current: "Development module reads and JSX transforms share a pool with two workers and capacity for sixteen outstanding jobs. Admission pressure can return HTTP 503. A job that runs out of time answers 504.",
       links: ["network", "offloadSource", "applicationSource"]
     },
     browser: {
@@ -2579,50 +2579,50 @@ const tracePrograms = (() => {
     "open.h1": program(
       "Saba server", "Repository source", "src/core/server.odin",
       "../src/core/server.odin", [
-        [730, "dispatch_request :: proc(task: ^Connection_Task) -> Response {"],
-        [731, "  if !begin_request_context(task) {"],
-        [732, "    return Response{status = .Internal_Server_Error, close_connection = true}"],
-        [733, "  }"],
-        [734, "  return call_request_handler(task, task.runtime.config.handler, task.runtime.config.handler_data)"],
-        [735, "}"]
+        [998, "dispatch_request :: proc(task: ^Connection_Task) -> Response {"],
+        [999, "  if !begin_request_context(task) {"],
+        [1000, "    return Response{status = .Internal_Server_Error, close_connection = true}"],
+        [1001, "  }"],
+        [1002, "  return call_request_handler(task, task.runtime.config.handler, task.runtime.config.handler_data)"],
+        [1003, "}"]
       ], [
-        [0, 730, "Enter shared dispatch with the connection task for this completed HTTP/1.1 request."],
-        [0.34, 731, "Ensure the request has a cancellation context. If this fails, dispatch returns a server error."],
-        [0.78, 734, "Call the configured handler through the shared wrapper and return its response."]
+        [0, 998, "Enter shared dispatch with the connection task for this completed HTTP/1.1 request."],
+        [0.34, 999, "Ensure the request has a cancellation context. If this fails, dispatch returns a server error."],
+        [0.78, 1002, "Call the configured handler through the shared wrapper and return its response."]
       ]
     ),
     "open.h2": program(
       "Saba server", "Repository source", "src/core/http2.odin",
       "../src/core/http2.odin", [
-        [1437, "task.request.body = task.request.body[:request.body_len]"],
-        [1438, "request.response_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.response)"],
-        [1439, "response := dispatch_request(task)"],
-        [1440, ""],
-        [1441, "if !h2_queue_response(task, response) {"],
-        [1442, "  request.failed = true"]
+        [1614, "task.request.body = task.request.body[:request.body_len]"],
+        [1615, "request.response_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.response)"],
+        [1616, "response := dispatch_request(task)"],
+        [1617, ""],
+        [1618, "if !h2_queue_response(task, response) {"],
+        [1619, "  request.failed = true"]
       ], [
-        [0, 1437, "Trim this stream’s request body to the number of bytes received. For this GET, the body is empty."],
-        [0.34, 1438, "Set this stream’s response deadline to the current time plus the configured response timeout."],
-        [0.78, 1439, "Dispatch the completed HTTP/2 request and save the response for the stream’s outgoing queue."]
+        [0, 1614, "Trim this stream’s request body to the number of bytes received. For this GET, the body is empty."],
+        [0.34, 1615, "Set this stream’s response deadline to the current time plus the configured response timeout."],
+        [0.78, 1616, "Dispatch the completed HTTP/2 request and save the response for the stream’s outgoing queue."]
       ]
     ),
     "open.h3": program(
       "Saba server", "Repository source", "src/core/http3.odin",
       "../src/core/http3.odin", [
-        [278, "state := cast(^Http3_Request)wire.user_data"],
-        [279, ""],
-        [280, "if state == nil {"],
-        [281, "  state = http3_create_request(owner, wire)"],
-        [282, "  if state == nil {"],
-        [283, "    return .Failed"],
-        [284, "  }"],
-        [285, "  wire.user_data = state"],
-        [286, "}"],
-        [313, "    response = call_request_handler(task, owner.config.handler, owner.config.handler_data)"]
+        [363, "state := cast(^Http3_Request)wire.user_data"],
+        [364, ""],
+        [365, "if state == nil {"],
+        [366, "  state = http3_create_request(owner, wire)"],
+        [367, "  if state == nil {"],
+        [368, "    return .Failed"],
+        [369, "  }"],
+        [370, "  wire.user_data = state"],
+        [371, "}"],
+        [398, "    response = call_request_handler(task, owner.config.handler, owner.config.handler_data)"]
       ], [
-        [0, 278, "Read the Saba request state attached to this HTTP/3 exchange. On the first poll, the pointer is empty."],
-        [0.34, 281, "Create the server-side request state for this new HTTP/3 exchange."],
-        [0.78, 313, "Call the configured handler for this HTTP/3 request and save the response it returns."]
+        [0, 363, "Read the Saba request state attached to this HTTP/3 exchange. On the first poll, the pointer is empty."],
+        [0.34, 366, "Create the server-side request state for this new HTTP/3 exchange."],
+        [0.78, 398, "Call the configured handler for this HTTP/3 request and save the response it returns."]
       ]
     ),
     "html": program(
@@ -2675,22 +2675,22 @@ const tracePrograms = (() => {
     "fetch": program(
       "Browser", "Repository source", "src/modules/dom.js",
       "../src/modules/dom.js", [
-        [1468, "export async function api("],
-        [1469, "  path,"],
-        [1470, "  { method = \"GET\", body, abort, messages = {} } = {},"],
-        [1471, ") {"],
-        [1472, "  const controller = new AbortController();"],
-        [1481, "  const timeout = setTimeout(() => controller.abort(), 20000);"],
-        [1484, "    const response = await fetch(path, {"],
-        [1485, "      method,"],
-        [1486, "      credentials: \"same-origin\","],
-        [1487, "      cache: \"no-store\","],
-        [1493, "      signal: controller.signal,"],
-        [1494, "    });"]
+        [1694, "export async function api("],
+        [1695, "  path,"],
+        [1696, "  { method = \"GET\", body, abort, messages = {} } = {},"],
+        [1697, ") {"],
+        [1698, "  const controller = new AbortController();"],
+        [1707, "  const timeout = setTimeout(() => controller.abort(), 20000);"],
+        [1710, "    const response = await fetch(path, {"],
+        [1711, "      method,"],
+        [1712, "      credentials: \"same-origin\","],
+        [1713, "      cache: \"no-store\","],
+        [1719, "      signal: controller.signal,"],
+        [1720, "    });"]
       ], [
-        [0, 1470, "Read the API call options. The example omits a method, so the request uses GET."],
-        [0.27, 1481, "Schedule the request controller to abort after 20 seconds."],
-        [0.52, 1484, "Start the fetch for /api/unread and suspend this helper until the browser receives the response headers."]
+        [0, 1696, "Read the API call options. The example omits a method, so the request uses GET."],
+        [0.27, 1707, "Schedule the request controller to abort after 20 seconds."],
+        [0.52, 1710, "Start the fetch for /api/unread and suspend this helper until the browser receives the response headers."]
       ]
     ),
     "lookup": program(
@@ -2711,58 +2711,58 @@ const tracePrograms = (() => {
     "defer.surf": program(
       "Saba server", "Repository source", "src/upstream/response.odin",
       "../src/upstream/response.odin", [
-        [168, "state.dispatcher, state.build, state.lease = d, build, lease"],
-        [169, "handle, cause := client.client_submit(d.client, outbound, deadline)"],
-        [170, "if cause.kind != .None {"],
-        [171, "  dispose(state)"],
-        [172, "  return {status = failure_status(cause)}"],
-        [173, "}"],
-        [174, "state.handle = handle"],
-        [175, "sync.lock(&d.mu)"],
-        [176, "slot := &d.slots[int(handle.slot) - 1]"],
-        [190, "return {deferred = {data = state, poll = poll, drop = drop, timeout = timeout}}"],
-        [285, "poll :: proc(data: rawptr, io: ^server.Deferred_IO) -> (server.Response, server.Deferred_Step) {"],
-        [289, "  if !state.complete {"],
-        [294, "    if state.wake == (signal.Signal{}) {"],
-        [296, "      state.wake, ok = signal.retain(io.wake)"],
-        [302, "    sync.unlock(&d.mu)"],
-        [303, "    return {}, .Waiting"]
+        [200, "state.dispatcher, state.build, state.lease = d, build, lease"],
+        [201, "handle, cause := client.client_submit(d.client, outbound, deadline)"],
+        [202, "if cause.kind != .None {"],
+        [203, "  dispose(state)"],
+        [204, "  return {status = failure_status(cause)}"],
+        [205, "}"],
+        [206, "state.handle = handle"],
+        [207, "sync.lock(&d.mu)"],
+        [208, "slot := &d.slots[int(handle.slot) - 1]"],
+        [222, "return {deferred = {data = state, poll = poll, drop = drop, timeout = timeout}}"],
+        [326, "poll :: proc(data: rawptr, io: ^server.Deferred_IO) -> (server.Response, server.Deferred_Step) {"],
+        [330, "  if !state.complete {"],
+        [335, "    if state.wake == (signal.Signal{}) {"],
+        [337, "      state.wake, ok = signal.retain(io.wake)"],
+        [343, "    sync.unlock(&d.mu)"],
+        [344, "    return {}, .Waiting"]
       ], [
-        [0, 168, "Keep the completion dispatcher, response builder and request lease together."],
-        [0.25, 169, "Submit outbound HTTP with a deadline. Surf can make progress on its own runtime."],
-        [0.55, 174, "Save the returned handle so this exchange can retrieve or cancel its upstream request."],
-        [0.78, 190, "Return the deferred continuation. The response owner can resume it when completion is published."],
-        [0.88, 296, "On the first owner poll, retain its wake signal for the dispatcher to use when Surf finishes."],
-        [0.96, 303, "Tell core this response is waiting. The connection worker can now run another exchange."]
+        [0, 200, "Keep the completion dispatcher, response builder and request lease together."],
+        [0.25, 201, "Submit outbound HTTP with a deadline. Surf can make progress on its own runtime."],
+        [0.55, 206, "Save the returned handle so this exchange can retrieve or cancel its upstream request."],
+        [0.78, 222, "Return the deferred continuation. The response owner can resume it when completion is published."],
+        [0.88, 337, "On the first owner poll, retain its wake signal for the dispatcher to use when Surf finishes."],
+        [0.96, 344, "Tell core this response is waiting. The connection worker can now run another exchange."]
       ]
     ),
     "defer.pool": program(
       "Saba server", "Repository source", "src/offload/response.odin",
       "../src/offload/response.odin", [
         [62, "  return {deferred = {data = state, poll = poll_result, drop = drop, timeout = timeout}}, true"],
-        [74, "start :: proc(state: ^State, io: ^server.Deferred_IO) -> pool.Error {"],
-        [86, "notice.signal = retained"],
-        [87, "notification := pool.Notification{notice, wake, drop_notice}"],
-        [88, "handle, admission := pool.submit_scoped("],
-        [89, "  state.lane,"],
-        [90, "  &state.work,"],
-        [91, "  &notification,"],
-        [92, "  server.request_deadline(io.cancellation),"],
-        [93, "  io.resources,"],
-        [94, "  state.unmanaged_bytes,"],
-        [95, ")"],
-        [102, "state.handle, state.started = handle, true"],
-        [122, "  view, error := pool.poll(state.handle)"],
-        [127, "  switch view.outcome {"],
-        [128, "  case .Pending:"],
-        [129, "    return {}, .Waiting"]
+        [89, "start :: proc(state: ^State, io: ^server.Deferred_IO) -> pool.Error {"],
+        [101, "notice.signal = retained"],
+        [102, "notification := pool.Notification{notice, wake, drop_notice}"],
+        [103, "handle, admission := pool.submit_scoped("],
+        [104, "  state.lane,"],
+        [105, "  &state.work,"],
+        [106, "  &notification,"],
+        [107, "  server.request_deadline(io.cancellation),"],
+        [108, "  io.resources,"],
+        [109, "  state.unmanaged_bytes,"],
+        [110, ")"],
+        [117, "state.handle, state.started = handle, true"],
+        [133, "  view, error := pool.poll(state.handle)"],
+        [138, "  switch view.outcome {"],
+        [139, "  case .Pending:"],
+        [140, "    return {}, .Waiting"]
       ], [
         [0, 62, "Return the deferred descriptor with its poll and drop callbacks. Core will poll it to start the job."],
-        [0.16, 86, "Store the retained wake signal in the notice for this job."],
-        [0.3, 87, "Give the pool a notification containing the notice and its wake and cleanup callbacks."],
-        [0.48, 88, "Submit bounded work with the request deadline and resource scope."],
-        [0.72, 102, "Save the admitted job handle and mark it started so a later poll uses this same job."],
-        [0.96, 129, "The job is pending. Return Waiting so the worker can run another exchange."]
+        [0.16, 101, "Store the retained wake signal in the notice for this job."],
+        [0.3, 102, "Give the pool a notification containing the notice and its wake and cleanup callbacks."],
+        [0.48, 103, "Submit bounded work with the request deadline and resource scope."],
+        [0.72, 117, "Save the admitted job handle and mark it started so a later poll uses this same job."],
+        [0.96, 140, "The job is pending. Return Waiting so the worker can run another exchange."]
       ]
     ),
     "sibling-request": program(
@@ -2789,73 +2789,73 @@ const tracePrograms = (() => {
     "resume.surf": program(
       "Saba server", "Repository source", "src/upstream/response.odin",
       "../src/upstream/response.odin", [
-        [226, "d.pending -= 1"],
-        [227, "state.complete = true"],
-        [228, "abandoned := state.abandoned"],
-        [229, "wake, _ := signal.retain(state.wake)"],
-        [230, "sync.unlock(&d.mu)"],
-        [232, "if abandoned {"],
-        [233, "  _ = client.client_release(d.client, handle)"],
-        [234, "  dispose(state)"],
-        [235, "} else {"],
-        [236, "  _ = signal.wake(wake)"],
-        [237, "}"],
-        [238, "signal.release(&wake)"],
-        [285, "poll :: proc(data: rawptr, io: ^server.Deferred_IO) -> (server.Response, server.Deferred_Step) {"],
-        [306, "  source: surf.Response"],
-        [307, "  cause := client.client_take(d.client, state.handle, &source)"],
-        [312, "  defer surf.response_destroy(&source)"],
-        [313, "  result, ok := state.build(&source, io.allocator)"],
-        [318, "  return result, .Ready"]
+        [267, "d.pending -= 1"],
+        [268, "state.complete = true"],
+        [269, "abandoned := state.abandoned"],
+        [270, "wake, _ := signal.retain(state.wake)"],
+        [271, "sync.unlock(&d.mu)"],
+        [273, "if abandoned {"],
+        [274, "  _ = client.client_release(d.client, handle)"],
+        [275, "  dispose(state)"],
+        [276, "} else {"],
+        [277, "  _ = signal.wake(wake)"],
+        [278, "}"],
+        [279, "signal.release(&wake)"],
+        [326, "poll :: proc(data: rawptr, io: ^server.Deferred_IO) -> (server.Response, server.Deferred_Step) {"],
+        [347, "  source: surf.Response"],
+        [348, "  cause := client.client_take(d.client, state.handle, &source)"],
+        [353, "  defer surf.response_destroy(&source)"],
+        [354, "  result, ok := state.build(&source, io.allocator)"],
+        [359, "  return result, .Ready"]
       ], [
-        [0, 226, "Subtract the completed upstream request from the dispatcher’s pending count."],
-        [0.2, 227, "Mark this request complete so its continuation can retrieve the result."],
-        [0.4, 229, "Retain the downstream owner’s wake signal across the notification."],
-        [0.52, 236, "Signal the downstream owner to poll its continuation again. That poll can now collect the upstream result."],
-        [0.72, 307, "On the next owner poll, take the completed HTTP response from Surf using the saved handle."],
-        [0.84, 313, "Pass the upstream response and the request allocator to the application’s response builder."],
-        [0.96, 318, "Return the built downstream response to core and mark the poll ready."]
+        [0, 267, "Subtract the completed upstream request from the dispatcher’s pending count."],
+        [0.2, 268, "Mark this request complete so its continuation can retrieve the result."],
+        [0.4, 270, "Retain the downstream owner’s wake signal across the notification."],
+        [0.52, 277, "Signal the downstream owner to poll its continuation again. That poll can now collect the upstream result."],
+        [0.72, 348, "On the next owner poll, take the completed HTTP response from Surf using the saved handle."],
+        [0.84, 354, "Pass the upstream response and the request allocator to the application’s response builder."],
+        [0.96, 359, "Return the built downstream response to core and mark the poll ready."]
       ]
     ),
     "resume.pool": program(
       "Saba server", "Repository source", "src/offload/response.odin",
       "../src/offload/response.odin", [
-        [65, "wake :: proc(data: rawptr) {"],
-        [66, "  _ = signal.wake((cast(^Notice)data).signal)"],
-        [67, "}"],
-        [107, "poll_result :: proc(data: rawptr, io: ^server.Deferred_IO) -> (server.Response, server.Deferred_Step) {"],
-        [122, "view, error := pool.poll(state.handle)"],
-        [123, "if error != .None {"],
-        [124, "  return {}, .Failed"],
-        [125, "}"],
-        [127, "switch view.outcome {"],
-        [128, "case .Pending:"],
-        [129, "  return {}, .Waiting"],
-        [130, "case .Succeeded:"],
-        [131, "  response, ok := state.build(view.data, io.allocator)"],
-        [138, "  return response, .Ready"]
+        [80, "wake :: proc(data: rawptr) {"],
+        [81, "  _ = signal.wake((cast(^Notice)data).signal)"],
+        [82, "}"],
+        [122, "poll_result :: proc(data: rawptr, io: ^server.Deferred_IO) -> (server.Response, server.Deferred_Step) {"],
+        [133, "view, error := pool.poll(state.handle)"],
+        [134, "if error != .None {"],
+        [135, "  return {}, .Failed"],
+        [136, "}"],
+        [138, "switch view.outcome {"],
+        [139, "case .Pending:"],
+        [140, "  return {}, .Waiting"],
+        [141, "case .Succeeded:"],
+        [142, "  response, ok := state.build(view.data, io.allocator)"],
+        [149, "  return response, .Ready"]
       ], [
-        [0, 66, "When the pool signals completion, this callback wakes the parked response owner."],
-        [0.3, 122, "After the completion notification, the response owner inspects its pool handle."],
-        [0.48, 130, "Select the success branch for this finished job. Its result is still accessible through the handle."],
-        [0.68, 131, "Build the response in request-owned storage while the job data is valid."],
-        [0.96, 138, "Return the built response and mark this deferred poll ready for core."]
+        [0, 81, "When the pool signals completion, this callback wakes the parked response owner."],
+        [0.3, 133, "After the completion notification, the response owner inspects its pool handle."],
+        [0.48, 141, "Select the success branch for this finished job. Its result is still accessible through the handle."],
+        [0.68, 142, "Build the response in request-owned storage while the job data is valid."],
+        [0.96, 149, "Return the built response and mark this deferred poll ready for core."]
       ]
     ),
     "data": program(
       "Browser", "Repository source", "src/modules/dom.js",
       "../src/modules/dom.js", [
-        [1496, "const data = isJsonResponse(response) ? await response.json() : null;"],
-        [1498, "if (abort?.aborted) throw abort.reason;"],
-        [1500, "if (!response.ok) {"],
-        [1509, "  throw error;"],
-        [1510, "}"],
-        [1512, "return data;"]
+        [1722, "const data = isJsonResponse(response) ? await response.json() : null;"],
+        [1724, "if (abort?.aborted) throw abort.reason;"],
+        [1726, "if (!response.ok) {"],
+        [1735, "  throw error;"],
+        [1736, "}"],
+        [1738, "return data;"]
       ], [
-        [0, 1496, "Check the response content type. This response is JSON, so read its body and parse it."],
-        [0.5, 1498, "Check the caller’s abort signal before using the parsed data."],
-        [0.73, 1500, "Check for an unsuccessful HTTP status. This response is 200, so skip the error branch."],
-        [0.95, 1512, "Return the parsed object to the component. The example caller then writes its unread field into the signal."]
+        [0, 1722, "Check the response content type. This response is JSON, so read its body and parse it."],
+        [0.5, 1724, "Check the caller’s abort signal before using the parsed data."],
+        [0.73, 1726, "Check for an unsuccessful HTTP status. This response is 200, so skip the error branch."],
+        [0.95, 1738, "Return the parsed object to the component. The example caller then writes its unread field into the signal."]
       ]
     ),
     "patch": generated([22,27,28,29,30,31,32,33], [

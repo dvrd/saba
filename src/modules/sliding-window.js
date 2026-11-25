@@ -16,9 +16,24 @@ function measuredLimit(viewport) {
   let limit = Infinity;
   try {
     const probe = doc.createElement("div");
-    probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;width:1px;top:0;left:0;height:1000000000px";
+    probe.style.cssText = "position:absolute;visibility:hidden;pointer-events:none;width:1px;top:0;left:0";
     doc.documentElement.appendChild(probe);
-    const measured = probe.getBoundingClientRect().height;
+    const laidOut = height => {
+      probe.style.height = height + "px";
+      return probe.getBoundingClientRect().height;
+    };
+    let measured = laidOut(1e9);
+    // Chromium and WebKit clamp a taller element to the cap. Gecko lays it
+    // out with no height at all, so find the tallest height it still keeps.
+    if (!(measured > 0)) {
+      let kept = 0, dropped = 1e9;
+      while (dropped - kept > 1) {
+        const middle = Math.floor((kept + dropped) / 2);
+        if (laidOut(middle) > 0) kept = middle;
+        else dropped = middle;
+      }
+      measured = kept && laidOut(kept);
+    }
     probe.remove();
     // Stay a little under the cap: the spacer's own offset counts as well.
     if (measured > 0 && measured < 1e9) limit = Math.floor(measured * 0.95);

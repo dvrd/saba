@@ -70,6 +70,23 @@ test('a dataset the browser can lay out keeps one pixel per pixel', async () => 
   controller.dispose();
 });
 
+// Gecko does not clamp an element taller than its cap: it lays it out with no
+// height. The measured limit must come from the tallest height it keeps.
+test('a cap that collapses taller elements is still measured', () => {
+  const cap = 17_895_696;
+  const viewport = viewportOf(600), spacer = { style: {} };
+  const probe = { style: {}, remove() {}, getBoundingClientRect() {
+    const height = parseFloat(this.style.height);
+    return { height: height > cap ? 0 : height };
+  } };
+  viewport.ownerDocument.createElement = () => probe;
+  viewport.ownerDocument.documentElement = { appendChild() {} };
+  let range;
+  observeRowWindow(viewport, { rowCount: 2_000_000, rowHeight: 24, spacer }, (first, end) => { range = [first, end]; }).dispose();
+  assert.equal(spacer.style.height, Math.floor(cap * 0.95) + 'px');
+  assert.deepEqual(range, [0, 33]);
+});
+
 function documentOf({ recover = false, route, page } = {}) {
   const app = {
     childNodes: [], attributes: new Map([['aria-busy', 'true'], ['data-saba-pending', ''], ['inert', '']]),

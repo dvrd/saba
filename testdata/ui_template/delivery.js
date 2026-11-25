@@ -46,8 +46,15 @@ async function verify() {
   const entry = new URL(doc.querySelector('script').src).pathname;
   check(waiting(host) && heading.textContent === 'Product A' && !doc.querySelector('[data-saba-recover]').hidden, 'Release A must be readable before its entry runs');
   check(preloads.length > 2 && !preloads.some(url => /details|nested/.test(url)), 'Optional modules must stay outside the startup preloads');
-  let transfers = await (await fetch('/requests')).json();
-  check(transfers[entry] === 0 && preloads.every(url => transfers[url] === 1), 'Held A must preload each startup dependency once without fetching its entry');
+  // WebKit can fire the document's load event before its module preloads
+  // finish; wait for each to be fetched before counting the transfers.
+  let transfers;
+  for (let tries = 0; tries < 100; tries++) {
+    transfers = await (await fetch('/requests')).json();
+    if (preloads.every(url => transfers[url] > 0)) break;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  check(transfers[entry] === 0 && preloads.every(url => transfers[url] === 1), 'Held A must preload each startup dependency once without fetching its entry: ' + JSON.stringify({entry, preloads, transfers}));
   await publish();
   check(await release(doc), 'Retained A entry failed to load after B published');
   check(doc.querySelector('h1') === heading && active(host) && doc.querySelector('[data-saba-recover]').hidden && doc.querySelector('#version').textContent === 'A', 'A document attached with a different release or replaced its heading');
@@ -83,5 +90,5 @@ try {
   await verify();
   document.getElementById('result').textContent = 'PASS';
 } catch (error) {
-  document.getElementById('result').textContent = error.stack || error.message;
+  document.getElementById('result').textContent = error.stack?.includes(error.message) ? error.stack : error.message + '\n' + error.stack;
 }

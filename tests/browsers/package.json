@@ -1,0 +1,11 @@
+{
+  "name": "saba-browser-tests",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "playwright": "1.65.1"
+  }
+}

@@ -22,9 +22,26 @@ tasks:
       The default uses krs install --frozen in a private, temporary Odin root.
       ODIN overrides the compiler. WEBTOOLS_SHARED or --shared selects an
       existing development collection instead of installing the lock.
+    deps: [browser-driver]
     cmds:
       - defer: 'rm -f -- "{{.RUNNER}}"'
       - '"{{.COMPILER}}" run tests/run.odin -file -out:"{{.RUNNER}}" -- {{.CLI_ARGS}}'
+
+  browser-driver:
+    internal: true
+    desc: Install the locked Playwright package for the Firefox and WebKit UI tests
+    dir: tests/browsers
+    # Runs only when npm exists and the lock changed since the last install.
+    # Without the package the Firefox and WebKit tests log a skip notice.
+    status:
+      - '! command -v npm >/dev/null || cmp -s package-lock.json node_modules/.saba-installed-lock'
+    cmds:
+      - |
+        if npm ci --ignore-scripts --no-bin-links --no-audit --no-fund; then
+          cp package-lock.json node_modules/.saba-installed-lock
+        else
+          echo "Could not install tests/browsers; the Firefox and WebKit UI tests will be skipped." >&2
+        fi
 
   bench:mesa:
     desc: Measure the synthetic item editor in Chromium against the Odin fixture

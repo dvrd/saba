@@ -80,6 +80,59 @@ On an Apple M1 Max with Chrome 157.0.8103.80, each profile ran 12 measured pairs
 
 The windowed lists became ready sooner in all 24 pairs. The median paired saving was 14.3 ms on desktop and 90.9 ms under throttling. Under throttling the form became editable sooner in six of 12 pairs. Both versions fetched 67,228 encoded API body bytes on startup and made the same five requests on save. The windowed version mounted 43 rows after save and at most 61 across the sampled scroll positions, including a jump to the end and back. These counts describe DOM work. Scroll frame times and heap usage were outside this run.
 
+## Re-measurement on 2026-11-25
+
+The JSX compiler's lowering rules changed after the records above. Slot windows are no longer lowered, so `benchmarks/frameworks/fair/saba-slot.jsx` runs on the runtime path. Lowered keyed mounts keep a runtime host guard and scope ownership, and bare `{record().field}` text stays on the runtime. Both benchmarks were run again from `develop` at `f50250a` on the same Apple M1 Max with Google Chrome 158.0.8127.37. The earlier editor record used Chrome 157.0.8103.80 and the earlier fair record used Chrome for Testing 148.0.7778.96. The machine was not idle. Other test suites were running, and the one-minute load average was 8.9 to 17.0 during the editor run and 8.7 to 35.1 during the fair run on 10 cores. Absolute times, and especially p95 values, are therefore less reliable than ratios within a round or pair. [Editor samples](benchmarks/saba-generated-editor-2026-11-25.json) · [Fair samples](benchmarks/renderer-fair-2026-11-25.json)
+
+### Generated editor
+
+`task bench:compiled-editor -- --trials 12 --profiles desktop,constrained`. Times are p50 / p95 in milliseconds. Paired deltas are the median of generated minus prototype within the same pair.
+
+| Profile | Metric | Generated, 2026-11-20 | Generated, 2026-11-25 | Prototype, 2026-11-20 | Prototype, 2026-11-25 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Desktop | Editable | 51.6 / 54.4 | 48.8 / 80.6 | 25.4 / 29.2 | 26.1 / 38.8 |
+| Desktop | All lists ready | 51.2 / 54.0 | 49.4 / 80.1 | 30.9 / 35.6 | 31.1 / 49.7 |
+| Desktop | Key to frame | 16.2 / 19.2 | 16.4 / 18.3 | 16.2 / 18.9 | 16.3 / 19.8 |
+| Desktop | Submit to fresh DOM | 21.0 / 40.5 | 20.4 / 22.7 | 18.3 / 21.2 | 18.1 / 61.9 |
+| Desktop | Submit to Saved paint | 48.5 / 65.8 | 58.9 / 68.5 | 47.6 / 54.0 | 60.3 / 77.1 |
+| Constrained | Editable | 311.8 / 319.9 | 333.2 / 452.0 | 327.3 / 338.7 | 337.9 / 368.0 |
+| Constrained | All lists ready | 410.3 / 425.3 | 422.1 / 554.0 | 405.0 / 421.5 | 413.1 / 453.3 |
+| Constrained | Key to frame | 17.2 / 19.5 | 17.0 / 19.2 | 17.2 / 19.9 | 17.2 / 20.6 |
+| Constrained | Submit to fresh DOM | 206.1 / 215.7 | 209.3 / 219.7 | 199.0 / 201.6 | 202.3 / 240.8 |
+| Constrained | Submit to Saved paint | 215.9 / 225.0 | 220.6 / 230.8 | 212.7 / 217.8 | 213.6 / 255.8 |
+| Both | Encoded startup JavaScript (bytes) | 22,527 | 31,318 | 13,984 | 18,930 |
+
+The desktop gap to the prototype is unchanged. Generated Saba became editable a paired median 23.4 ms later than the prototype, later in all 12 pairs, against 25.3 ms in all 12 pairs before. Its median moved from 51.6 to 48.8 ms, which is within the noise of this loaded run and is not an improvement to rely on. **The constrained startup advantage mostly disappeared.** Generated Saba used to be editable a paired median 13.8 ms earlier, in all 12 pairs. It is now 3.1 ms earlier and is slower in 5 of 12 pairs. Its startup JavaScript grew by 8,791 encoded bytes (39%), and the prototype, which shares the runtime, grew by 4,946 bytes. The extra bytes are a plausible cause. This run did not isolate them. Typing and save latency did not change beyond noise. The constrained paired list-ready delta rose from 6.2 to 10.8 ms.
+
+### Keyed and slot-window updates
+
+`task bench:fair` with its defaults: 6 rounds, a 2,048-row list, a 256-row window, 12 repetitions and 6 warm-up passes. Every arm passed its checks. Values are medians in milliseconds. Ratios are the median per-round ratio to `vanilla-keyed` for list operations and to `vanilla-slot` for window operations. Every arm, including vanilla, got slower in absolute terms under the new browser and load, so compare the ratios.
+
+| Arm | Metric | 2026-11-21 | 2026-11-25 | Ratio, 2026-11-21 | Ratio, 2026-11-25 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| saba-slot | Window jump | 0.26 | 1.46 | 2.74× | **14.16×** |
+| saba-slot | Window shift | 0.10 | 0.19 | 2.18× | 3.20× |
+| saba-slot | Window mount | 0.85 | 1.25 | 3.42× | 2.70× |
+| saba-slot | Mount 2,048 | 6.5 | 30.8 | 2.56× | **7.81×** |
+| saba-slot | Dense update | 2.50 | 16.85 | 2.10× | **7.24×** |
+| saba-slot | Reverse | 1.35 | 14.43 | 1.23× | **9.52×** |
+| saba-slot | Rotate | 1.34 | 12.30 | 4.82× | **35.20×** |
+| saba-slot | Splice | 0.40 | 1.55 | 1.31× | 3.92× |
+| saba-slot | Heap after mount (bytes) | 1,490,058 | 6,053,698 | | |
+| saba-keyed | Mount 2,048 | 13.0 | 4.25 | 5.14× | 1.12× |
+| saba-keyed | Dense update | 2.03 | 1.99 | 1.71× | 0.92× |
+| saba-keyed | Splice | 0.66 | 0.55 | 2.14× | 1.31× |
+| saba-keyed | Window jump | 1.16 | 0.40 | 12.20× | 3.96× |
+| saba-keyed | Heap after mount (bytes) | 4,054,990 | 1,030,293 | | |
+| react | Window jump | 0.55 | 0.86 | 5.89× | 8.08× |
+| solid | Window jump | 0.53 | 0.69 | 5.66× | 6.28× |
+
+**The slot-window case regressed severely.** With the window on the runtime path, a disjoint jump costs 14 times the hand-written recycler, against 2.7 times before. It is now slower than React (8.1×), Solid (6.3×), Svelte (8.3×) and Preact (9.6×) on the same jump, all of which it beat before. Full-list dense, reverse and rotate updates on the slot arm are 7 to 35 times vanilla, and its heap after mount roughly quadrupled. Record-keyed Saba moved the other way. Its mount, heap and list operations are now within about 1.3× of vanilla-keyed. This run happened under heavy load, so the absolute times should be repeated on an idle machine. Even so, the slot arm's ratios moved far more than any other arm's.
+
+### Not re-measured
+
+`task bench:scale` was not run. Other test suites kept the machine's load average between 38 and 69 for more than 20 minutes after the fair run, and the session ended before the machine became idle. The [compiled slot window](SABA_RENDERER_LOSSES.md#compiled-slot-windows) figures in the losses document (0.50 ms jump and 7.55 ms over 31 refills) are therefore still from 2026-11-20 and predate the change that stopped lowering slot windows. The fair result suggests they no longer hold.
+
 ## Conditions and clocks
 
 - One Apple M1 Max, macOS arm64, full Chromium 145.0.7632.6 running headless. Each navigation uses a fresh browser context. The browser process and loopback service stay warm. Desktop uses the machine at its normal speed. The constrained profile applies Chromium’s 4× CPU slowdown, 60 ms network latency, 10 Mbps download and 2 Mbps upload. The latter is a repeatable emulation. Both profiles use local synthetic data and exclude production authentication, TLS, other users and external services.

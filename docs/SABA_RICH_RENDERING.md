@@ -2,6 +2,8 @@
 
 These benchmarks exercise two different screens. The project board measures cold startup, state changes, a cross-lane drag and the resulting animation. The telemetry grid measures how much work it takes to mount data-bearing components, update sparse records and scroll to the final record. The [single-record editor](SABA_FRAMEWORK_COMPARISON.md) remains a separate workload.
 
+Measured before 2026-11-25. The compiler now lowers some keyed and checkbox lists and element-or-nothing holes to direct DOM code, which may change the compiled Saba figures below. They are kept as recorded until new measurements replace them. All runs used Chromium. [Lowering rules](adr/0007-saba-reactive-props-and-bindings.md#shapes-the-compiler-lowers-to-direct-dom-code)
+
 ## Project board
 
 The board mounts 240 cards across four independently scrollable lanes. Each card displays a title, owner, priority and estimated points. The screen also includes a toolbar, three summary counters, an eight-bar workload chart and a selected-card inspector. Every adapter starts from the same empty document host, viewport and stylesheet.

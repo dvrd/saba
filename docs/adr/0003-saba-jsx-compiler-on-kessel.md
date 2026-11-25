@@ -4,7 +4,7 @@ status: accepted
 
 # Saba's JSX compiler is built on Kessel's syntax tree
 
-Saba's JSX transform was a self-contained lexical scanner of about 900 lines with no dependencies. The current compiler parses each module with Kessel. Saba uses that tree for reactive expression emission, SVG, spread children and static extraction. Source maps and general linting remain future work.
+Saba's JSX transform was a self-contained lexical scanner of about 900 lines with no dependencies. The current compiler parses each module with Kessel. Saba uses that tree for reactive expression emission, SVG, spread children and static extraction. The transform can return a version 3 source map structure to an Odin caller that asks for one, but no served module or build generation carries a source map or a `sourceMappingURL`. Delivering source maps and general linting remain future work. [Mapping](../../src/jsx/map.odin)
 
 ## Considered options
 
@@ -22,7 +22,21 @@ The initial pairing is Kessel `v0.4.1` at `4fc1eaf42d9b000a53955de3d8e175d0ba34f
 
 Use half-open byte offsets `[start, end)` from the original source. Emit each outermost JSX expression once and recurse into its JSX children and expression holes. Copy everything outside the replaced span verbatim. Generated imports and temporaries must avoid collisions with author bindings. For a name whose lexical binding Saba cannot establish, use the conservative reader or leave the value to browser code. Shadowed imports, a parameter with the same spelling as a module constant, or an opaque call give no license to execute code at build time. [Extraction contract](0004-saba-compile-time-html-no-request-rendering.md)
 
+The project lock now pins Kessel `v0.21.0`. A parse error is reported at its `ParseError.start` offset, converted to the original file's line and column; Kessel reports a mismatched closing tag at the following token, so Saba moves that error back to the preceding `</`. Only the first reported error is shown, and the checker runs only when parsing succeeded. [Dependency lock](../../.krs/packages.json) · [Compiler entry](../../src/jsx/jsx.odin)
+
 Start the forwarded-prop browser test and compiler implementation using the pinned Kessel version locally. Before merging the Kessel dependency, a clean Saba fixture must obtain that version through the project distribution path, compile an Odin caller of these APIs and pass the same browser test. The parser checks open a JSX module with multibyte text before nested JSX, verify that each span recovers the original text, and report a parser or checker error against its original filename and coordinates. Run the transformed module with an import name collision, a shadowed name, a tagged-template hole and a valid async-helper hole. Verify browser behavior and unchanged neighboring JavaScript. [Implementation sequence](../SABA_UI_ROADMAP.md#first-implementation-steps) · [Current Odin transform tests](../../tests/internal/jsx_test.odin) · [Project test entry point](../../Taskfile.yml)
+
+## Limits and memory
+
+Saba does not rely on the parser to bound its recursion: deeply nested or very long input could overflow the native stack while it is parsed, checked or walked. Before parsing, Saba scans the source with an estimate that needs no tokenizer. It tracks code, tags, JSX text and template literal text, skips comments and quoted strings that close on their line, and does not count text as code. It refuses:
+
+- more than 128 nested JSX elements: `JSX nesting exceeds 128 levels`, at the opening tag that exceeds it;
+- more than 256 levels of brackets: `Nesting exceeds 256 levels of brackets`;
+- more than 20,000 operators, calls or indexes chained in one expression at one bracket level: `Expression nesting is too deep to compile`.
+
+Each is a located diagnostic instead of a crash. The emitter enforces the same 128-level element limit and bounds its own tree walk. A line that starts with a letter in column zero resets the estimate, so a wrong guess cannot accumulate across a file.
+
+The parser owns a fixed arena sized for the syntax tree. Everything the compiler itself allocates while emitting lives in a separate growing arena that is released when the compilation returns; only the result is copied to the caller's allocator.
 
 ## Namespace belongs to the rendered position
 

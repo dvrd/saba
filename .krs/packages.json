@@ -3,45 +3,45 @@
   "packages": [
     {
       "name": "async",
-      "source": "local",
-      "tag": "v0.1.0",
-      "commit": "b92c05f45e552f07923abfb265360001e82d5471",
-      "hash": "22a007346c3fb4646c0f200ff5560dc85e534d236c2cbd93b2e74a7757edb5f8"
+      "source": "https://github.com/dvrd/async.git",
+      "tag": "v0.3.1",
+      "commit": "5573991e43a6d8689b57a0377413763bd1cb36e0",
+      "hash": "1c2aabc5c9806eccdfc02241bb2441eb337de3d39e791c173f0eba5e09ef8172"
     },
     {
       "name": "aws",
       "source": "local",
-      "tag": "v0.1.0",
-      "commit": "36aee15d32c8f4319bb3a75f8be24d27dbb54a8c",
-      "hash": "e3ec355fdd31df1e8006012144aa333877392102b93f217d6b6af734efe4bfbf"
+      "tag": "v0.2.0",
+      "commit": "b16522954ead6f0037bc10888be8bf376d2b6c59",
+      "hash": "01a5feac363e8d767caa2b9a4ef6bc7143204631b43e6e5abb437ef0560af0f1"
     },
     {
       "name": "kakunou",
       "source": "local",
-      "tag": "v0.2.0",
-      "commit": "afda0c3e59f497357447a4dbda04dbdfb4311c2b",
-      "hash": "30c0e6b8f7e566acab6b5fdff1776748a915e70e8a4d33c4e128655112fcaf4f"
+      "tag": "v0.2.1",
+      "commit": "b44bf98dcd1db02ec70453623c400357d7be1359",
+      "hash": "7b4d052823a79ab8ef4e75ece3dcef045e15238050dfa6559c4dc57e5d6c8e82"
     },
     {
       "name": "kessel",
       "source": "https://github.com/dvrd/kessel.git",
-      "tag": "v0.4.1",
-      "commit": "4fc1eaf42d9b000a53955de3d8e175d0ba34fb3f",
-      "hash": "cae24825a6d9ffebb523ead5543a7ef349d028e74df474314d53bd8b623172de"
+      "tag": "v0.21.0",
+      "commit": "a9ba38301296771ce512f64063e7286844a86679",
+      "hash": "80aa6d59edd17676d0bae28378106d96c52e49214679a91aaf53cab1522c38a3"
     },
     {
       "name": "surf",
       "source": "local",
-      "tag": "v0.1.0",
-      "commit": "6d5c512ecbc33351e701bd79ed2fcc5670c0cc22",
-      "hash": "78077290d47ebb1d37d0e312a3c2205c8f360b9de33a27d4a5ef3d96a502d146"
+      "tag": "v0.1.3",
+      "commit": "a552088ff92067c07fca5c87868933eb8057de22",
+      "hash": "9c5c4485c512db2b74c092ab0185a592b8c92aa5b693f98f95ae363b1af427d0"
     },
     {
       "name": "websocket",
       "source": "local",
-      "tag": "v0.1.0",
-      "commit": "4953c3a5fa99c57bbf66815e0fe96be3d8ff1e4f",
-      "hash": "0bd62223a0439926636f2fd314a96a46fb48cc2b79e128ec78b82481cded598f"
+      "tag": "v0.1.2",
+      "commit": "18cf35aef3d5dcd6f75d36a927eeac1ae4417371",
+      "hash": "9b7484afce706bc15ceaba7f37b3f89ff59240f07861656bcf8020c0d04ff844"
     }
   ]
 }

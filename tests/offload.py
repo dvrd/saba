@@ -83,8 +83,10 @@ def check_admission(binary, checks):
         clients = [sockets.enter_context(server.connect()) for _ in range(4)]
         for i, conn in enumerate(clients):
             conn.sendall(request('/work', 'POST', str(i).encode()))
-        state = server.until(lambda s: s[:3] == (2, 2, 4))
-        assert state[3:5] == (2, 0), state
+        # The pool counts a job as running when a worker takes it, an instant
+        # before the job body records its run; wait for both.
+        state = server.until(lambda s: s[:4] == (2, 2, 4, 2))
+        assert state[4] == 0, state
         assert server.exchange('/work')[0] == 503
         for _ in range(32):
             started = time.monotonic()

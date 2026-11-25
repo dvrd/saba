@@ -983,10 +983,12 @@ h2_event_for_a_full_tunnel_is_deferred_not_held :: proc(t: ^testing.T) {
 // ENHANCE_YOUR_CALM. Both an over-limit content-length and a body that
 // outgrows the limit are covered.
 @(test)
-h2_upload_after_an_early_413_does_not_exhaust_the_reset_allowance :: proc(t: ^testing.T) {
+h2_upload_after_an_early_413_is_reset_with_no_error_and_in_flight_data_is_tolerated :: proc(t: ^testing.T) {
 	state: H2W_Server
 	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
-		LATE :: 3 * H2_RESET_BURST
+		// Data already in flight when the reset reaches the client: a full
+		// initial window of 1 KB frames, as a real client sends it.
+		LATE :: 48
 		if !testing.expect(t, h2w_preface(peer)) {
 			return
 		}
@@ -1021,13 +1023,13 @@ h2_upload_after_an_early_413_does_not_exhaust_the_reset_allowance :: proc(t: ^te
 			// learn that the server has read them all.
 			clear(&wire)
 			for _ in 0 ..< LATE {
-				h2w_frame(&wire, 0, 0, stream, filler[:1])
+				h2w_frame(&wire, 0, 0, stream, filler[:])
 			}
 			h2w_frame(&wire, 6, 0, 0, []u8{1, 2, 3, 4, 5, 6, 7, u8(stream)})
 			if !testing.expect(t, h2w_send(peer, wire[:])) {
 				return
 			}
-			acknowledged := false
+			acknowledged, reset := false, false
 			for !acknowledged {
 				frame, ok := h2w_next(peer, true)
 				if !testing.expectf(t, ok, "stream %d: connection ended after late DATA", stream) {
@@ -1036,8 +1038,14 @@ h2_upload_after_an_early_413_does_not_exhaust_the_reset_allowance :: proc(t: ^te
 				if !testing.expectf(t, frame.kind != 7, "stream %d: GOAWAY(%d) after late DATA", stream, h2w_code(frame)) {
 					return
 				}
+				if frame.kind == 3 && frame.stream == stream {
+					testing.expectf(t, h2w_code(frame) == 0, "stream %d: reset with %d, not NO_ERROR", stream, h2w_code(frame))
+					reset = true
+				}
 				acknowledged = frame.kind == 6 && frame.flags & 1 != 0 && frame.payload[7] == u8(stream)
 			}
+			// RFC 9113 section 8.1: the server stops a body it will not read.
+			testing.expectf(t, reset, "stream %d: no RST_STREAM(NO_ERROR) after the early 413", stream)
 		}
 
 		// And the connection still serves.

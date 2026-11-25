@@ -1466,6 +1466,12 @@ H2_Request :: struct {
 	task:                                                              Connection_Task,
 	handle:                                                            h2.Stream_Handle,
 	receiving, have_length, request_open, ready, headers_sent, failed: bool,
+	// The peer has not ended its side of the stream; it may still be sending a
+	// body the server has stopped reading (an early 413 or 400).
+	body_open:                                                         bool,
+	// The response is complete and queued; the stream is reset with NO_ERROR
+	// once that output has drained, unless the peer ends its side first.
+	awaiting_reset:                                                    bool,
 	expected, limit, body_len, offset, producer_offset:                int,
 	body_deadline, response_deadline:                                  time.Tick,
 	response:                                                          Response,
@@ -1766,6 +1772,10 @@ h2_request_data :: proc(request: ^H2_Request, event: h2.Event_View, value: h2.Da
 	_ = h2.connection_discard(engine, value.consumption)
 	h2.incoming_data_destroy(&incoming)
 
+	if value.end_stream {
+		request.body_open = false
+	}
+
 	if value.end_stream && request.receiving {
 		h2_request_complete(&request.task)
 	}
@@ -1863,6 +1873,17 @@ h2_request_output :: proc(request: ^H2_Request) -> bool {
 
 	if pending, ok := h2.connection_stream_output_pending(engine, request.handle); !ok || pending {
 		return false
+	}
+
+	// RFC 9113 section 8.1: a server that answered before the request was
+	// complete may reset the stream with NO_ERROR, so the client stops
+	// sending a body that will not be read.
+	if request.awaiting_reset {
+		if request.body_open {
+			_ = h2.connection_reset(engine, request.handle, .No_Error)
+		}
+		h2_request_release(request, true, .Completed)
+		return true
 	}
 
 	if !request.headers_sent {
@@ -1991,6 +2012,11 @@ h2_request_output :: proc(request: ^H2_Request) -> bool {
 		h2_shutdown(request.parent)
 	}
 
+	if request.body_open {
+		request.awaiting_reset = true
+		return true
+	}
+
 	h2_request_release(request, true, .Completed)
 
 	return true
@@ -2053,6 +2079,7 @@ h2_requests_pump :: proc(parent: ^Connection_Task) -> bool {
 }
 h2_request_decode :: proc(task: ^Connection_Task, summary: h2.Header_Summary, end_stream: bool) -> bool {
 	session := task.http2_request
+	session.body_open = !end_stream
 
 	if task.observation_finished {
 		task.observed = false

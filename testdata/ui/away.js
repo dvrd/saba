@@ -26,7 +26,17 @@ async function visitNextGeneration() {
 
 addEventListener("pageshow", () => {
   if (sessionStorage.getItem("saba-ui-history-step") === "rollout") {
-    visitNextGeneration().catch(error => fetch("/history-result", {method: "POST", body: error?.stack?.includes(error.message) ? error.stack : String(error) + "\n" + (error?.stack || "")}));
+    // Firefox rejects this page's pending fetches when the development client
+    // reloads it, and still runs the rejection handler. The reloaded page
+    // continues the transfer, so only a failure on a page that stays reports.
+    let leaving = false;
+    addEventListener("beforeunload", () => { leaving = true; });
+    addEventListener("pagehide", () => { leaving = true; });
+    visitNextGeneration().catch(async error => {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      if (leaving) return;
+      await fetch("/history-result", {method: "POST", body: error?.stack?.includes(error.message) ? error.stack : String(error) + "\n" + (error?.stack || "")});
+    });
     return;
   }
   if (sessionStorage.getItem("saba-ui-switch-user") === "yes")

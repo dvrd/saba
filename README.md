@@ -151,3 +151,7 @@ below.
 
 Work lands on `develop`. Releases reach `main` through a pull request from
 `develop`.
+
+## License
+
+Saba is released under the MIT License. See [LICENSE](LICENSE).

@@ -26,7 +26,11 @@ Design notes live in [docs/](docs/) and [docs/adr/](docs/adr/).
   `.krs/packages.json` (async, surf, websocket, aws, kakunou, kessel).
 - [Task](https://taskfile.dev) to run the suites.
 - For the UI and JavaScript tests: Node (`SABA_NODE`) and Chrome or Chromium
-  (`SABA_CHROME`).
+  (`SABA_CHROME`). The UI tests also run in Firefox and WebKit through the
+  Playwright package locked in `tests/browsers`, which `task test` installs
+  with `npm ci`. Download its browser builds once with
+  `cd tests/browsers && npx playwright install firefox webkit`
+  (`PLAYWRIGHT_PATH` selects another Playwright package).
 - For the loopback harnesses: `python3` (`SABA_PYTHON`); Go (`SABA_GO`) for
   the HTTP/2, HTTPS and WebSocket harnesses; a Python with
   [aioquic](https://github.com/aiortc/aioquic) in `SABA_AIOQUIC_PYTHON` for

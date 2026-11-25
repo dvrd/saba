@@ -399,7 +399,7 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 	if !valid {
 		return not_found(request)
 	}
-	canonical_root, root_error := filepath.abs(root, request.allocator)
+	canonical_root, root_error := root_directory(root, request.allocator)
 	if root_error != nil {
 		return not_found(request)
 	}
@@ -908,7 +908,7 @@ preload_mount :: proc(
 	mem.dynamic_arena_init(&scratch)
 	defer mem.dynamic_arena_destroy(&scratch)
 	temporary := mem.dynamic_arena_allocator(&scratch)
-	root, re := filepath.abs(mount.directory, temporary)
+	root, re := root_directory(mount.directory, temporary)
 	if re != nil {
 		return {kind = .Unavailable, io = re}
 	}

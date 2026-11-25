@@ -69,6 +69,8 @@ serve :: proc(config: Config) -> (ok: bool) {
 		config = config,
 	}
 	defer { release_page_arena(state.page_arena) }
+	// Runs before the arena release above: late generations live outside it.
+	defer pages_api.release_build(&state.pages.build)
 
 	defer assets_api.destroy_assets(&state.assets, allocator)
 	if !prepare(&state, allocator) {
@@ -373,6 +375,8 @@ rebuild_pages :: proc(data: rawptr) -> (published: bool) {
 	state.page_arena = arena
 	state.pages = next
 	sync.rw_mutex_unlock(&state.page_lock)
+	// Readers of the old build copied what they borrowed under the lock.
+	pages_api.release_build(&previous)
 	release_page_arena(old)
 	return true
 }

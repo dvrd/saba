@@ -6,6 +6,8 @@ import "core:log"
 import "core:net"
 import "core:os"
 import "core:path/filepath"
+import "core:path/slashpath"
+import "core:encoding/json"
 import "core:strings"
 import jsx "../jsx"
 import "core:mem"
@@ -27,14 +29,14 @@ serve_modules :: proc(
 	response: Response,
 	matched: bool,
 ) {
-	relative, response_error, module_matched := module_request(request, prefix)
+	relative, response_error, module_matched := module_request(request, prefix, development)
 	if !module_matched {
 		return {}, false
 	}
 	if response_error || module_excluded(exclude, relative) {
 		return not_found(request), true
 	}
-	root, root_error := filepath.abs(directory, request.allocator)
+	root, root_error := root_directory(directory, request.allocator)
 	if root_error != nil {
 		log.errorf("Could not resolve module directory %s: %v", directory, root_error)
 		return Response{status = .Internal_Server_Error}, true
@@ -43,6 +45,9 @@ serve_modules :: proc(
 }
 
 read_module :: proc(request: ^Request, root, relative: string, development: bool) -> Response {
+	if development && strings.has_suffix(relative, SOURCE_MAP_SUFFIX) {
+		return read_module_map(request, root, relative)
+	}
 	javascript, has_javascript, javascript_allowed := module_file(root, relative, request.allocator)
 	if !javascript_allowed {
 		return not_found(request)
@@ -64,7 +69,12 @@ read_module :: proc(request: ^Request, root, relative: string, development: bool
 
 		if has_source {
 			// The client sees the mount-relative name; the log keeps the full path.
-			return serve_jsx(request, source, fmt.tprintf("%s.jsx", relative[:len(relative) - len(".js")]))
+			return serve_jsx(
+				request,
+				source,
+				fmt.tprintf("%s.jsx", relative[:len(relative) - len(".js")]),
+				fmt.tprintf("%s%s", slashpath.base(relative), SOURCE_MAP_SUFFIX),
+			)
 		}
 	}
 	if !has_javascript {
@@ -79,8 +89,10 @@ read_module :: proc(request: ^Request, root, relative: string, development: bool
 }
 
 // `display` names the source in the diagnostic sent to the browser. It defaults
-// to the file's base name so a filesystem layout never reaches a client.
-serve_jsx :: proc(request: ^Request, source_path: string, display := "") -> Response {
+// to the file's base name so a filesystem layout never reaches a client. A
+// non-empty source_map_url ends the module with a sourceMappingURL comment that
+// names it; development passes the module's own name plus ".map".
+serve_jsx :: proc(request: ^Request, source_path: string, display := "", source_map_url := "") -> Response {
 	source, read := assets.read_limited(source_path, assets.DEFAULT_ASSET_LIMITS.max_file_bytes, request.allocator)
 
 	if read.kind != .None {
@@ -105,7 +117,91 @@ serve_jsx :: proc(request: ^Request, source_path: string, display := "") -> Resp
 		)
 	}
 
+	if source_map_url != "" {
+		output = fmt.aprintf("%s\n//# sourceMappingURL=%s\n", output, source_map_url, allocator = request.allocator)
+	}
+
 	return assets.representation_response(request, transmute([]u8)output, "text/javascript; charset=utf-8", true)
+}
+
+// A development module compiled from JSX names its map as `<module>.js.map`
+// beside itself. Production never serves or advertises one.
+SOURCE_MAP_SUFFIX :: ".map"
+
+@(private)
+Source_Map_Document :: struct {
+	version:         int,
+	file:            string,
+	sources:         []string,
+	sources_content: []string `json:"sourcesContent"`,
+	names:           []string,
+	mappings:        string,
+}
+
+// The map for a development module, compiled again from its JSX source. file and
+// sources are bare names, relative to the map's own URL, so no filesystem path
+// reaches the browser. The source is embedded because the module route never
+// serves .jsx. A module written as JavaScript keeps its own map file, if any.
+read_module_map :: proc(request: ^Request, root, relative: string) -> Response {
+	module := relative[:len(relative) - len(SOURCE_MAP_SUFFIX)]
+	stem := module[:len(module) - len(".js")]
+	source_path, has_source, source_allowed := module_file(root, fmt.tprintf("%s.jsx", stem), request.allocator)
+	if !source_allowed {
+		return not_found(request)
+	}
+	if !has_source {
+		path, found, allowed := module_file(root, relative, request.allocator)
+		if !found || !allowed {
+			return not_found(request)
+		}
+		body, read := assets.read_limited(path, assets.DEFAULT_ASSET_LIMITS.max_file_bytes, request.allocator)
+		if read.kind != .None {
+			log.errorf("Could not read source map %s: %v %v", path, read.kind, read.io)
+			return Response{status = .Internal_Server_Error}
+		}
+		return assets.representation_response(request, body, "application/json; charset=utf-8", true)
+	}
+	source, read := assets.read_limited(source_path, assets.DEFAULT_ASSET_LIMITS.max_file_bytes, request.allocator)
+	if read.kind != .None {
+		log.errorf("Could not read JSX module %s: %v %v", source_path, read.kind, read.io)
+		return Response{status = .Internal_Server_Error}
+	}
+	compiled: jsx.Source_Map
+	_, error := transform_jsx(string(source), source_path, request.allocator, &compiled)
+	if error.message != "" {
+		// The module request reports the diagnostic; a map has nothing to describe.
+		return not_found(request)
+	}
+	mappings := compiled.mappings
+	if compiled.version == 0 {
+		// Without JSX the module is the source itself, line for line.
+		mappings = identity_mappings(string(source), request.allocator)
+	}
+	document := Source_Map_Document {
+		version         = 3,
+		file            = slashpath.base(module),
+		sources         = {fmt.tprintf("%s.jsx", slashpath.base(stem))},
+		sources_content = {string(source)},
+		names           = {},
+		mappings        = mappings,
+	}
+	body, marshal_error := json.marshal(document, allocator = request.allocator)
+	if marshal_error != nil {
+		return Response{status = .Internal_Server_Error}
+	}
+	return assets.representation_response(request, body, "application/json; charset=utf-8", true)
+}
+
+@(private)
+identity_mappings :: proc(source: string, allocator: mem.Allocator) -> string {
+	b := strings.builder_make(allocator)
+	strings.write_string(&b, "AAAA")
+	for i in 0 ..< len(source) {
+		if source[i] == '\n' && i + 1 < len(source) {
+			strings.write_string(&b, ";AACA")
+		}
+	}
+	return strings.to_string(b)
 }
 
 // One mount can expose a whole web root or a component subtree.
@@ -118,6 +214,11 @@ Module_Mount :: struct {
 }
 
 module_excluded :: proc(exclude: []string, relative: string) -> bool {
+	relative := relative
+	// A development map belongs to its module and is excluded with it.
+	if strings.has_suffix(relative, ".js.map") {
+		relative = relative[:len(relative) - len(SOURCE_MAP_SUFFIX)]
+	}
 	for entry in exclude {
 		name := strings.trim(entry, "/")
 		if name == "" {
@@ -172,7 +273,8 @@ serve_prepared_modules :: proc(request: ^Request, mounts: []Module_Cache, develo
 	return {}, false
 }
 
-module_request :: proc(request: ^Request, prefix: string) -> (path: string, invalid, matched: bool) {
+// maps also matches `<module>.js.map`, which only the development route serves.
+module_request :: proc(request: ^Request, prefix: string, maps := false) -> (path: string, invalid, matched: bool) {
 	if (request.method != "GET" && request.method != "HEAD") ||
 	   !strings.has_prefix(prefix, "/") ||
 	   !strings.has_suffix(prefix, "/") ||
@@ -184,7 +286,9 @@ module_request :: proc(request: ^Request, prefix: string) -> (path: string, inva
 	if !decoded {
 		return "", true, true
 	}
-	if !strings.has_suffix(relative, ".js") && !strings.has_suffix(relative, ".jsx") {
+	if !strings.has_suffix(relative, ".js") &&
+	   !strings.has_suffix(relative, ".jsx") &&
+	   !(maps && strings.has_suffix(relative, ".js.map")) {
 		return "", false, false
 	}
 	if strings.has_suffix(relative, ".jsx") || !module_relative_ok(relative) {
@@ -335,7 +439,7 @@ prepare_module_mounts :: proc(
 			return nil, false
 		}
 
-		root, error := filepath.abs(mount.directory, allocator)
+		root, error := root_directory(mount.directory, allocator)
 
 		if error != nil {
 			log.errorf("Could not resolve module directory %s: %v", mount.directory, error)

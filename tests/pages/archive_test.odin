@@ -652,3 +652,74 @@ module_and_page_preparation_is_bounded :: proc(t: ^testing.T) {
 		)
 	}
 }
+
+// Two processes share one archive. Each prepared its own generation; a page
+// from one can send the browser to the other for its modules.
+@(test)
+generations_written_by_another_process_become_servable :: proc(t: ^testing.T) {
+	fixture := delivery_fixture("Alpha")
+	defer delivery_destroy(&fixture)
+	fixture.mount.templates.archive_retention.rescan_interval = 300 * time.Millisecond
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
+	defer mem.dynamic_arena_destroy(&arena)
+	allocator := mem.dynamic_arena_allocator(&arena)
+
+	first, ok := delivery_prepare(fixture, allocator)
+	if !testing.expect(t, ok) {
+		return
+	}
+	defer pages.release_build(&first.build)
+	// The second process starts later, from different sources.
+	delivery_write(fixture.source, delivery_page("Beta"))
+	second, again := delivery_prepare(fixture, allocator)
+	if !testing.expect(t, again) {
+		return
+	}
+	defer pages.release_build(&second.build)
+	testing.expect(t, first.build.id != second.build.id)
+
+	entry := fmt.tprintf("/__saba/build/%s/__saba/entry-0-0.js", second.build.id)
+	own := delivery_get(second, entry, allocator)
+	testing.expect_value(t, own.status, core.HTTP_Status.OK)
+	borrowed := delivery_get(first, entry, allocator)
+	testing.expect_value(t, borrowed.status, core.HTTP_Status.OK)
+	testing.expect_value(t, string(borrowed.body), string(own.body))
+	view := delivery_get(first, fmt.tprintf("/__saba/build/%s/ui/data.js", second.build.id), allocator)
+	testing.expect_value(t, view.status, core.HTTP_Status.OK)
+	// A file the generation does not hold stays missing without a new read.
+	absent := delivery_get(first, fmt.tprintf("/__saba/build/%s/ui/none.js", second.build.id), allocator)
+	testing.expect_value(t, absent.status, core.HTTP_Status.Not_Found)
+
+	// A generation that appears after a miss is looked for again only once the
+	// interval has passed.
+	late := "late-generation"
+	late_url := fmt.tprintf("/__saba/build/%s/ui/old.js", late)
+	testing.expect_value(t, delivery_get(first, late_url, allocator).status, core.HTTP_Status.Not_Found)
+	delivery_archive(fixture, late, 0, "export default 'late'")
+	testing.expect_value(t, delivery_get(first, late_url, allocator).status, core.HTTP_Status.Not_Found)
+	time.sleep(400 * time.Millisecond)
+	found := delivery_get(first, late_url, allocator)
+	testing.expect_value(t, found.status, core.HTTP_Status.OK)
+	testing.expect_value(t, string(found.body), "export default 'late'")
+
+	// An unusable archive is skipped with a warning, as at preparation.
+	captured: Captured_Log
+	strings.builder_init(&captured.text)
+	defer strings.builder_destroy(&captured.text)
+	logger := context.logger
+	context.logger = capture_logger(&captured)
+	delivery_write(fmt.tprintf("%s/torn.saba-build.json", fixture.archive), `{"id":"torn","files":{"/ui/a.js":"ex`)
+	torn := delivery_get(first, "/__saba/build/torn/ui/a.js", allocator)
+	context.logger = logger
+	testing.expect_value(t, torn.status, core.HTTP_Status.Not_Found)
+	testing.expect_value(t, captured.warnings, 1)
+	testing.expect(t, strings.contains(strings.to_string(captured.text), "torn"))
+
+	// A negative interval keeps a process to what it prepared.
+	fixture.mount.templates.archive_retention.rescan_interval = -1
+	delivery_write(fixture.source, delivery_page("Gamma"))
+	fixed, prepared := delivery_prepare(fixture, allocator)
+	testing.expect(t, prepared)
+	testing.expect(t, fixed.build.late == nil)
+}

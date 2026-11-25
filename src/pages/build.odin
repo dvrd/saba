@@ -15,7 +15,9 @@ import "core:os"
 import "core:path/slashpath"
 import "core:slice"
 import "core:strings"
+import "core:sync"
 import "core:time"
+import rt "base:runtime"
 
 BUILD_PATH :: "/__saba/build/"
 BUILD_START :: #load("template-entry.js", string)
@@ -59,6 +61,11 @@ Archive_Retention :: struct {
 	max_count:         int,
 	// Largest archive file a build will read. Zero selects the 64 MiB maximum.
 	max_archive_bytes: int,
+	// A request for a generation this process does not hold looks for it in
+	// archive_directory, so processes that share the directory serve each
+	// other's builds. Each generation is looked for at most once per interval.
+	// Zero selects 2 seconds; negative never looks after preparation.
+	rescan_interval:   time.Duration,
 }
 
 Compiled_Document :: struct {
@@ -70,6 +77,51 @@ Build_Cache :: struct {
 	id:        string,
 	documents: map[string]Compiled_Document,
 	files:     map[string]assets.Prepared_Representation,
+	// Nil without an archive directory. Release with release_build.
+	late:      ^Late_Generations,
+}
+
+DEFAULT_ARCHIVE_RESCAN_INTERVAL :: 2 * time.Second
+// Distinct generations looked for within one interval, whatever their names.
+LATE_ATTEMPTS :: 32
+// Generations loaded after preparation, when retention sets no count limit.
+LATE_GENERATIONS_MAX :: 64
+
+// Generations that other processes wrote to the shared archive after this one
+// prepared. Lookups, loads and storage are serialized by mu; loaded files live in
+// arena until release_build, so a response may borrow them like prepared files.
+Late_Generations :: struct {
+	mu:        sync.Mutex,
+	directory: string,
+	interval:  time.Duration,
+	max_age:   time.Duration,
+	max_bytes: int,
+	max_count: int,
+	// Generations this process holds: prepared, retained or loaded late.
+	held:      map[string]bool,
+	loaded:    int,
+	arena:     mem.Dynamic_Arena,
+	files:     map[string]assets.Prepared_Representation,
+	attempts:  [LATE_ATTEMPTS]Late_Attempt,
+}
+
+@(private)
+Late_Attempt :: struct {
+	id:     [64]u8,
+	length: int,
+	at:     time.Tick,
+}
+
+// Frees what was loaded after preparation. Call once no request can reach the
+// build; the rest of the cache belongs to the allocator that prepared it.
+release_build :: proc(build: ^Build_Cache) {
+	if build == nil || build.late == nil {
+		return
+	}
+	mem.dynamic_arena_destroy(&build.late.arena)
+	build.late.files = nil
+	build.late.held = nil
+	build.late = nil
 }
 
 // Generations are named by content: the digest covers every linked module and
@@ -377,9 +429,13 @@ prepare_templates :: proc(
 			allocator,
 		)
 	}
-	if config.archive_directory != "" &&
-	   !archive_build(&build, linked, config.archive_directory, config.archive_retention, allocator) {
-		return false
+	if config.archive_directory != "" {
+		if !archive_build(&build, linked, config.archive_directory, config.archive_retention, allocator) {
+			return false
+		}
+		if config.archive_retention.rescan_interval >= 0 {
+			build.late = late_generations(build, config.archive_directory, config.archive_retention, allocator)
+		}
 	}
 	cache.patterns = patterns[:]
 	slice.sort_by(cache.patterns, literal_first)
@@ -647,6 +703,160 @@ archive_build :: proc(
 	return true
 }
 
+@(private)
+late_generations :: proc(
+	build: Build_Cache,
+	directory: string,
+	retention: Archive_Retention,
+	allocator: mem.Allocator,
+) -> ^Late_Generations {
+	late := new(Late_Generations, allocator)
+	late.directory = strings.clone(directory, allocator)
+	late.interval = retention.rescan_interval
+	if late.interval == 0 {
+		late.interval = DEFAULT_ARCHIVE_RESCAN_INTERVAL
+	}
+	late.max_age = retention.max_age
+	if late.max_age == 0 {
+		late.max_age = DEFAULT_ARCHIVE_MAX_AGE
+	}
+	late.max_bytes = retention.max_archive_bytes
+	if late.max_bytes <= 0 || late.max_bytes > assets.FILE_BYTES_MAX {
+		late.max_bytes = assets.FILE_BYTES_MAX
+	}
+	late.max_count = retention.max_count
+	if late.max_count == 0 {
+		late.max_count = DEFAULT_ARCHIVE_MAX_COUNT
+	}
+	if late.max_count < 0 || late.max_count > LATE_GENERATIONS_MAX {
+		late.max_count = LATE_GENERATIONS_MAX
+	}
+	// Late storage, the held set among it, is the process heap's: the cache's
+	// own allocator is not for request threads.
+	mem.dynamic_arena_init(&late.arena, rt.heap_allocator(), rt.heap_allocator())
+	storage := mem.dynamic_arena_allocator(&late.arena)
+	late.held = make(map[string]bool, storage)
+	for url in build.files {
+		if id, ok := build_url_generation(url); ok && id not_in late.held {
+			late.held[strings.clone(id, storage)] = true
+		}
+	}
+	late.held[strings.clone(build.id, storage)] = true
+	return late
+}
+
+@(private)
+build_url_generation :: proc(url: string) -> (id: string, ok: bool) {
+	if !strings.has_prefix(url, BUILD_PATH) {
+		return "", false
+	}
+	rest := url[len(BUILD_PATH):]
+	slash := strings.index_byte(rest, '/')
+	if slash <= 0 {
+		return "", false
+	}
+	return rest[:slash], archive_id_ok(rest[:slash])
+}
+
+// Admits a lookup of id unless it, or LATE_ATTEMPTS other generations, were
+// looked for within the interval. The caller holds late.mu.
+@(private)
+late_attempt_admitted :: proc(late: ^Late_Generations, id: string) -> bool {
+	now := time.tick_now()
+	slot := -1
+	for &attempt, index in late.attempts {
+		if attempt.length == len(id) && string(attempt.id[:attempt.length]) == id {
+			if time.tick_diff(attempt.at, now) < late.interval {
+				return false
+			}
+			slot = index
+			break
+		}
+		if slot < 0 && (attempt.length == 0 || time.tick_diff(attempt.at, now) >= late.interval) {
+			slot = index
+		}
+	}
+	if slot < 0 {
+		return false
+	}
+	attempt := &late.attempts[slot]
+	attempt.length = copy(attempt.id[:], id)
+	attempt.at = now
+	return true
+}
+
+// A request for a generation this process does not hold reads that one archive
+// file on the request's thread, with the limits and skip-and-warn rules of
+// preparation. Only real archive files cost more than a stat, and each is loaded
+// once, up to the retention count.
+@(private)
+late_build_file :: proc(late: ^Late_Generations, url: string) -> (assets.Prepared_Representation, bool) {
+	id, valid := build_url_generation(url)
+	if !valid {
+		return {}, false
+	}
+	sync.mutex_lock(&late.mu)
+	defer sync.mutex_unlock(&late.mu)
+	if rep, found := late.files[url]; found {
+		return rep, true
+	}
+	if late.held[id] || !late_attempt_admitted(late, id) {
+		return {}, false
+	}
+	scratch_arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&scratch_arena)
+	defer mem.dynamic_arena_destroy(&scratch_arena)
+	scratch := mem.dynamic_arena_allocator(&scratch_arena)
+	path := fmt.aprintf("%s/%s%s", late.directory, id, ARCHIVE_SUFFIX, allocator = scratch)
+	if entry_type(path) != .Regular {
+		return {}, false
+	}
+	if late.loaded >= late.max_count {
+		log.warnf(
+			"Ignoring build archive %s: %d generations were already loaded after preparation",
+			path,
+			late.loaded,
+		)
+		return {}, false
+	}
+	archive, reason := read_archive(path, id, late.max_bytes, scratch)
+	if reason != "" {
+		log.warnf("Ignoring build archive %s: %s", path, reason)
+		return {}, false
+	}
+	seconds := time.to_unix_seconds(time.now())
+	if late.max_age > 0 &&
+	   archive.retired_at > 0 &&
+	   time.Duration(seconds - archive.retired_at) * time.Second > late.max_age {
+		log.warnf("Ignoring build archive %s: retired longer than %v", path, late.max_age)
+		return {}, false
+	}
+	storage := mem.dynamic_arena_allocator(&late.arena)
+	if late.files == nil {
+		late.files = make(map[string]assets.Prepared_Representation, storage)
+	}
+	for key, previous in archive.files {
+		owned_url := fmt.aprintf("%s%s%s", BUILD_PATH, id, key, allocator = storage)
+		source, clone_err := strings.clone(previous, storage)
+		if owned_url == "" || clone_err != nil {
+			log.errorf("Could not allocate build archive %s", path)
+			return {}, false
+		}
+		late.files[owned_url], _ = assets.prepare_encoded_representation(
+			transmute([]u8)source,
+			build_content_type(key),
+			storage,
+			level = assets.RETAINED_BROTLI_LEVEL,
+		)
+	}
+	owned_id, _ := strings.clone(id, storage)
+	late.held[owned_id] = true
+	late.loaded += 1
+	log.infof("Loaded build archive %s written after this process prepared", path)
+	rep, found := late.files[url]
+	return rep, found
+}
+
 serve_build_asset :: proc(request: ^Request, cache: Page_Cache) -> (Response, bool) {
 	if !strings.has_prefix(request.path, BUILD_PATH) {
 		return {}, false
@@ -656,6 +866,9 @@ serve_build_asset :: proc(request: ^Request, cache: Page_Cache) -> (Response, bo
 	}
 	path, valid := document_path(request.path, request.allocator)
 	rep, found := cache.build.files[path]
+	if valid && !found && cache.build.late != nil {
+		rep, found = late_build_file(cache.build.late, path)
+	}
 	if !valid || !found {
 		// Another process may hold this generation, or it has retired. Neither
 		// answer may be remembered for a URL that is immutable where it exists.

@@ -7,7 +7,6 @@ import "core:log"
 import "core:mem"
 import "core:net"
 import "core:os"
-import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 import core "../core"
@@ -58,7 +57,7 @@ prepare_legacy_pages :: proc(config: Page_Mount, development: bool, allocator: m
 		return {}, false
 	}
 
-	root, error := filepath.abs(config.directory, allocator)
+	root, error := root_directory(config.directory, allocator)
 
 	if error != nil {
 		log.error("Could not resolve page directory")

@@ -152,28 +152,60 @@ footer{margin-top:64px;padding:22px 0 0;border-top:1px solid var(--line);display
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <defs>
-    <linearGradient id="chan-back" x1="0" y1="0" x2="1" y2=".6"><stop offset="0" stop-color="#3fc6d4"/><stop offset=".5" stop-color="#3f84e6"/><stop offset="1" stop-color="#8b6cf0"/></linearGradient>
-    <linearGradient id="chan-fin" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4fa2ec"/><stop offset="1" stop-color="#8b6cf0"/></linearGradient>
-    <clipPath id="chan-body"><path d="M30 100C30 56 74 31 124 32C170 33 198 62 200 96C198 129 168 152 122 154C72 156 30 141 30 100Z"/></clipPath>
+    <radialGradient id="chan-back" cx=".34" cy=".22" r=".85"><stop offset="0" stop-color="#8ff0f4"/><stop offset=".28" stop-color="#3fc3d8"/><stop offset=".62" stop-color="#3a7ee0"/><stop offset="1" stop-color="#4a3fb8"/></radialGradient>
+    <linearGradient id="chan-belly" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset=".45" stop-color="#eef3f2"/><stop offset=".8" stop-color="#cfdbe4"/><stop offset="1" stop-color="#a9b6d6"/></linearGradient>
+    <linearGradient id="chan-sheen" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#7fe6ef" stop-opacity="0"/><stop offset=".35" stop-color="#9fd8ff" stop-opacity=".55"/><stop offset=".7" stop-color="#d7a6ff" stop-opacity=".5"/><stop offset="1" stop-color="#d7a6ff" stop-opacity="0"/></linearGradient>
+    <radialGradient id="chan-shade" cx=".42" cy=".36" r=".7"><stop offset=".55" stop-color="#0a1030" stop-opacity="0"/><stop offset="1" stop-color="#0a1030" stop-opacity=".5"/></radialGradient>
+    <linearGradient id="chan-fin" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6fd4f0"/><stop offset=".55" stop-color="#4f8ef0"/><stop offset="1" stop-color="#7a5ce8"/></linearGradient>
+    <linearGradient id="chan-tail" x1="0" y1=".5" x2="1" y2=".5"><stop offset="0" stop-color="#3a6fd8"/><stop offset=".6" stop-color="#6f68f0"/><stop offset="1" stop-color="#b79cff"/></linearGradient>
+    <linearGradient id="chan-finlet" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffe08a"/><stop offset="1" stop-color="#f2b33d"/></linearGradient>
+    <radialGradient id="chan-iris" cx=".5" cy=".7" r=".7"><stop offset="0" stop-color="#2f8fb0"/><stop offset=".55" stop-color="#16304a"/><stop offset="1" stop-color="#0b1420"/></radialGradient>
+    <radialGradient id="chan-blush" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ff7d9a" stop-opacity=".9"/><stop offset="1" stop-color="#ff7d9a" stop-opacity="0"/></radialGradient>
+    <filter id="chan-blur" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="2.2"/></filter>
+    <filter id="chan-blur-lg" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="5"/></filter>
+    <clipPath id="chan-body"><path d="M28 104C28 60 66 34 114 34C160 34 188 62 194 98C188 132 160 156 112 156C64 156 28 144 28 104Z"/></clipPath>
     <symbol id="saba-chan" viewBox="0 0 240 180">
-      <path d="M190 84C204 70 214 56 230 48C234 66 226 82 220 96C226 110 234 126 230 144C214 136 204 122 190 108Z" fill="url(#chan-fin)" stroke="#14202a" stroke-width="5" stroke-linejoin="round"/>
-      <path d="M112 36C118 20 136 12 156 16C152 26 146 34 140 40Z" fill="url(#chan-fin)" stroke="#14202a" stroke-width="5" stroke-linejoin="round"/>
+      <!-- forked tail and its rays -->
+      <path d="M182 88C192 92 198 94 202 92C208 72 220 56 236 48C236 70 228 86 216 99C228 112 236 128 236 150C220 142 208 126 202 106C198 104 192 106 182 110Z" fill="url(#chan-tail)" stroke="#14202a" stroke-width="5" stroke-linejoin="round"/>
+      <path d="M206 90L226 62M207 99L214 99M206 108L226 136" fill="none" stroke="#2b2a8c" stroke-opacity=".35" stroke-width="2.5" stroke-linecap="round"/>
+      <!-- finlets, the mackerel's little yellow comb -->
+      <g fill="url(#chan-finlet)" stroke="#14202a" stroke-width="3.5" stroke-linejoin="round">
+        <path d="M160 46L172 40L170 52Z"/><path d="M172 54L184 49L180 61Z"/><path d="M181 64L193 61L187 72Z"/>
+        <path d="M160 152L172 158L170 146Z"/><path d="M172 144L184 149L180 137Z"/>
+      </g>
+      <!-- dorsal fin -->
+      <path d="M96 40C100 20 118 8 144 10C138 18 136 28 140 40Z" fill="url(#chan-fin)" stroke="#14202a" stroke-width="5" stroke-linejoin="round"/>
+      <path d="M108 37L116 20M122 38L130 15" fill="none" stroke="#2b2a8c" stroke-opacity=".35" stroke-width="2.5" stroke-linecap="round"/>
+      <!-- body -->
       <g clip-path="url(#chan-body)">
         <rect x="20" y="20" width="200" height="150" fill="url(#chan-back)"/>
-        <g fill="none" stroke="#1a2f5c" stroke-width="6" stroke-linecap="round">
-          <path d="M100 34c-7 9 7 17 0 26s7 17 0 26"/><path d="M126 32c-7 9 7 17 0 26s7 17 0 26"/>
-          <path d="M152 36c-7 9 7 17 0 26s7 17 0 24"/><path d="M176 46c-6 8 6 15 0 23s6 14 0 20"/>
+        <g fill="none" stroke="#14266a" stroke-opacity=".62" stroke-width="5.5" stroke-linecap="round">
+          <path d="M92 38c-8 8 6 15-1 23s6 14 0 22"/><path d="M114 36c-8 9 6 16-1 24s6 14 0 23"/>
+          <path d="M136 38c-8 9 6 16-1 24s6 14 0 22"/><path d="M158 44c-7 8 6 15 0 22s5 13 0 19"/>
+          <path d="M178 58c-5 7 5 12 0 18s4 10 0 14"/>
         </g>
-        <path d="M18 106C60 96 104 116 148 104S196 98 214 104V176H18Z" fill="#f4efe4"/>
-        <path d="M18 106C60 96 104 116 148 104S196 98 214 104" fill="none" stroke="#c9d9de" stroke-width="3"/>
-        <ellipse cx="128" cy="52" rx="34" ry="8" fill="#fff" opacity=".22" transform="rotate(-8 128 52)"/>
+        <path d="M24 108C64 98 108 120 152 108S192 100 214 106V176H24Z" fill="url(#chan-belly)"/>
+        <path d="M24 108C64 98 108 120 152 108S192 100 214 106" fill="none" stroke="url(#chan-sheen)" stroke-width="9"/>
+        <rect x="20" y="20" width="200" height="150" fill="url(#chan-shade)"/>
+        <!-- rim light along the back, a soft top highlight and a glint -->
+        <path d="M36 92C44 58 76 40 114 39C150 39 176 58 186 86" fill="none" stroke="#e8fdff" stroke-opacity=".55" stroke-width="5" filter="url(#chan-blur)"/>
+        <ellipse cx="104" cy="58" rx="30" ry="9" fill="#fff" opacity=".55" transform="rotate(-10 104 58)" filter="url(#chan-blur)"/>
+        <ellipse cx="84" cy="62" rx="5" ry="3.2" fill="#fff" transform="rotate(-18 84 62)"/>
+        <!-- gill arc and belly bounce light -->
+        <path d="M84 72C92 86 92 104 84 116" fill="none" stroke="#0e1e4a" stroke-opacity=".22" stroke-width="3.5" stroke-linecap="round"/>
+        <ellipse cx="112" cy="168" rx="70" ry="14" fill="#9fd8ff" opacity=".35" filter="url(#chan-blur-lg)"/>
       </g>
-      <path d="M30 100C30 56 74 31 124 32C170 33 198 62 200 96C198 129 168 152 122 154C72 156 30 141 30 100Z" fill="none" stroke="#14202a" stroke-width="5"/>
-      <path d="M96 116C112 110 126 116 128 132C114 136 100 130 96 116Z" fill="url(#chan-fin)" stroke="#14202a" stroke-width="4" stroke-linejoin="round"/>
-      <ellipse cx="64" cy="84" rx="8" ry="10.5" fill="#14202a"/>
-      <circle cx="61.5" cy="79.5" r="3.2" fill="#fff"/><circle cx="66.5" cy="89" r="1.4" fill="#fff"/>
-      <ellipse cx="60" cy="108" rx="10" ry="5.5" fill="#ff8fa6" opacity=".85"/>
-      <path d="M40 114q5 6 10 0" fill="none" stroke="#14202a" stroke-width="3.5" stroke-linecap="round"/>
+      <path d="M28 104C28 60 66 34 114 34C160 34 188 62 194 98C188 132 160 156 112 156C64 156 28 144 28 104Z" fill="none" stroke="#14202a" stroke-width="5"/>
+      <!-- pectoral fin -->
+      <path d="M100 112C118 104 136 110 140 128C128 136 108 132 100 112Z" fill="url(#chan-fin)" stroke="#14202a" stroke-width="4.5" stroke-linejoin="round"/>
+      <path d="M106 114L132 126M110 120L128 130" fill="none" stroke="#ffffff" stroke-opacity=".45" stroke-width="2" stroke-linecap="round"/>
+      <!-- face -->
+      <ellipse cx="66" cy="120" rx="13" ry="7.5" fill="url(#chan-blush)"/>
+      <ellipse cx="62" cy="86" rx="13" ry="15" fill="#fff" stroke="#14202a" stroke-width="4"/>
+      <ellipse cx="60" cy="88" rx="9.5" ry="11.5" fill="url(#chan-iris)"/>
+      <circle cx="56" cy="82" r="4.2" fill="#fff"/><circle cx="64" cy="94" r="1.8" fill="#fff"/>
+      <path d="M36 112C40 122 50 124 54 114Z" fill="#7a1f33" stroke="#14202a" stroke-width="3.5" stroke-linejoin="round"/>
+      <path d="M41 119C44 116 49 116 51 118C49 121 44 122 41 119Z" fill="#ff8fa6"/>
     </symbol>
   </defs>
 </svg>

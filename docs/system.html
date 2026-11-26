@@ -3,111 +3,197 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
 <meta name="description" content="How Saba is built: its packages and libraries, the path of a request, the connection phases, and how JSX becomes a served document.">
-<title>Saba · System</title>
+<title>System · Saba</title>
 <!-- Sources: src/saba.odin (facade), src/application/application.odin (preparation and
      routing order), src/core/connection.odin and server.odin (listeners, phases, deadlines),
      src/core/http2.odin, http3.odin, response.odin, content_coding.odin, src/pages/build.odin,
      src/jsx/*.odin, src/modules/*.js, docs/adr/0004 and 0006, README.md. -->
 <style>
-:root{color-scheme:light;
---bg:#f6f8fb;--panel:#ffffff;--panel2:#eef2f7;--text:#202b3a;--muted:#586777;--border:#e0e6ee;
---cyan:#1457ba;--green:#2f7a52;--amber:#a35a15;--rose:#b4473b;--purple:#6b4fb3;--orange:#c2621a;--slate:#7a8899;
---navy:#172a40;--navy-text:#bdcbd9;--brand:#e7a465;
---wrap:1400px;--gut:28px;--r-sm:8px;--r-md:12px;--r-lg:16px;
---shadow:0 1px 2px rgba(25,59,104,.06);--ease:.12s ease-out}
-@media(max-width:600px){:root{--gut:16px}}
+/* Saba is mackerel (鯖). Sumi-ink ground, the fish's iridescent back as the one
+   brand gradient, its wavy stripes as the motif, a vermilion seal for the mark
+   and for every limit. Diagram roles: net, route, ui, wait, lib, stop. */
+:root{
+--bg:#090e10;--bg-2:#0d1417;--panel:#10191d;--node:#121c20;--node-soft:#0f171a;
+--line:#1f2d33;--line-2:#2a3b42;--ink:#e6eeef;--muted:#8a9ba1;--faint:#5b6c72;--wire:#5f7379;
+--net:#5ccbe0;--route:#f0c36a;--ui:#b39cff;--wait:#ff9f5c;--lib:#6ad9a0;--stop:#ff5b45;
+--tint-net:rgba(92,203,224,.10);--tint-route:rgba(240,195,106,.10);--tint-ui:rgba(179,156,255,.11);
+--tint-wait:rgba(255,159,92,.10);--tint-lib:rgba(106,217,160,.10);--tint-stop:rgba(255,91,69,.08);
+--sheen:linear-gradient(115deg,#2fb7c9 0%,#3f7fe0 45%,#8a6cf0 75%,#d7a6ff 100%);
+--seal:#e5432f;
+--sans:"Geist","Inter","SF Pro Text",system-ui,-apple-system,"Segoe UI",sans-serif;
+--mono:"Geist Mono","JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+--side:248px;--gut:32px;--r:10px}
+@media(prefers-color-scheme:light){:root{
+--bg:#f3f1ea;--bg-2:#ebe8df;--panel:#fbfaf6;--node:#ffffff;--node-soft:#f6f4ee;
+--line:#dcd8cc;--line-2:#cbc6b8;--ink:#14191b;--muted:#5a6467;--faint:#8b9294;--wire:#7d878a;
+--net:#0f7f96;--route:#9a6a00;--ui:#6847d6;--wait:#c2540f;--lib:#1d7d4e;--stop:#c8321e;
+--tint-net:rgba(15,127,150,.08);--tint-route:rgba(154,106,0,.08);--tint-ui:rgba(104,71,214,.08);
+--tint-wait:rgba(194,84,15,.08);--tint-lib:rgba(29,125,78,.08);--tint-stop:rgba(200,50,30,.06)}}
 *{box-sizing:border-box}
-html{scroll-behavior:smooth;scroll-padding-top:26px}
-body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 Geist,'Avenir Next','Segoe UI',system-ui,sans-serif;overflow-wrap:break-word}
-a{color:var(--cyan);text-decoration:none}a:hover{text-decoration:underline}
-code,kbd,pre{font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
-code{color:#394d61;font-size:.92em}
-:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
+html{scroll-behavior:smooth;scroll-padding-top:72px}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 var(--sans);-webkit-font-smoothing:antialiased;overflow-wrap:break-word}
+a{color:var(--ink);text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:3px}
+a:hover{text-decoration-color:var(--net)}
+code{font-family:var(--mono);font-size:.86em;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+:focus-visible{outline:2px solid var(--net);outline-offset:3px;border-radius:4px}
+::selection{background:rgba(92,203,224,.28)}
 
-.masthead{background:var(--navy);color:#f5f8fc}
-.masthead .bar{max-width:var(--wrap);margin:auto;padding:14px var(--gut);display:flex;align-items:center;justify-content:space-between;gap:24px}
-.masthead .brand{font-weight:650;letter-spacing:-1px;font-size:22px;color:#f5f8fc;text-decoration:none}
-.masthead .brand span{color:var(--brand)}
-.masthead nav{display:flex;gap:18px;font-size:13px}
-.masthead nav a{display:inline-flex;align-items:center;min-height:32px;border-bottom:2px solid transparent;color:var(--navy-text);white-space:nowrap}
-.masthead nav a:hover{color:#fff;text-decoration:none}
-.masthead nav a[aria-current="page"]{color:#fff;border-bottom-color:var(--brand)}
-.masthead a:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
+/* top bar */
+.top{position:sticky;top:0;z-index:5;height:56px;display:flex;align-items:center;gap:28px;padding:0 var(--gut) 0 20px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--bg) 82%,transparent);backdrop-filter:blur(12px)}
+.mark{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)}
+.seal{width:26px;height:26px;border-radius:5px;background:var(--seal);color:#fff4ec;display:grid;place-items:center;font:600 16px/1 "Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.18)}
+.word{font-weight:650;font-size:18px;letter-spacing:-.04em}
+.ver{font:500 11px var(--mono);color:var(--muted);border:1px solid var(--line-2);border-radius:999px;padding:2px 8px}
+.top nav{display:flex;gap:22px;font-size:13.5px;margin-left:12px}
+.top nav a{color:var(--muted);text-decoration:none}
+.top nav a:hover,.top nav a[aria-current]{color:var(--ink)}
+.top .gh{margin-left:auto;font:12px var(--mono);color:var(--muted);text-decoration:none;border:1px solid var(--line-2);border-radius:7px;padding:5px 10px}
+.top .gh:hover{color:var(--ink);border-color:var(--wire)}
 
-.wrap{max-width:var(--wrap);margin:auto;padding:36px var(--gut) 48px}
-.eyebrow{font-size:13px;font-weight:500;color:var(--muted)}
-h1{font-size:clamp(26px,3.6vw,40px);font-weight:550;line-height:1.2;letter-spacing:-.045em;margin:12px 0 8px}
-h2{font-size:23px;letter-spacing:-.03em;margin:0 0 8px}
-h3{font-size:15px;margin:0 0 8px}
+/* layout */
+.shell{display:grid;grid-template-columns:var(--side) minmax(0,1fr)}
+.side{position:sticky;top:56px;height:calc(100vh - 56px);overflow:auto;border-right:1px solid var(--line);padding:26px 14px 30px 20px}
+.side h4{margin:0 0 10px 8px;font:500 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.side a{display:flex;gap:12px;align-items:baseline;padding:6px 8px;border-radius:6px;font-size:13.5px;color:var(--muted);text-decoration:none}
+.side a span{font:11px var(--mono);color:var(--faint);min-width:18px}
+.side a:hover{background:var(--panel);color:var(--ink)}
+.side .group{margin-bottom:26px}
+main{min-width:0;padding:0 var(--gut) 64px}
+.col{max-width:1120px;margin:0 auto}
+
+/* hero */
+.hero{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:40px;align-items:center;padding:64px 0 52px;border-bottom:1px solid var(--line)}
+.kicker{font:500 11.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted);display:flex;gap:10px;align-items:center}
+.kicker::before{content:"";width:22px;height:2px;background:var(--sheen);border-radius:2px}
+h1{font-size:clamp(34px,4.6vw,58px);line-height:1.02;letter-spacing:-.05em;font-weight:600;margin:18px 0 18px}
+h1 em{font-style:normal;background:var(--sheen);-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{font-size:17px;color:var(--muted);max-width:620px;margin:0}
+.lead+.lead{margin-top:12px;font-size:14.5px}
+.fish{position:relative;aspect-ratio:5/4;border-radius:16px;overflow:hidden;border:1px solid var(--line-2);background:#0b1418}
+.fish svg{position:absolute;inset:0;width:100%;height:100%}
+.fish .stamp{position:absolute;right:18px;bottom:18px;width:64px;height:64px;border-radius:9px;background:var(--seal);color:#fff4ec;display:grid;place-items:center;font:600 38px/1 "Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;transform:rotate(-4deg);box-shadow:0 10px 30px -10px rgba(229,67,47,.6),inset 0 0 0 2px rgba(255,255,255,.16)}
+.fish .tag{position:absolute;left:18px;top:16px;font:11px var(--mono);letter-spacing:.1em;color:rgba(230,238,239,.75)}
+
+/* sections */
+section{padding:56px 0 8px}
+.section-head{max-width:820px;margin-bottom:26px}
+.eyebrow{font:500 11.5px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint);display:flex;gap:10px}
+.eyebrow b{color:var(--net);font-weight:500}
+h2{font-size:clamp(24px,2.6vw,32px);line-height:1.15;letter-spacing:-.035em;font-weight:600;margin:12px 0 12px}
+h3{font-size:15px;letter-spacing:-.01em;margin:0 0 6px;font-weight:600}
 p{color:var(--muted);margin:8px 0}
-.lead{font-size:16px;max-width:900px}
-.big{font-size:16px;color:var(--text);max-width:1000px}
-main>header{max-width:1000px;margin-bottom:32px}
-.toc{display:flex;gap:12px;flex-wrap:wrap;margin:24px 0 32px}
-.toc a{display:inline-flex;align-items:center;min-height:36px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--panel);padding:0 14px;color:#394d61;transition:border-color var(--ease)}
-.toc a:hover{border-color:var(--cyan);text-decoration:none}
-section{margin:46px 0}
-.section-head{margin-bottom:20px;max-width:1020px}
+.big{font-size:16px;color:var(--ink);opacity:.86}
+.section-head p{max-width:760px}
 
-.diagram{border:1px solid var(--border);background:var(--panel2);border-radius:var(--r-lg);overflow-x:auto;padding:18px}
-.diagram svg{display:block;width:100%;min-width:1050px;height:auto}
-.legend{display:flex;gap:24px;flex-wrap:wrap;color:var(--muted);font-size:13px;margin:15px 0}
-.swatch{display:inline-block;width:10px;height:10px;border:1px solid currentColor;border-radius:2px;margin-right:8px}
+/* figures */
+.diagram{margin:0;border:1px solid var(--line);border-radius:14px;background:var(--bg-2);overflow:hidden}
+.diagram figcaption{display:flex;justify-content:space-between;gap:16px;align-items:center;padding:11px 16px;border-bottom:1px solid var(--line);font:11.5px var(--mono);letter-spacing:.06em;color:var(--muted);background:var(--panel)}
+.diagram figcaption b{color:var(--ink);font-weight:500}
+.diagram figcaption code{background:none;border:0;padding:0;color:var(--faint);font-size:11px}
+.canvas{overflow-x:auto;padding:18px;background-image:radial-gradient(var(--line) 1px,transparent 1.2px);background-size:22px 22px}
+.canvas svg{display:block;width:100%;min-width:1050px;height:auto;fill:var(--ink)}
+.canvas svg text{font-family:var(--mono)}
+.canvas path[stroke-dasharray]{animation:drift 2.4s linear infinite}
+@keyframes drift{to{stroke-dashoffset:-36}}
+.legend{display:flex;gap:22px;flex-wrap:wrap;color:var(--muted);font:12px var(--mono);margin:14px 2px}
+.swatch{display:inline-block;width:9px;height:9px;border-radius:50%;background:currentColor;margin-right:8px;vertical-align:1px}
 
-.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-top:22px}
+/* cards */
+.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;margin-top:22px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .cards.three{grid-template-columns:repeat(3,minmax(0,1fr))}
-.card{border:1px solid var(--border);background:var(--panel);border-radius:var(--r-md);padding:22px;min-width:0}
-.card .q{color:var(--text);font-size:13px;margin-bottom:6px}
-.card h3 code{color:var(--text);font-size:14px}
-.card p{font-size:13px}
-.c-cyan{border-top:3px solid var(--cyan)}.c-orange{border-top:3px solid var(--orange)}
-.c-green{border-top:3px solid var(--green)}.c-purple{border-top:3px solid var(--purple)}
-.c-amber{border-top:3px solid var(--amber)}.c-slate{border-top:3px solid var(--muted)}
+.cards+.cards{margin-top:14px}
+.card{background:var(--panel);padding:20px 20px 22px;min-width:0;position:relative;transition:background .15s}
+.card:hover{background:var(--node)}
+.card::before{content:"";position:absolute;left:20px;top:0;width:28px;height:2px;background:var(--role,var(--net))}
+.card .q{font:11.5px var(--mono);color:var(--faint);margin:6px 0 10px}
+.card h3 code{background:none;border:0;padding:0;font-size:14px;color:var(--role,var(--ink))}
+.card p{font-size:13.5px;margin:0}
+.c-cyan{--role:var(--net)}.c-orange{--role:var(--route)}.c-green{--role:var(--lib)}
+.c-purple{--role:var(--ui)}.c-amber{--role:var(--wait)}.c-slate{--role:var(--muted)}
 
-.table-wrap{overflow:auto;border:1px solid var(--border);border-radius:var(--r-md);margin-top:14px;box-shadow:var(--shadow)}
-table{border-collapse:collapse;width:100%;min-width:780px;font-size:13px}
-th,td{text-align:left;padding:12px 16px;border-bottom:1px solid var(--border);vertical-align:top}
-th{color:var(--text);background:#f0f4f8;font-size:12px}
-td{color:var(--muted);background:var(--panel)}
-td:first-child{color:var(--amber);width:20%}
-td:nth-child(2){color:var(--text)}
+/* steps */
+.steps{list-style:none;padding:0;margin:22px 0 0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden;counter-reset:s}
+.steps li{counter-increment:s;background:var(--panel);padding:18px 18px 20px;min-width:0}
+.steps li::before{content:"0" counter(s);display:block;font:11.5px var(--mono);color:var(--net);margin-bottom:10px}
+.steps p{font-size:13px;margin:0}
+
+/* tables */
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:12px;margin-top:14px}
+table{border-collapse:collapse;width:100%;min-width:760px;font-size:13.5px}
+th,td{text-align:left;padding:13px 18px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:500 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);background:var(--panel)}
+td{color:var(--muted)}
+td:first-child{width:20%;color:var(--ink)}
+td:first-child code{color:var(--net)}
+td:nth-child(2){color:var(--ink);opacity:.9}
 tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--panel)}
+#limits td:first-child{color:var(--stop)}
 
-.steps{list-style:none;padding:0;margin:0;display:grid;gap:14px;counter-reset:s}
-.steps li{counter-increment:s;border:1px solid var(--border);background:var(--panel);border-radius:var(--r-md);padding:18px 20px 18px 64px;position:relative;min-width:0}
-.steps li::before{content:counter(s);position:absolute;left:20px;top:16px;width:28px;height:28px;border-radius:50%;border:1px solid var(--cyan);color:var(--cyan);display:grid;place-items:center;font-size:13px}
-.steps li.fail::before{border-color:var(--rose);color:var(--rose)}
-.steps h3{margin-bottom:4px}
-.steps p{font-size:13px}
-.note{border-left:2px solid var(--amber);padding-left:16px;margin-top:20px}
-footer{margin-top:40px;border-top:1px solid var(--border);padding-top:16px;font-size:13px;color:var(--muted)}
+.note{position:relative;margin-top:18px;padding:14px 16px 14px 52px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:14px}
+.note::before{content:"鯖";position:absolute;left:14px;top:13px;width:24px;height:24px;border-radius:5px;background:var(--seal);color:#fff4ec;display:grid;place-items:center;font:600 13px/1 "Hiragino Mincho ProN","Yu Mincho",serif}
+footer{margin-top:64px;padding:22px 0 0;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font:12px var(--mono);color:var(--faint)}
 
-@media(max-width:1100px){.masthead .bar{flex-direction:column;align-items:flex-start;gap:4px}.cards,.cards.three{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:760px){.cards,.cards.three{grid-template-columns:1fr}.diagram{padding:8px}section{margin:36px 0}
-.steps li{padding:16px 14px 16px 52px}.steps li::before{left:14px}.card{padding:18px}table{min-width:0}
-th,td{padding:10px}td:first-child{width:auto}td,th{overflow-wrap:anywhere}.table-wrap{overflow:visible}}
-@media print{body{print-color-adjust:exact}.masthead,.toc{display:none}.diagram{overflow:visible}.diagram svg{min-width:0}section{break-inside:avoid}}
-@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+@media(max-width:1180px){.steps{grid-template-columns:repeat(2,minmax(0,1fr))}.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:980px){.shell{grid-template-columns:1fr}.side{display:none}.hero{grid-template-columns:1fr}.top nav{display:none}}
+@media(max-width:640px){:root{--gut:16px}.cards,.cards.three,.steps{grid-template-columns:1fr}.canvas{padding:8px}table{min-width:0}td:first-child{width:auto}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.canvas path[stroke-dasharray]{animation:none}*{transition:none!important}}
+@media print{.top,.side{display:none}.shell{display:block}.canvas svg{min-width:0}.canvas path{animation:none}}
 </style>
 </head>
 <body>
-<header class="masthead"><div class="bar"><a class="brand" href="system.html">saba<span>.</span></a>
-<nav aria-label="Documentation"><a href="system.html" aria-current="page">System</a><a href="architecture.html">In motion</a><a href="features.html">Features</a><a href="https://github.com/dvrd/saba">Source</a></nav></div></header>
-<main class="wrap">
-
-<header>
-  <div class="eyebrow">Saba · system architecture</div>
-  <h1>From a socket to a live page.</h1>
-  <p class="lead">Saba is one Odin process that speaks HTTP/1.1, HTTP/2 and HTTP/3, serves documents its compiler built ahead of time, and ships a small JavaScript runtime that attaches to them in the browser. This page explains how those parts fit together.</p>
-  <p>Read it with <a href="architecture.html">Saba in motion</a>, which animates the same path, and the decisions in <a href="adr/">docs/adr</a>.</p>
+<header class="top">
+  <a class="mark" href="system.html" aria-label="Saba"><span class="seal" aria-hidden="true">鯖</span><span class="word">saba</span></a>
+  <span class="ver">develop</span>
+  <nav aria-label="Documentation"><a href="system.html" aria-current="page">System</a><a href="architecture.html">In motion</a><a href="features.html">Features</a><a href="adr/">Decisions</a></nav>
+  <a class="gh" href="https://github.com/dvrd/saba">dvrd/saba ↗</a>
 </header>
-
-<nav class="toc" aria-label="Sections"><a href="#idea">01 · The idea</a><a href="#map">02 · The map</a><a href="#request">03 · A request, end to end</a><a href="#phases">04 · A connection's phases</a><a href="#responses">05 · Kinds of response</a><a href="#ui">06 · From JSX to a live page</a><a href="#limits">07 · Limits and deadlines</a><a href="#libraries">08 · The libraries</a></nav>
+<div class="shell">
+<aside class="side" aria-label="Sections">
+  <div class="group"><h4>System</h4>
+    <a href="#idea"><span>01</span>The idea</a><a href="#map"><span>02</span>The map</a><a href="#request"><span>03</span>A request, end to end</a><a href="#phases"><span>04</span>A connection's phases</a></div>
+  <div class="group"><h4>Behavior</h4>
+    <a href="#responses"><span>05</span>Kinds of response</a><a href="#ui"><span>06</span>From JSX to a live page</a><a href="#limits"><span>07</span>Limits and deadlines</a><a href="#libraries"><span>08</span>The libraries</a></div>
+  <div class="group"><h4>Elsewhere</h4>
+    <a href="architecture.html"><span>↗</span>Saba in motion</a><a href="features.html"><span>↗</span>Features</a><a href="adr/"><span>↗</span>Decision records</a></div>
+</aside>
+<main><div class="col">
+<header class="hero">
+  <div>
+    <div class="kicker">System architecture</div>
+    <h1>From a socket<br>to a <em>live page</em>.</h1>
+    <p class="lead">Saba is one Odin process that speaks HTTP/1.1, HTTP/2 and HTTP/3, serves documents its compiler built ahead of time, and ships a small JavaScript runtime that attaches to them in the browser.</p>
+    <p class="lead">Read it with <a href="architecture.html">Saba in motion</a>, which animates the same path, and the decisions in <a href="adr/">docs/adr</a>.</p>
+  </div>
+  <div class="fish" aria-hidden="true">
+    <svg viewBox="0 0 500 400" preserveAspectRatio="xMidYMid slice">
+      <defs>
+        <linearGradient id="back" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0d4f5c"/><stop offset=".38" stop-color="#1f6fb0"/><stop offset=".68" stop-color="#5a4fc4"/><stop offset="1" stop-color="#2a2f63"/></linearGradient>
+        <linearGradient id="belly" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cfe1e6" stop-opacity="0"/><stop offset=".45" stop-color="#c9d6db" stop-opacity=".55"/><stop offset="1" stop-color="#eef3f4" stop-opacity=".9"/></linearGradient>
+        <radialGradient id="glint" cx=".7" cy=".25" r=".6"><stop offset="0" stop-color="#d9b8ff" stop-opacity=".45"/><stop offset="1" stop-color="#d9b8ff" stop-opacity="0"/></radialGradient>
+      </defs>
+      <rect width="500" height="400" fill="url(#back)"/>
+      <rect width="500" height="400" fill="url(#glint)"/>
+      <g fill="none" stroke="#071216" stroke-linecap="round" opacity=".78">
+        <path d="M-20 40C40 10 70 70 130 40S220 10 270 46 360 20 410 52 480 30 530 50" stroke-width="9"/>
+        <path d="M-20 86C30 60 80 112 140 84S230 58 290 92 380 62 430 96 500 78 530 92" stroke-width="7"/>
+        <path d="M-20 132C40 104 90 160 150 128S240 104 300 140 390 108 440 142 500 124 530 136" stroke-width="10"/>
+        <path d="M-20 176C30 152 90 200 150 174S250 150 300 184 400 156 450 186 510 172 530 180" stroke-width="6"/>
+        <path d="M-20 214C40 196 100 234 160 212S260 192 320 222 410 198 460 224" stroke-width="5" opacity=".7"/>
+      </g>
+      <rect y="150" width="500" height="250" fill="url(#belly)"/>
+      <path d="M-10 236C120 214 300 252 510 226" stroke="#8fd6e0" stroke-opacity=".55" stroke-width="1.2" fill="none"/>
+    </svg>
+    <span class="tag">SABA · 鯖 · MACKEREL</span>
+    <span class="stamp">鯖</span>
+  </div>
+</header>
 
 <!-- ============================================================ 01 idea -->
 <section id="idea">
-  <div class="section-head"><div class="eyebrow">01 / The idea</div>
+  <div class="section-head"><div class="eyebrow"><b>01</b>The idea</div>
     <h2>The server never renders per request. The compiler decides what is HTML; the browser does the rest.</h2>
     <p class="big">Two halves meet at the build generation. The server half moves bytes safely under budgets and deadlines. The UI half turns JSX into documents and modules before the first request arrives.</p></div>
   <div class="cards">
@@ -126,189 +212,188 @@ th,td{padding:10px}td:first-child{width:auto}td,th{overflow-wrap:anywhere}.table
 
 <!-- ============================================================ 02 map -->
 <section id="map">
-  <div class="section-head"><div class="eyebrow">02 / The map</div>
+  <div class="section-head"><div class="eyebrow"><b>02</b>The map</div>
     <h2>How the packages connect</h2>
     <p>Read left to right. Your program configures the facade; the facade composes Saba's packages; those packages stand on shared libraries that <code>krs</code> installs from <code>.krs/packages.json</code>.</p></div>
 
-<div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" font-family="Menlo,Consolas,monospace" role="img" aria-labelledby="map-t map-d" viewBox="0 0 1400 760">
+<figure class="diagram"><figcaption><span><b>FIG. 02</b> · Package map</span><code>src/ · .krs/packages.json</code></figcaption><div class="canvas"><svg xmlns="http://www.w3.org/2000/svg" font-family="Menlo,Consolas,monospace" role="img" aria-labelledby="map-t map-d" viewBox="0 0 1400 760">
 <title id="map-t">Package map</title>
 <desc id="map-d">The application's main program configures shared:saba, which hands it to the application package. The application prepares assets, modules and pages and serves through core. JSX sources are compiled by the jsx package with the Kessel parser. Core stands on async. The adapters use Surf, aws and the WebSocket codec. The optional database is a kakunou SQLite handle. The browser runtime is served under /__saba/.</desc>
 <defs>
-<marker id="m-cyan" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0 L9 3.5 L0 7Z" fill="#1457ba"/></marker>
-<marker id="m-orange" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0 L9 3.5 L0 7Z" fill="#c2621a"/></marker>
-<marker id="m-purple" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0 L9 3.5 L0 7Z" fill="#6b4fb3"/></marker>
-<marker id="m-green" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0 L9 3.5 L0 7Z" fill="#2f7a52"/></marker>
-<marker id="m-amber" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0 L9 3.5 L0 7Z" fill="#a35a15"/></marker>
-<marker id="m-slate" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0 L9 3.5 L0 7Z" fill="#586777"/></marker>
-<pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#e6ebf2" stroke-width=".5"/></pattern>
+<marker id="m-cyan" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0 L9 3.5 L0 7Z" style="fill:var(--net)"/></marker>
+<marker id="m-orange" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0 L9 3.5 L0 7Z" style="fill:var(--route)"/></marker>
+<marker id="m-purple" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0 L9 3.5 L0 7Z" style="fill:var(--ui)"/></marker>
+<marker id="m-green" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0 L9 3.5 L0 7Z" style="fill:var(--lib)"/></marker>
+<marker id="m-amber" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0 L9 3.5 L0 7Z" style="fill:var(--wait)"/></marker>
+<marker id="m-slate" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0 L9 3.5 L0 7Z" style="fill:var(--muted)"/></marker>
+
 </defs>
-<rect width="100%" height="100%" fill="url(#grid)"/>
-<text x="30" y="34" fill="#1457ba" font-size="12">YOUR APPLICATION</text><text x="330" y="34" fill="#c2621a" font-size="12">FACADE</text><text x="640" y="34" fill="#6b4fb3" font-size="12">SABA PACKAGES</text><text x="1030" y="34" fill="#2f7a52" font-size="12">SHARED LIBRARIES · krs</text>
+<text x="30" y="34" font-size="12" style="fill:var(--net)">YOUR APPLICATION</text><text x="330" y="34" font-size="12" style="fill:var(--route)">FACADE</text><text x="640" y="34" font-size="12" style="fill:var(--ui)">SABA PACKAGES</text><text x="1030" y="34" font-size="12" style="fill:var(--lib)">SHARED LIBRARIES · krs</text>
 
 <!-- arrows -->
-<path d="M280 125H325" stroke="#1457ba" stroke-width="1.6" fill="none" marker-end="url(#m-cyan)"/>
-<path d="M460 180V195" stroke="#c2621a" stroke-width="1.6" fill="none" marker-end="url(#m-orange)"/>
-<path d="M590 225H635" stroke="#c2621a" stroke-width="1.6" fill="none" marker-end="url(#m-orange)"/>
-<text x="596" y="216" fill="#c2621a" font-size="10">serve</text>
-<path d="M590 300H612V400H635" stroke="#c2621a" stroke-width="1.2" stroke-dasharray="5 4" fill="none" marker-end="url(#m-orange)"/>
-<text x="474" y="410" fill="#c2621a" font-size="10">prepares before listen</text>
-<path d="M280 300H305V355H890V345" stroke="#1457ba" stroke-width="1.4" fill="none" marker-end="url(#m-cyan)"/>
-<text x="330" y="372" fill="#1457ba" font-size="10">compiled at build time</text>
-<path d="M970 160H1025" stroke="#2f7a52" stroke-width="1.6" fill="none" marker-end="url(#m-green)"/>
-<path d="M970 310H1025" stroke="#6b4fb3" stroke-width="1.4" fill="none" marker-end="url(#m-purple)"/>
-<path d="M970 480C1000 480 998 385 1025 385" stroke="#a35a15" stroke-width="1.3" fill="none" marker-end="url(#m-amber)"/>
-<path d="M970 495C1004 495 1002 445 1025 445" stroke="#a35a15" stroke-width="1.3" fill="none" marker-end="url(#m-amber)"/>
-<path d="M970 510C1000 510 1000 505 1025 505" stroke="#a35a15" stroke-width="1.3" fill="none" marker-end="url(#m-amber)"/>
-<path d="M970 525C1004 525 994 70 1025 205" stroke="#2f7a52" stroke-width="1" stroke-dasharray="4 4" fill="none" marker-end="url(#m-green)"/>
-<path d="M155 450V615H1000V565H1025" stroke="#586777" stroke-width="1.2" stroke-dasharray="5 4" fill="none" marker-end="url(#m-slate)"/>
-<text x="330" y="608" fill="#586777" font-size="10">Server.database is handed to every handler call</text>
+<path d="M280 125H325" stroke-width="1.6" fill="none" marker-end="url(#m-cyan)" style="stroke:var(--net)"/>
+<path d="M460 180V195" stroke-width="1.6" fill="none" marker-end="url(#m-orange)" style="stroke:var(--route)"/>
+<path d="M590 225H635" stroke-width="1.6" fill="none" marker-end="url(#m-orange)" style="stroke:var(--route)"/>
+<text x="596" y="216" font-size="10" style="fill:var(--route)">serve</text>
+<path d="M590 300H612V400H635" stroke-width="1.2" stroke-dasharray="5 4" fill="none" marker-end="url(#m-orange)" style="stroke:var(--route)"/>
+<text x="474" y="410" font-size="10" style="fill:var(--route)">prepares before listen</text>
+<path d="M280 300H305V355H890V345" stroke-width="1.4" fill="none" marker-end="url(#m-cyan)" style="stroke:var(--net)"/>
+<text x="330" y="372" font-size="10" style="fill:var(--net)">compiled at build time</text>
+<path d="M970 160H1025" stroke-width="1.6" fill="none" marker-end="url(#m-green)" style="stroke:var(--lib)"/>
+<path d="M970 310H1025" stroke-width="1.4" fill="none" marker-end="url(#m-purple)" style="stroke:var(--ui)"/>
+<path d="M970 480C1000 480 998 385 1025 385" stroke-width="1.3" fill="none" marker-end="url(#m-amber)" style="stroke:var(--wait)"/>
+<path d="M970 495C1004 495 1002 445 1025 445" stroke-width="1.3" fill="none" marker-end="url(#m-amber)" style="stroke:var(--wait)"/>
+<path d="M970 510C1000 510 1000 505 1025 505" stroke-width="1.3" fill="none" marker-end="url(#m-amber)" style="stroke:var(--wait)"/>
+<path d="M970 525C1004 525 994 70 1025 205" stroke-width="1" stroke-dasharray="4 4" fill="none" marker-end="url(#m-green)" style="stroke:var(--lib)"/>
+<path d="M155 450V615H1000V565H1025" stroke-width="1.2" stroke-dasharray="5 4" fill="none" marker-end="url(#m-slate)" style="stroke:var(--muted)"/>
+<text x="330" y="608" font-size="10" style="fill:var(--muted)">Server.database is handed to every handler call</text>
 
 <!-- application -->
-<g><rect x="30" y="70" width="250" height="110" rx="8" fill="#ffffff"/><rect x="30" y="70" width="250" height="110" rx="8" fill="rgba(20,87,186,0.12)" stroke="#1457ba" stroke-width="1.5"/><text x="48" y="99" fill="#202b3a" font-size="16" font-weight="600">main.odin</text><text x="48" y="123" fill="#586777" font-size="12">saba.Server{ … }</text><text x="48" y="142" fill="#586777" font-size="12">handler · handler_routes</text><text x="48" y="161" fill="#586777" font-size="12">tls · http2 · http3 · limits</text></g>
-<g><rect x="30" y="220" width="250" height="110" rx="8" fill="#ffffff"/><rect x="30" y="220" width="250" height="110" rx="8" fill="rgba(20,87,186,0.12)" stroke="#1457ba" stroke-width="1.5"/><text x="48" y="249" fill="#202b3a" font-size="16" font-weight="600">web/</text><text x="48" y="273" fill="#586777" font-size="12">components *.jsx</text><text x="48" y="292" fill="#586777" font-size="12">page templates · routes</text><text x="48" y="311" fill="#586777" font-size="12">static assets</text></g>
-<g><rect x="30" y="380" width="250" height="70" rx="8" fill="#ffffff" stroke="#1457ba" stroke-width="1.2" stroke-dasharray="5 4"/><text x="48" y="408" fill="#202b3a" font-size="14" font-weight="600">database (optional)</text><text x="48" y="430" fill="#586777" font-size="12">opened by the program</text></g>
+<g><rect x="30" y="70" width="250" height="110" rx="8" style="fill:var(--node)"/><rect x="30" y="70" width="250" height="110" rx="8" stroke-width="1.5" style="fill:var(--tint-net);stroke:var(--net)"/><text x="48" y="99" font-size="16" font-weight="600" style="fill:var(--ink)">main.odin</text><text x="48" y="123" font-size="12" style="fill:var(--muted)">saba.Server{ … }</text><text x="48" y="142" font-size="12" style="fill:var(--muted)">handler · handler_routes</text><text x="48" y="161" font-size="12" style="fill:var(--muted)">tls · http2 · http3 · limits</text></g>
+<g><rect x="30" y="220" width="250" height="110" rx="8" style="fill:var(--node)"/><rect x="30" y="220" width="250" height="110" rx="8" stroke-width="1.5" style="fill:var(--tint-net);stroke:var(--net)"/><text x="48" y="249" font-size="16" font-weight="600" style="fill:var(--ink)">web/</text><text x="48" y="273" font-size="12" style="fill:var(--muted)">components *.jsx</text><text x="48" y="292" font-size="12" style="fill:var(--muted)">page templates · routes</text><text x="48" y="311" font-size="12" style="fill:var(--muted)">static assets</text></g>
+<g><rect x="30" y="380" width="250" height="70" rx="8" stroke-width="1.2" stroke-dasharray="5 4" style="fill:var(--node);stroke:var(--net)"/><text x="48" y="408" font-size="14" font-weight="600" style="fill:var(--ink)">database (optional)</text><text x="48" y="430" font-size="12" style="fill:var(--muted)">opened by the program</text></g>
 
 <!-- facade -->
-<g><rect x="330" y="70" width="260" height="110" rx="8" fill="#ffffff"/><rect x="330" y="70" width="260" height="110" rx="8" fill="rgba(194,98,26,0.16)" stroke="#c2621a" stroke-width="1.5"/><text x="348" y="99" fill="#202b3a" font-size="16" font-weight="600">shared:saba</text><text x="348" y="123" fill="#586777" font-size="12">Server · serve</text><text x="348" y="142" fill="#586777" font-size="12">re-exports core · pages · s3</text><text x="348" y="161" fill="#586777" font-size="12">handler gets a Connection</text></g>
-<g><rect x="330" y="200" width="260" height="130" rx="8" fill="#ffffff"/><rect x="330" y="200" width="260" height="130" rx="8" fill="rgba(194,98,26,0.16)" stroke="#c2621a" stroke-width="1.5"/><text x="348" y="229" fill="#202b3a" font-size="16" font-weight="600">application</text><text x="348" y="253" fill="#586777" font-size="12">prepare, then listen</text><text x="348" y="272" fill="#586777" font-size="12">route in a fixed order</text><text x="348" y="291" fill="#586777" font-size="12">dev watcher · rebuild</text><text x="348" y="310" fill="#586777" font-size="12">no database dependency</text></g>
+<g><rect x="330" y="70" width="260" height="110" rx="8" style="fill:var(--node)"/><rect x="330" y="70" width="260" height="110" rx="8" stroke-width="1.5" style="fill:var(--tint-route);stroke:var(--route)"/><text x="348" y="99" font-size="16" font-weight="600" style="fill:var(--ink)">shared:saba</text><text x="348" y="123" font-size="12" style="fill:var(--muted)">Server · serve</text><text x="348" y="142" font-size="12" style="fill:var(--muted)">re-exports core · pages · s3</text><text x="348" y="161" font-size="12" style="fill:var(--muted)">handler gets a Connection</text></g>
+<g><rect x="330" y="200" width="260" height="130" rx="8" style="fill:var(--node)"/><rect x="330" y="200" width="260" height="130" rx="8" stroke-width="1.5" style="fill:var(--tint-route);stroke:var(--route)"/><text x="348" y="229" font-size="16" font-weight="600" style="fill:var(--ink)">application</text><text x="348" y="253" font-size="12" style="fill:var(--muted)">prepare, then listen</text><text x="348" y="272" font-size="12" style="fill:var(--muted)">route in a fixed order</text><text x="348" y="291" font-size="12" style="fill:var(--muted)">dev watcher · rebuild</text><text x="348" y="310" font-size="12" style="fill:var(--muted)">no database dependency</text></g>
 
 <!-- saba packages -->
-<g><rect x="640" y="70" width="330" height="180" rx="8" fill="#ffffff"/><rect x="640" y="70" width="330" height="180" rx="8" fill="rgba(20,87,186,0.10)" stroke="#1457ba" stroke-width="1.5"/><text x="658" y="99" fill="#202b3a" font-size="16" font-weight="600">core</text><text x="658" y="123" fill="#586777" font-size="12">HTTP/1.1 · HTTP/2 · HTTP/3</text><text x="658" y="142" fill="#586777" font-size="12">TLS · ALPN h2 or http/1.1</text><text x="658" y="161" fill="#586777" font-size="12">gzip · Brotli response coding</text><text x="658" y="180" fill="#586777" font-size="12">stream · deferred · upgrade</text><text x="658" y="199" fill="#586777" font-size="12">budgets · deadlines · keep-alive</text><text x="658" y="218" fill="#586777" font-size="12">signals · graceful drain</text><text x="658" y="237" fill="#586777" font-size="12">observability events</text></g>
-<g><rect x="640" y="280" width="155" height="62" rx="8" fill="#ffffff" stroke="#6b4fb3" stroke-width="1.2"/><text x="656" y="305" fill="#202b3a" font-size="14" font-weight="600">development</text><text x="656" y="326" fill="#586777" font-size="11">supervisor · reload</text></g>
-<g><rect x="815" y="280" width="155" height="62" rx="8" fill="#ffffff"/><rect x="815" y="280" width="155" height="62" rx="8" fill="rgba(107,79,179,0.12)" stroke="#6b4fb3" stroke-width="1.5"/><text x="831" y="305" fill="#202b3a" font-size="14" font-weight="600">jsx</text><text x="831" y="326" fill="#586777" font-size="11">JSX → HTML + JS</text></g>
-<g><rect x="640" y="370" width="100" height="62" rx="8" fill="#ffffff" stroke="#6b4fb3" stroke-width="1.2"/><text x="654" y="395" fill="#202b3a" font-size="13" font-weight="600">assets</text><text x="654" y="416" fill="#586777" font-size="11">preloaded</text></g>
-<g><rect x="755" y="370" width="100" height="62" rx="8" fill="#ffffff" stroke="#6b4fb3" stroke-width="1.2"/><text x="769" y="395" fill="#202b3a" font-size="13" font-weight="600">modules</text><text x="769" y="416" fill="#586777" font-size="11">JS mounts</text></g>
-<g><rect x="870" y="370" width="100" height="62" rx="8" fill="#ffffff" stroke="#6b4fb3" stroke-width="1.2"/><text x="884" y="395" fill="#202b3a" font-size="13" font-weight="600">pages</text><text x="884" y="416" fill="#586777" font-size="11">generations</text></g>
-<g><rect x="640" y="460" width="330" height="90" rx="8" fill="#ffffff"/><rect x="640" y="460" width="330" height="90" rx="8" fill="rgba(163,90,21,0.10)" stroke="#a35a15" stroke-width="1.5"/><text x="658" y="488" fill="#202b3a" font-size="15" font-weight="600">adapters</text><text x="658" y="511" fill="#586777" font-size="12">offload · upstream</text><text x="658" y="530" fill="#586777" font-size="12">websocket · s3</text></g>
+<g><rect x="640" y="70" width="330" height="180" rx="8" style="fill:var(--node)"/><rect x="640" y="70" width="330" height="180" rx="8" stroke-width="1.5" style="fill:var(--tint-net);stroke:var(--net)"/><text x="658" y="99" font-size="16" font-weight="600" style="fill:var(--ink)">core</text><text x="658" y="123" font-size="12" style="fill:var(--muted)">HTTP/1.1 · HTTP/2 · HTTP/3</text><text x="658" y="142" font-size="12" style="fill:var(--muted)">TLS · ALPN h2 or http/1.1</text><text x="658" y="161" font-size="12" style="fill:var(--muted)">gzip · Brotli response coding</text><text x="658" y="180" font-size="12" style="fill:var(--muted)">stream · deferred · upgrade</text><text x="658" y="199" font-size="12" style="fill:var(--muted)">budgets · deadlines · keep-alive</text><text x="658" y="218" font-size="12" style="fill:var(--muted)">signals · graceful drain</text><text x="658" y="237" font-size="12" style="fill:var(--muted)">observability events</text></g>
+<g><rect x="640" y="280" width="155" height="62" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--ui)"/><text x="656" y="305" font-size="14" font-weight="600" style="fill:var(--ink)">development</text><text x="656" y="326" font-size="11" style="fill:var(--muted)">supervisor · reload</text></g>
+<g><rect x="815" y="280" width="155" height="62" rx="8" style="fill:var(--node)"/><rect x="815" y="280" width="155" height="62" rx="8" stroke-width="1.5" style="fill:var(--tint-ui);stroke:var(--ui)"/><text x="831" y="305" font-size="14" font-weight="600" style="fill:var(--ink)">jsx</text><text x="831" y="326" font-size="11" style="fill:var(--muted)">JSX → HTML + JS</text></g>
+<g><rect x="640" y="370" width="100" height="62" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--ui)"/><text x="654" y="395" font-size="13" font-weight="600" style="fill:var(--ink)">assets</text><text x="654" y="416" font-size="11" style="fill:var(--muted)">preloaded</text></g>
+<g><rect x="755" y="370" width="100" height="62" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--ui)"/><text x="769" y="395" font-size="13" font-weight="600" style="fill:var(--ink)">modules</text><text x="769" y="416" font-size="11" style="fill:var(--muted)">JS mounts</text></g>
+<g><rect x="870" y="370" width="100" height="62" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--ui)"/><text x="884" y="395" font-size="13" font-weight="600" style="fill:var(--ink)">pages</text><text x="884" y="416" font-size="11" style="fill:var(--muted)">generations</text></g>
+<g><rect x="640" y="460" width="330" height="90" rx="8" style="fill:var(--node)"/><rect x="640" y="460" width="330" height="90" rx="8" stroke-width="1.5" style="fill:var(--tint-wait);stroke:var(--wait)"/><text x="658" y="488" font-size="15" font-weight="600" style="fill:var(--ink)">adapters</text><text x="658" y="511" font-size="12" style="fill:var(--muted)">offload · upstream</text><text x="658" y="530" font-size="12" style="fill:var(--muted)">websocket · s3</text></g>
 
 <!-- libraries -->
-<g><rect x="1030" y="70" width="340" height="180" rx="8" fill="#ffffff"/><rect x="1030" y="70" width="340" height="180" rx="8" fill="rgba(47,122,82,0.12)" stroke="#2f7a52" stroke-width="1.5"/><text x="1048" y="99" fill="#202b3a" font-size="16" font-weight="600">async</text><text x="1048" y="123" fill="#586777" font-size="12">executor · reactor · timers</text><text x="1048" y="142" fill="#586777" font-size="12">tls · quic · credential store</text><text x="1048" y="161" fill="#586777" font-size="12">http v1 · v2 + hpack · v3</text><text x="1048" y="180" fill="#586777" font-size="12">mem/budget · owned chunks</text><text x="1048" y="199" fill="#586777" font-size="12">offload pool · signal</text><text x="1048" y="218" fill="#586777" font-size="12">compress gzip · brotli</text><text x="1048" y="237" fill="#586777" font-size="12">websocket (next tag)</text></g>
-<g><rect x="1030" y="280" width="340" height="62" rx="8" fill="#ffffff" stroke="#6b4fb3" stroke-width="1.2"/><text x="1048" y="305" fill="#202b3a" font-size="14" font-weight="600">kessel</text><text x="1048" y="326" fill="#586777" font-size="11">JavaScript and JSX parser</text></g>
-<g><rect x="1030" y="360" width="340" height="50" rx="8" fill="#ffffff" stroke="#a35a15" stroke-width="1.2"/><text x="1048" y="382" fill="#202b3a" font-size="14" font-weight="600">surf</text><text x="1048" y="400" fill="#586777" font-size="11">HTTP client · address policy</text></g>
-<g><rect x="1030" y="420" width="340" height="50" rx="8" fill="#ffffff" stroke="#a35a15" stroke-width="1.2"/><text x="1048" y="442" fill="#202b3a" font-size="14" font-weight="600">aws</text><text x="1048" y="460" fill="#586777" font-size="11">SigV4 signing · credential providers</text></g>
-<g><rect x="1030" y="480" width="340" height="50" rx="8" fill="#ffffff" stroke="#a35a15" stroke-width="1.2"/><text x="1048" y="502" fill="#202b3a" font-size="14" font-weight="600">websocket</text><text x="1048" y="520" fill="#586777" font-size="11">RFC 6455 codec</text></g>
-<g><rect x="1030" y="540" width="340" height="50" rx="8" fill="#ffffff" stroke="#586777" stroke-width="1.2"/><text x="1048" y="562" fill="#202b3a" font-size="14" font-weight="600">kakunou</text><text x="1048" y="580" fill="#586777" font-size="11">SQLite</text></g>
+<g><rect x="1030" y="70" width="340" height="180" rx="8" style="fill:var(--node)"/><rect x="1030" y="70" width="340" height="180" rx="8" stroke-width="1.5" style="fill:var(--tint-lib);stroke:var(--lib)"/><text x="1048" y="99" font-size="16" font-weight="600" style="fill:var(--ink)">async</text><text x="1048" y="123" font-size="12" style="fill:var(--muted)">executor · reactor · timers</text><text x="1048" y="142" font-size="12" style="fill:var(--muted)">tls · quic · credential store</text><text x="1048" y="161" font-size="12" style="fill:var(--muted)">http v1 · v2 + hpack · v3</text><text x="1048" y="180" font-size="12" style="fill:var(--muted)">mem/budget · owned chunks</text><text x="1048" y="199" font-size="12" style="fill:var(--muted)">offload pool · signal</text><text x="1048" y="218" font-size="12" style="fill:var(--muted)">compress gzip · brotli</text><text x="1048" y="237" font-size="12" style="fill:var(--muted)">websocket (next tag)</text></g>
+<g><rect x="1030" y="280" width="340" height="62" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--ui)"/><text x="1048" y="305" font-size="14" font-weight="600" style="fill:var(--ink)">kessel</text><text x="1048" y="326" font-size="11" style="fill:var(--muted)">JavaScript and JSX parser</text></g>
+<g><rect x="1030" y="360" width="340" height="50" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--wait)"/><text x="1048" y="382" font-size="14" font-weight="600" style="fill:var(--ink)">surf</text><text x="1048" y="400" font-size="11" style="fill:var(--muted)">HTTP client · address policy</text></g>
+<g><rect x="1030" y="420" width="340" height="50" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--wait)"/><text x="1048" y="442" font-size="14" font-weight="600" style="fill:var(--ink)">aws</text><text x="1048" y="460" font-size="11" style="fill:var(--muted)">SigV4 signing · credential providers</text></g>
+<g><rect x="1030" y="480" width="340" height="50" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--wait)"/><text x="1048" y="502" font-size="14" font-weight="600" style="fill:var(--ink)">websocket</text><text x="1048" y="520" font-size="11" style="fill:var(--muted)">RFC 6455 codec</text></g>
+<g><rect x="1030" y="540" width="340" height="50" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--muted)"/><text x="1048" y="562" font-size="14" font-weight="600" style="fill:var(--ink)">kakunou</text><text x="1048" y="580" font-size="11" style="fill:var(--muted)">SQLite</text></g>
 
 <!-- browser runtime -->
-<g><rect x="30" y="645" width="1340" height="64" rx="8" fill="#ffffff" stroke="#2f7a52" stroke-width="1.2" stroke-dasharray="5 4"/><text x="48" y="671" fill="#2f7a52" font-size="12">BROWSER RUNTIME · served by modules under /__saba/</text><text x="48" y="693" fill="#202b3a" font-size="13">dom.js signals + bindings · attach.js · page-entry.js · reads.js · mutations.js · editor.js · sliding-window.js · slot-window.js</text></g>
-<text x="30" y="742" fill="#394d61" font-size="13">→ Program → facade → packages → libraries. Solid arrows are calls at run time; dashed ones are preparation, build or optional paths.</text>
-</svg></div>
-  <div class="legend"><span><span class="swatch" style="color:var(--cyan)"></span>your code · server core</span><span><span class="swatch" style="color:var(--orange)"></span>facade</span><span><span class="swatch" style="color:var(--purple)"></span>UI build</span><span><span class="swatch" style="color:var(--amber)"></span>adapters</span><span><span class="swatch" style="color:var(--green)"></span>shared libraries</span></div>
+<g><rect x="30" y="645" width="1340" height="64" rx="8" stroke-width="1.2" stroke-dasharray="5 4" style="fill:var(--node);stroke:var(--lib)"/><text x="48" y="671" font-size="12" style="fill:var(--lib)">BROWSER RUNTIME · served by modules under /__saba/</text><text x="48" y="693" font-size="13" style="fill:var(--ink)">dom.js signals + bindings · attach.js · page-entry.js · reads.js · mutations.js · editor.js · sliding-window.js · slot-window.js</text></g>
+<text x="30" y="742" font-size="13" style="fill:var(--muted)">→ Program → facade → packages → libraries. Solid arrows are calls at run time; dashed ones are preparation, build or optional paths.</text>
+</svg></div></figure>
+  <div class="legend"><span><span class="swatch" style="color:var(--net)"></span>your code · server core</span><span><span class="swatch" style="color:var(--route)"></span>facade</span><span><span class="swatch" style="color:var(--ui)"></span>UI build</span><span><span class="swatch" style="color:var(--wait)"></span>adapters</span><span><span class="swatch" style="color:var(--lib)"></span>shared libraries</span></div>
   <p class="note">The facade is optional. <code>shared:saba/core</code> runs alone with a <code>proc(data, connection, request) -> Response</code> handler; <code>shared:saba/application</code> adds preparation and routing without the database. The WebSocket codec is moving into <code>shared:async/websocket</code>; Saba switches once a tagged <code>async</code> and <code>surf</code> carry it.</p>
 </section>
 
 <!-- ============================================================ 03 request -->
 <section id="request">
-  <div class="section-head"><div class="eyebrow">03 / A request, end to end</div>
+  <div class="section-head"><div class="eyebrow"><b>03</b>A request, end to end</div>
     <h2>Every protocol ends in the same handler</h2>
     <p>Listeners admit connections under a capacity and a budget. Each connection is one task on the executor. Whatever the protocol, a complete request reaches <code>handle_request</code>, which tries Saba's own routes in order before yours. The response then goes back out through the protocol that brought it.</p></div>
 
-<div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" font-family="Menlo,Consolas,monospace" viewBox="0 0 1240 500" role="img" aria-labelledby="req-t req-d">
+<figure class="diagram"><figcaption><span><b>FIG. 03</b> · Request path</span><code>src/core · src/application</code></figcaption><div class="canvas"><svg xmlns="http://www.w3.org/2000/svg" font-family="Menlo,Consolas,monospace" viewBox="0 0 1240 500" role="img" aria-labelledby="req-t req-d">
 <title id="req-t">Path of a request</title>
 <desc id="req-d">HTTP/1.1 and HTTP/2 arrive on the TCP listener, HTTP/3 on the UDP listener. The accept task admits a connection task, which runs the TLS handshake and either the HTTP/1 phases or an HTTP/2 session whose streams are tasks. HTTP/3 requests come from the QUIC connection table. Each request reaches handle_request, which tries development routes, built-in /__saba routes, reserved handler routes, assets, modules and pages before the application handler. The response is immediate, streamed, deferred or an upgrade; it is content-coded and written. Deadlines and budgets answer 408, 413, 431, 503 or 504, and keep-alive returns the connection to idle.</desc>
 <defs>
-<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7a8899"/></marker>
-<marker id="ahc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a35a15"/></marker>
-<marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b4473b"/></marker>
+<marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--wire)"/></marker>
+<marker id="ahc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--wait)"/></marker>
+<marker id="ahr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--stop)"/></marker>
 </defs>
-<g font-size="11" fill="#586777">
+<g font-size="11" style="fill:var(--muted)">
 <text x="20" y="22">CLIENTS</text><text x="228" y="22">LISTENERS</text><text x="414" y="22">CONNECTION TASK</text><text x="620" y="22">ROUTING</text><text x="836" y="22">RESPONSE</text><text x="1020" y="22">BACK TO THE WIRE</text>
 </g>
 <!-- clients -->
 <g font-size="12">
-<g><rect x="16" y="44" width="176" height="46" rx="9" fill="#ffffff" stroke="#1457ba"/><text x="28" y="64" fill="#202b3a">HTTP/1.1</text><text x="28" y="80" fill="#1457ba" font-size="10">TCP · plain or TLS</text></g>
-<g><rect x="16" y="104" width="176" height="46" rx="9" fill="#ffffff" stroke="#1457ba"/><text x="28" y="124" fill="#202b3a">HTTP/2</text><text x="28" y="140" fill="#1457ba" font-size="10">TLS · ALPN h2</text></g>
-<g><rect x="16" y="164" width="176" height="46" rx="9" fill="#ffffff" stroke="#6b4fb3"/><text x="28" y="184" fill="#202b3a">WebSocket</text><text x="28" y="200" fill="#5a3fa0" font-size="10">Upgrade · extended CONNECT</text></g>
-<g><rect x="16" y="244" width="176" height="46" rx="9" fill="#e7f3ea" stroke="#2f7a52"/><text x="28" y="264" fill="#17301f">HTTP/3</text><text x="28" y="280" fill="#1f7a4d" font-size="10">UDP · QUIC</text></g>
+<g><rect x="16" y="44" width="176" height="46" rx="9" style="fill:var(--node);stroke:var(--net)"/><text x="28" y="64" style="fill:var(--ink)">HTTP/1.1</text><text x="28" y="80" font-size="10" style="fill:var(--net)">TCP · plain or TLS</text></g>
+<g><rect x="16" y="104" width="176" height="46" rx="9" style="fill:var(--node);stroke:var(--net)"/><text x="28" y="124" style="fill:var(--ink)">HTTP/2</text><text x="28" y="140" font-size="10" style="fill:var(--net)">TLS · ALPN h2</text></g>
+<g><rect x="16" y="164" width="176" height="46" rx="9" style="fill:var(--node);stroke:var(--ui)"/><text x="28" y="184" style="fill:var(--ink)">WebSocket</text><text x="28" y="200" font-size="10" style="fill:var(--ui)">Upgrade · extended CONNECT</text></g>
+<g><rect x="16" y="244" width="176" height="46" rx="9" style="fill:var(--tint-lib);stroke:var(--lib)"/><text x="28" y="264" style="fill:var(--ink)">HTTP/3</text><text x="28" y="280" font-size="10" style="fill:var(--lib)">UDP · QUIC</text></g>
 </g>
-<g stroke="#7a8899" stroke-width="1.5" fill="none" marker-end="url(#ah)">
-<path d="M192 67C210 67 210 110 226 110"/><path d="M192 127L226 118"/><path d="M192 187C210 187 210 126 226 126"/>
-<path d="M192 267L226 267"/>
+<g stroke-width="1.5" fill="none" marker-end="url(#ah)" style="stroke:var(--wire)">
+<path d="M192 67C210 67 210 110 226 110" style="fill:none"/><path d="M192 127L226 118" style="fill:none"/><path d="M192 187C210 187 210 126 226 126" style="fill:none"/>
+<path d="M192 267L226 267" style="fill:none"/>
 </g>
 <!-- listeners -->
-<rect x="228" y="62" width="150" height="110" rx="10" fill="#ffffff" stroke="#1457ba" stroke-width="1.5"/>
-<text x="242" y="86" font-size="13" fill="#1457ba" font-weight="600">accept task</text>
-<text x="242" y="106" font-size="10" fill="#586777">TCP · listen backlog</text>
-<text x="242" y="122" font-size="10" fill="#586777">admits under capacity</text>
-<text x="242" y="138" font-size="10" fill="#586777">budget scope per conn</text>
-<text x="242" y="154" font-size="10" fill="#586777">retries after errors</text>
-<rect x="228" y="226" width="150" height="110" rx="10" fill="#ffffff" stroke="#2f7a52" stroke-width="1.5"/>
-<text x="242" y="250" font-size="13" fill="#2f7a52" font-weight="600">HTTP/3 listener</text>
-<text x="242" y="270" font-size="10" fill="#586777">QUIC connection table</text>
-<text x="242" y="286" font-size="10" fill="#586777">32 max · 8 per address</text>
-<text x="242" y="302" font-size="10" fill="#586777">Retry above half full</text>
-<text x="242" y="318" font-size="10" fill="#586777">fields 128 · 16 KiB</text>
+<rect x="228" y="62" width="150" height="110" rx="10" stroke-width="1.5" style="fill:var(--node);stroke:var(--net)"/>
+<text x="242" y="86" font-size="13" font-weight="600" style="fill:var(--net)">accept task</text>
+<text x="242" y="106" font-size="10" style="fill:var(--muted)">TCP · listen backlog</text>
+<text x="242" y="122" font-size="10" style="fill:var(--muted)">admits under capacity</text>
+<text x="242" y="138" font-size="10" style="fill:var(--muted)">budget scope per conn</text>
+<text x="242" y="154" font-size="10" style="fill:var(--muted)">retries after errors</text>
+<rect x="228" y="226" width="150" height="110" rx="10" stroke-width="1.5" style="fill:var(--node);stroke:var(--lib)"/>
+<text x="242" y="250" font-size="13" font-weight="600" style="fill:var(--lib)">HTTP/3 listener</text>
+<text x="242" y="270" font-size="10" style="fill:var(--muted)">QUIC connection table</text>
+<text x="242" y="286" font-size="10" style="fill:var(--muted)">32 max · 8 per address</text>
+<text x="242" y="302" font-size="10" style="fill:var(--muted)">Retry above half full</text>
+<text x="242" y="318" font-size="10" style="fill:var(--muted)">fields 128 · 16 KiB</text>
 <!-- connection task -->
-<path d="M378 117L412 117" stroke="#7a8899" stroke-width="1.5" marker-end="url(#ah)"/>
-<rect x="414" y="52" width="170" height="150" rx="10" fill="#ffffff" stroke="#1457ba" stroke-width="1.5"/>
-<text x="428" y="76" font-size="13" fill="#1457ba" font-weight="600">Connection_Task</text>
-<text x="428" y="96" font-size="10" fill="#586777">one task per connection</text>
-<text x="428" y="112" font-size="10" fill="#586777">TLS handshake · ALPN</text>
-<text x="428" y="128" font-size="10" fill="#586777">HTTP/1 phases, or</text>
-<text x="428" y="144" font-size="10" fill="#586777">one h2 session whose</text>
-<text x="428" y="160" font-size="10" fill="#586777">streams are tasks</text>
-<text x="428" y="176" font-size="10" fill="#586777">request arena · budget</text>
-<text x="428" y="192" font-size="10" fill="#586777">runs on any free worker</text>
-<rect x="414" y="236" width="170" height="90" rx="10" fill="#ffffff" stroke="#2f7a52" stroke-width="1.5"/>
-<text x="428" y="260" font-size="13" fill="#2f7a52" font-weight="600">Http3_Request</text>
-<text x="428" y="280" font-size="10" fill="#586777">one per request stream</text>
-<text x="428" y="296" font-size="10" fill="#586777">polled by async/http/v3</text>
-<text x="428" y="312" font-size="10" fill="#586777">deadlines per phase</text>
-<path d="M378 281L412 281" stroke="#7a8899" stroke-width="1.5" marker-end="url(#ah)"/>
+<path d="M378 117L412 117" stroke-width="1.5" marker-end="url(#ah)" style="stroke:var(--wire);fill:none"/>
+<rect x="414" y="52" width="170" height="150" rx="10" stroke-width="1.5" style="fill:var(--node);stroke:var(--net)"/>
+<text x="428" y="76" font-size="13" font-weight="600" style="fill:var(--net)">Connection_Task</text>
+<text x="428" y="96" font-size="10" style="fill:var(--muted)">one task per connection</text>
+<text x="428" y="112" font-size="10" style="fill:var(--muted)">TLS handshake · ALPN</text>
+<text x="428" y="128" font-size="10" style="fill:var(--muted)">HTTP/1 phases, or</text>
+<text x="428" y="144" font-size="10" style="fill:var(--muted)">one h2 session whose</text>
+<text x="428" y="160" font-size="10" style="fill:var(--muted)">streams are tasks</text>
+<text x="428" y="176" font-size="10" style="fill:var(--muted)">request arena · budget</text>
+<text x="428" y="192" font-size="10" style="fill:var(--muted)">runs on any free worker</text>
+<rect x="414" y="236" width="170" height="90" rx="10" stroke-width="1.5" style="fill:var(--node);stroke:var(--lib)"/>
+<text x="428" y="260" font-size="13" font-weight="600" style="fill:var(--lib)">Http3_Request</text>
+<text x="428" y="280" font-size="10" style="fill:var(--muted)">one per request stream</text>
+<text x="428" y="296" font-size="10" style="fill:var(--muted)">polled by async/http/v3</text>
+<text x="428" y="312" font-size="10" style="fill:var(--muted)">deadlines per phase</text>
+<path d="M378 281L412 281" stroke-width="1.5" marker-end="url(#ah)" style="stroke:var(--wire);fill:none"/>
 <!-- routing -->
-<path d="M584 127C600 127 600 160 616 160" stroke="#7a8899" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
-<path d="M584 281C600 281 600 200 616 200" stroke="#7a8899" stroke-width="1.5" fill="none" marker-end="url(#ah)"/>
-<rect x="618" y="52" width="196" height="274" rx="10" fill="#ffffff" stroke="#c2621a" stroke-width="1.5"/>
-<text x="632" y="76" font-size="13" fill="#c2621a" font-weight="600">handle_request</text>
-<text x="632" y="96" font-size="10" fill="#586777">first match answers</text>
-<g font-size="11" fill="#202b3a">
-<text x="632" y="122">1 /__reload</text><text x="736" y="122" font-size="9" fill="#586777">development</text>
-<text x="632" y="146">2 /__saba/…</text><text x="736" y="146" font-size="9" fill="#586777">GET · HEAD</text>
-<text x="632" y="170">3 handler_routes</text><text x="760" y="170" font-size="9" fill="#586777">skip 4–6</text>
+<path d="M584 127C600 127 600 160 616 160" stroke-width="1.5" fill="none" marker-end="url(#ah)" style="stroke:var(--wire)"/>
+<path d="M584 281C600 281 600 200 616 200" stroke-width="1.5" fill="none" marker-end="url(#ah)" style="stroke:var(--wire)"/>
+<rect x="618" y="52" width="196" height="274" rx="10" stroke-width="1.5" style="fill:var(--node);stroke:var(--route)"/>
+<text x="632" y="76" font-size="13" font-weight="600" style="fill:var(--route)">handle_request</text>
+<text x="632" y="96" font-size="10" style="fill:var(--muted)">first match answers</text>
+<g font-size="11" style="fill:var(--ink)">
+<text x="632" y="122">1 /__reload</text><text x="736" y="122" font-size="9" style="fill:var(--muted)">development</text>
+<text x="632" y="146">2 /__saba/…</text><text x="736" y="146" font-size="9" style="fill:var(--muted)">GET · HEAD</text>
+<text x="632" y="170">3 handler_routes</text><text x="760" y="170" font-size="9" style="fill:var(--muted)">skip 4–6</text>
 <text x="632" y="194">4 assets</text>
 <text x="632" y="218">5 modules</text>
 <text x="632" y="242">6 pages</text>
-<text x="632" y="270" fill="#1457ba" font-weight="600">7 your handler</text>
+<text x="632" y="270" font-weight="600" style="fill:var(--net)">7 your handler</text>
 </g>
-<text x="632" y="296" font-size="9" fill="#586777">paths compared decoded,</text>
-<text x="632" y="310" font-size="9" fill="#586777">so /%61dmin = /admin</text>
+<text x="632" y="296" font-size="9" style="fill:var(--muted)">paths compared decoded,</text>
+<text x="632" y="310" font-size="9" style="fill:var(--muted)">so /%61dmin = /admin</text>
 <!-- response kinds -->
-<path d="M814 190L830 190" stroke="#7a8899" stroke-width="1.5" marker-end="url(#ah)"/>
+<path d="M814 190L830 190" stroke-width="1.5" marker-end="url(#ah)" style="stroke:var(--wire);fill:none"/>
 <g font-size="10">
-<rect x="832" y="52" width="160" height="52" rx="8" fill="#ffffff" stroke="#1457ba"/><text x="844" y="73" fill="#1457ba" font-size="12">body</text><text x="844" y="91" fill="#586777">bytes ready now</text>
-<rect x="832" y="116" width="160" height="52" rx="8" fill="#ffffff" stroke="#2f7a52"/><text x="844" y="137" fill="#2f7a52" font-size="12">stream</text><text x="844" y="155" fill="#586777">chunks · backpressure</text>
-<rect x="832" y="180" width="160" height="66" rx="8" fill="#ffffff" stroke="#a35a15" stroke-dasharray="4 3"/><text x="844" y="201" fill="#a35a15" font-size="12">deferred</text><text x="844" y="219" fill="#586777">poll until ready</text><text x="844" y="235" fill="#586777">offload · upstream</text>
-<rect x="832" y="258" width="160" height="68" rx="8" fill="#ffffff" stroke="#6b4fb3" stroke-dasharray="2 2"/><text x="844" y="279" fill="#6b4fb3" font-size="12">upgrade</text><text x="844" y="297" fill="#586777">connection handed over</text><text x="844" y="313" fill="#586777">WebSocket · tunnel</text>
+<rect x="832" y="52" width="160" height="52" rx="8" style="fill:var(--node);stroke:var(--net)"/><text x="844" y="73" font-size="12" style="fill:var(--net)">body</text><text x="844" y="91" style="fill:var(--muted)">bytes ready now</text>
+<rect x="832" y="116" width="160" height="52" rx="8" style="fill:var(--node);stroke:var(--lib)"/><text x="844" y="137" font-size="12" style="fill:var(--lib)">stream</text><text x="844" y="155" style="fill:var(--muted)">chunks · backpressure</text>
+<rect x="832" y="180" width="160" height="66" rx="8" stroke-dasharray="4 3" style="fill:var(--node);stroke:var(--wait)"/><text x="844" y="201" font-size="12" style="fill:var(--wait)">deferred</text><text x="844" y="219" style="fill:var(--muted)">poll until ready</text><text x="844" y="235" style="fill:var(--muted)">offload · upstream</text>
+<rect x="832" y="258" width="160" height="68" rx="8" stroke-dasharray="2 2" style="fill:var(--node);stroke:var(--ui)"/><text x="844" y="279" font-size="12" style="fill:var(--ui)">upgrade</text><text x="844" y="297" style="fill:var(--muted)">connection handed over</text><text x="844" y="313" style="fill:var(--muted)">WebSocket · tunnel</text>
 </g>
 <!-- wire -->
-<path d="M992 78C1004 78 1004 110 1016 110" stroke="#7a8899" stroke-width="1.3" fill="none" marker-end="url(#ah)"/>
-<path d="M992 142L1016 130" stroke="#7a8899" stroke-width="1.3" fill="none" marker-end="url(#ah)"/>
-<path d="M992 213C1004 213 1004 150 1016 150" stroke="#7a8899" stroke-width="1.3" fill="none" marker-end="url(#ah)"/>
-<rect x="1018" y="80" width="204" height="96" rx="10" fill="#ffffff" stroke="#e0e6ee" stroke-width="1.5"/>
-<text x="1032" y="104" font-size="13" fill="#202b3a" font-weight="600">content coding</text>
-<text x="1032" y="124" font-size="10" fill="#586777">Brotli or gzip by q-value</text>
-<text x="1032" y="140" font-size="10" fill="#586777">Brotli wins a tie</text>
-<text x="1032" y="156" font-size="10" fill="#586777">skipped when uncoded</text>
-<path d="M1120 176L1120 206" stroke="#7a8899" stroke-width="1.5" marker-end="url(#ah)"/>
-<rect x="1018" y="208" width="204" height="88" rx="10" fill="#ffffff" stroke="#1457ba" stroke-width="1.5"/>
-<text x="1032" y="232" font-size="13" fill="#1457ba" font-weight="600">write</text>
-<text x="1032" y="252" font-size="10" fill="#586777">HTTP/1 head + body</text>
-<text x="1032" y="268" font-size="10" fill="#586777">h2 HEADERS + DATA</text>
-<text x="1032" y="284" font-size="10" fill="#586777">h3 frames on the stream</text>
-<path d="M992 292C1004 292 1004 380 1018 380" stroke="#6b4fb3" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#ah)"/>
-<text x="1024" y="384" font-size="10" fill="#6b4fb3">frames, not responses</text>
+<path d="M992 78C1004 78 1004 110 1016 110" stroke-width="1.3" fill="none" marker-end="url(#ah)" style="stroke:var(--wire)"/>
+<path d="M992 142L1016 130" stroke-width="1.3" fill="none" marker-end="url(#ah)" style="stroke:var(--wire)"/>
+<path d="M992 213C1004 213 1004 150 1016 150" stroke-width="1.3" fill="none" marker-end="url(#ah)" style="stroke:var(--wire)"/>
+<rect x="1018" y="80" width="204" height="96" rx="10" stroke-width="1.5" style="fill:var(--node);stroke:var(--line)"/>
+<text x="1032" y="104" font-size="13" font-weight="600" style="fill:var(--ink)">content coding</text>
+<text x="1032" y="124" font-size="10" style="fill:var(--muted)">Brotli or gzip by q-value</text>
+<text x="1032" y="140" font-size="10" style="fill:var(--muted)">Brotli wins a tie</text>
+<text x="1032" y="156" font-size="10" style="fill:var(--muted)">skipped when uncoded</text>
+<path d="M1120 176L1120 206" stroke-width="1.5" marker-end="url(#ah)" style="stroke:var(--wire);fill:none"/>
+<rect x="1018" y="208" width="204" height="88" rx="10" stroke-width="1.5" style="fill:var(--node);stroke:var(--net)"/>
+<text x="1032" y="232" font-size="13" font-weight="600" style="fill:var(--net)">write</text>
+<text x="1032" y="252" font-size="10" style="fill:var(--muted)">HTTP/1 head + body</text>
+<text x="1032" y="268" font-size="10" style="fill:var(--muted)">h2 HEADERS + DATA</text>
+<text x="1032" y="284" font-size="10" style="fill:var(--muted)">h3 frames on the stream</text>
+<path d="M992 292C1004 292 1004 380 1018 380" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#ah)" style="stroke:var(--ui)"/>
+<text x="1024" y="384" font-size="10" style="fill:var(--ui)">frames, not responses</text>
 <!-- keep-alive loop -->
-<path d="M1120 296V350H600V219H540V208" stroke="#1457ba" stroke-width="1.5" fill="none" stroke-dasharray="6 4" marker-end="url(#ah)"/>
-<text x="640" y="368" font-size="11" fill="#1457ba">keep-alive: back to Idle for the next request on the same connection</text>
+<path d="M1120 296V350H600V219H540V208" stroke-width="1.5" fill="none" stroke-dasharray="6 4" marker-end="url(#ah)" style="stroke:var(--net)"/>
+<text x="640" y="368" font-size="11" style="fill:var(--net)">keep-alive: back to Idle for the next request on the same connection</text>
 <!-- deadlines -->
-<rect x="414" y="392" width="690" height="88" rx="10" fill="#fff6f4" stroke="#b4473b" stroke-dasharray="4 3"/>
-<text x="428" y="414" font-size="12" fill="#8e453b" font-weight="600">deadlines and budgets, checked in every phase</text>
-<text x="428" y="434" font-size="10" fill="#586777">408 request not received in time · 431 header fields too large · 413 body over the limit</text>
-<text x="428" y="450" font-size="10" fill="#586777">503 a budget refused memory · 504 a handler or deferred result finished after its deadline</text>
-<text x="428" y="466" font-size="10" fill="#586777">HTTP/2: RST_STREAM per stream, GOAWAY for the connection · drain: listener closes, admitted requests finish</text>
-<path d="M500 392L500 330" stroke="#b4473b" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#ahr)"/>
-</svg></div>
-  <ol class="steps" style="margin-top:22px">
+<rect x="414" y="392" width="690" height="88" rx="10" stroke-dasharray="4 3" style="fill:var(--tint-stop);stroke:var(--stop)"/>
+<text x="428" y="414" font-size="12" font-weight="600" style="fill:var(--stop)">deadlines and budgets, checked in every phase</text>
+<text x="428" y="434" font-size="10" style="fill:var(--muted)">408 request not received in time · 431 header fields too large · 413 body over the limit</text>
+<text x="428" y="450" font-size="10" style="fill:var(--muted)">503 a budget refused memory · 504 a handler or deferred result finished after its deadline</text>
+<text x="428" y="466" font-size="10" style="fill:var(--muted)">HTTP/2: RST_STREAM per stream, GOAWAY for the connection · drain: listener closes, admitted requests finish</text>
+<path d="M500 392L500 330" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#ahr)" style="stroke:var(--stop)"/>
+</svg></div></figure>
+  <ol class="steps">
     <li><h3>Admit</h3><p>The accept task takes a socket only while the server has capacity, opens a budget scope for the connection and registers a <code>Connection_Task</code>. A lost connection is skipped; an exhausted resource pauses accepting for a moment instead of spinning. HTTP/3 admits in its own connection table, with a per-address cap and Retry tokens once it is half full.</p></li>
     <li><h3>Negotiate</h3><p>With TLS configured, the task runs the handshake first. ALPN picks <code>h2</code> when the client offers it, otherwise <code>http/1.1</code>. An <code>h2</code> connection becomes one session whose streams are tasks of their own.</p></li>
     <li><h3>Receive</h3><p>Headers must arrive within the header timeout and fit 8 KiB. The body has a limit (4 KiB unless <code>request_body_limit</code> raises it per request) and a stall budget that each byte of progress re-arms.</p></li>
@@ -319,52 +404,52 @@ th,td{padding:10px}td:first-child{width:auto}td,th{overflow-wrap:anywhere}.table
 
 <!-- ============================================================ 04 phases -->
 <section id="phases">
-  <div class="section-head"><div class="eyebrow">04 / A connection's phases</div>
+  <div class="section-head"><div class="eyebrow"><b>04</b>A connection's phases</div>
     <h2>One task, one state machine</h2>
     <p>A <code>Connection_Task</code> is resumed by whichever worker is free and runs until it would block, then yields. Its phase says where it is. A task never blocks a worker: waiting means returning <code>Waiting</code> and being woken by the reactor, a timer or a completed job.</p></div>
 
-<div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" font-family="Menlo,Consolas,monospace" viewBox="0 0 1240 330" role="img" aria-labelledby="ph-t ph-d">
+<figure class="diagram"><figcaption><span><b>FIG. 04</b> · Connection phases</span><code>src/core/server.odin</code></figcaption><div class="canvas"><svg xmlns="http://www.w3.org/2000/svg" font-family="Menlo,Consolas,monospace" viewBox="0 0 1240 330" role="img" aria-labelledby="ph-t ph-d">
 <title id="ph-t">Connection phases</title>
 <desc id="ph-d">Adopt, then Handshake when TLS is configured. Handshake leads to HTTP2 when ALPN selects h2, otherwise to Headers. Headers lead to Body or Chunked_Body, then Dispatch. Dispatch leads to Write for an immediate response, Await_Response for a deferred one, Produce for a stream, or Upgrade. Write leads to Idle on keep-alive, and Idle leads back to Headers.</desc>
 <defs>
-<marker id="pa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7a8899"/></marker>
-<marker id="pb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1457ba"/></marker>
+<marker id="pa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--wire)"/></marker>
+<marker id="pb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--net)"/></marker>
 </defs>
 <g font-size="12">
-<rect x="20" y="120" width="122" height="52" rx="9" fill="#ffffff" stroke="#586777"/><text x="34" y="142" fill="#202b3a" font-weight="600">Adopt</text><text x="34" y="160" fill="#586777" font-size="10">join the reactor</text>
-<rect x="170" y="120" width="120" height="52" rx="9" fill="#ffffff" stroke="#2f7a52"/><text x="184" y="142" fill="#202b3a" font-weight="600">Handshake</text><text x="184" y="160" fill="#586777" font-size="10">TLS · ALPN</text>
-<rect x="170" y="30" width="120" height="52" rx="9" fill="rgba(20,87,186,0.10)" stroke="#1457ba"/><text x="184" y="52" fill="#1457ba" font-weight="600">HTTP2</text><text x="184" y="70" fill="#586777" font-size="10">streams as tasks</text>
-<rect x="330" y="120" width="120" height="52" rx="9" fill="#ffffff" stroke="#1457ba"/><text x="344" y="142" fill="#202b3a" font-weight="600">Headers</text><text x="344" y="160" fill="#586777" font-size="10">≤ 8 KiB · 408</text>
-<rect x="490" y="90" width="130" height="44" rx="9" fill="#ffffff" stroke="#1457ba"/><text x="504" y="110" fill="#202b3a" font-weight="600">Body</text><text x="504" y="125" fill="#586777" font-size="10">Content-Length</text>
-<rect x="490" y="150" width="130" height="44" rx="9" fill="#ffffff" stroke="#1457ba"/><text x="504" y="170" fill="#202b3a" font-weight="600">Chunked_Body</text><text x="504" y="185" fill="#586777" font-size="10">chunked coding</text>
-<rect x="660" y="120" width="120" height="52" rx="9" fill="rgba(194,98,26,0.14)" stroke="#c2621a"/><text x="674" y="142" fill="#202b3a" font-weight="600">Dispatch</text><text x="674" y="160" fill="#586777" font-size="10">handler runs</text>
-<rect x="830" y="30" width="150" height="44" rx="9" fill="#ffffff" stroke="#a35a15" stroke-dasharray="4 3"/><text x="844" y="50" fill="#202b3a" font-weight="600">Await_Response</text><text x="844" y="65" fill="#586777" font-size="10">deferred poll</text>
-<rect x="830" y="90" width="150" height="44" rx="9" fill="#ffffff" stroke="#1457ba"/><text x="844" y="110" fill="#202b3a" font-weight="600">Write</text><text x="844" y="125" fill="#586777" font-size="10">head + body</text>
-<rect x="830" y="150" width="150" height="44" rx="9" fill="#ffffff" stroke="#2f7a52"/><text x="844" y="170" fill="#202b3a" font-weight="600">Produce</text><text x="844" y="185" fill="#586777" font-size="10">stream chunks</text>
-<rect x="830" y="210" width="150" height="44" rx="9" fill="#ffffff" stroke="#6b4fb3" stroke-dasharray="2 2"/><text x="844" y="230" fill="#202b3a" font-weight="600">Upgrade</text><text x="844" y="245" fill="#586777" font-size="10">WebSocket owns it</text>
-<rect x="1040" y="90" width="150" height="44" rx="9" fill="#ffffff" stroke="#586777"/><text x="1054" y="110" fill="#202b3a" font-weight="600">Idle</text><text x="1054" y="125" fill="#586777" font-size="10">keep-alive wait</text>
-<rect x="1040" y="210" width="150" height="44" rx="9" fill="#f6f8fb" stroke="#586777" stroke-dasharray="4 3"/><text x="1054" y="230" fill="#202b3a" font-weight="600">done</text><text x="1054" y="245" fill="#586777" font-size="10">close · release scope</text>
+<rect x="20" y="120" width="122" height="52" rx="9" style="fill:var(--node);stroke:var(--muted)"/><text x="34" y="142" font-weight="600" style="fill:var(--ink)">Adopt</text><text x="34" y="160" font-size="10" style="fill:var(--muted)">join the reactor</text>
+<rect x="170" y="120" width="120" height="52" rx="9" style="fill:var(--node);stroke:var(--lib)"/><text x="184" y="142" font-weight="600" style="fill:var(--ink)">Handshake</text><text x="184" y="160" font-size="10" style="fill:var(--muted)">TLS · ALPN</text>
+<rect x="170" y="30" width="120" height="52" rx="9" style="fill:var(--tint-net);stroke:var(--net)"/><text x="184" y="52" font-weight="600" style="fill:var(--net)">HTTP2</text><text x="184" y="70" font-size="10" style="fill:var(--muted)">streams as tasks</text>
+<rect x="330" y="120" width="120" height="52" rx="9" style="fill:var(--node);stroke:var(--net)"/><text x="344" y="142" font-weight="600" style="fill:var(--ink)">Headers</text><text x="344" y="160" font-size="10" style="fill:var(--muted)">≤ 8 KiB · 408</text>
+<rect x="490" y="90" width="130" height="44" rx="9" style="fill:var(--node);stroke:var(--net)"/><text x="504" y="110" font-weight="600" style="fill:var(--ink)">Body</text><text x="504" y="125" font-size="10" style="fill:var(--muted)">Content-Length</text>
+<rect x="490" y="150" width="130" height="44" rx="9" style="fill:var(--node);stroke:var(--net)"/><text x="504" y="170" font-weight="600" style="fill:var(--ink)">Chunked_Body</text><text x="504" y="185" font-size="10" style="fill:var(--muted)">chunked coding</text>
+<rect x="660" y="120" width="120" height="52" rx="9" style="fill:var(--tint-route);stroke:var(--route)"/><text x="674" y="142" font-weight="600" style="fill:var(--ink)">Dispatch</text><text x="674" y="160" font-size="10" style="fill:var(--muted)">handler runs</text>
+<rect x="830" y="30" width="150" height="44" rx="9" stroke-dasharray="4 3" style="fill:var(--node);stroke:var(--wait)"/><text x="844" y="50" font-weight="600" style="fill:var(--ink)">Await_Response</text><text x="844" y="65" font-size="10" style="fill:var(--muted)">deferred poll</text>
+<rect x="830" y="90" width="150" height="44" rx="9" style="fill:var(--node);stroke:var(--net)"/><text x="844" y="110" font-weight="600" style="fill:var(--ink)">Write</text><text x="844" y="125" font-size="10" style="fill:var(--muted)">head + body</text>
+<rect x="830" y="150" width="150" height="44" rx="9" style="fill:var(--node);stroke:var(--lib)"/><text x="844" y="170" font-weight="600" style="fill:var(--ink)">Produce</text><text x="844" y="185" font-size="10" style="fill:var(--muted)">stream chunks</text>
+<rect x="830" y="210" width="150" height="44" rx="9" stroke-dasharray="2 2" style="fill:var(--node);stroke:var(--ui)"/><text x="844" y="230" font-weight="600" style="fill:var(--ink)">Upgrade</text><text x="844" y="245" font-size="10" style="fill:var(--muted)">WebSocket owns it</text>
+<rect x="1040" y="90" width="150" height="44" rx="9" style="fill:var(--node);stroke:var(--muted)"/><text x="1054" y="110" font-weight="600" style="fill:var(--ink)">Idle</text><text x="1054" y="125" font-size="10" style="fill:var(--muted)">keep-alive wait</text>
+<rect x="1040" y="210" width="150" height="44" rx="9" stroke-dasharray="4 3" style="fill:var(--node-soft);stroke:var(--muted)"/><text x="1054" y="230" font-weight="600" style="fill:var(--ink)">done</text><text x="1054" y="245" font-size="10" style="fill:var(--muted)">close · release scope</text>
 </g>
-<g stroke="#7a8899" stroke-width="1.4" fill="none" marker-end="url(#pa)">
-<path d="M142 146H166"/><path d="M230 120V86"/><path d="M290 146H326"/>
-<path d="M75 172V200H390V176"/>
-<path d="M450 140L486 116"/><path d="M450 152L486 170"/>
-<path d="M620 112L656 136"/><path d="M620 172L656 156"/>
-<path d="M780 134L826 56"/><path d="M780 142L826 112"/><path d="M780 150L826 170"/><path d="M780 158L826 228"/>
-<path d="M905 74V86"/><path d="M905 150V138"/>
-<path d="M980 112H1036"/><path d="M980 232H1036"/><path d="M1115 134V206"/>
+<g stroke-width="1.4" fill="none" marker-end="url(#pa)" style="stroke:var(--wire)">
+<path d="M142 146H166" style="fill:none"/><path d="M230 120V86" style="fill:none"/><path d="M290 146H326" style="fill:none"/>
+<path d="M75 172V200H390V176" style="fill:none"/>
+<path d="M450 140L486 116" style="fill:none"/><path d="M450 152L486 170" style="fill:none"/>
+<path d="M620 112L656 136" style="fill:none"/><path d="M620 172L656 156" style="fill:none"/>
+<path d="M780 134L826 56" style="fill:none"/><path d="M780 142L826 112" style="fill:none"/><path d="M780 150L826 170" style="fill:none"/><path d="M780 158L826 228" style="fill:none"/>
+<path d="M905 74V86" style="fill:none"/><path d="M905 150V138" style="fill:none"/>
+<path d="M980 112H1036" style="fill:none"/><path d="M980 232H1036" style="fill:none"/><path d="M1115 134V206" style="fill:none"/>
 </g>
-<text x="84" y="214" font-size="10" fill="#586777">no TLS</text>
-<text x="238" y="104" font-size="10" fill="#1457ba">h2</text>
-<path d="M1115 90V12H395V116" stroke="#1457ba" stroke-width="1.5" stroke-dasharray="6 4" fill="none" marker-end="url(#pb)"/>
-<text x="420" y="28" font-size="11" fill="#1457ba">next request arrives on the same connection</text>
-<text x="20" y="300" font-size="12" fill="#394d61">→ Every arrow is a phase change inside one task. Waiting returns control to the executor; the reactor, a timer or a job's wake resumes the task.</text>
-</svg></div>
+<text x="84" y="214" font-size="10" style="fill:var(--muted)">no TLS</text>
+<text x="238" y="104" font-size="10" style="fill:var(--net)">h2</text>
+<path d="M1115 90V12H395V116" stroke-width="1.5" stroke-dasharray="6 4" fill="none" marker-end="url(#pb)" style="stroke:var(--net)"/>
+<text x="420" y="28" font-size="11" style="fill:var(--net)">next request arrives on the same connection</text>
+<text x="20" y="300" font-size="12" style="fill:var(--muted)">→ Every arrow is a phase change inside one task. Waiting returns control to the executor; the reactor, a timer or a job's wake resumes the task.</text>
+</svg></div></figure>
 </section>
 
 <!-- ============================================================ 05 responses -->
 <section id="responses">
-  <div class="section-head"><div class="eyebrow">05 / Kinds of response</div>
+  <div class="section-head"><div class="eyebrow"><b>05</b>Kinds of response</div>
     <h2>A handler returns a value. What the value holds decides what happens next.</h2>
     <p>Handlers run on shared workers that are never preempted, so a handler must return quickly. Anything that waits is expressed in the returned <code>Response</code>.</p></div>
   <div class="table-wrap"><table>
@@ -381,94 +466,94 @@ th,td{padding:10px}td:first-child{width:auto}td,th{overflow-wrap:anywhere}.table
 
 <!-- ============================================================ 06 ui -->
 <section id="ui">
-  <div class="section-head"><div class="eyebrow">06 / From JSX to a live page</div>
+  <div class="section-head"><div class="eyebrow"><b>06</b>From JSX to a live page</div>
     <h2>The document is built once. The browser attaches to it.</h2>
     <p>Before the server listens, the compiler turns each page into HTML for every declared language plus the JavaScript that attaches to it. All of it is one build generation, named by a digest of its bytes. Every reader of a page in one language gets the same document; private data arrives later through authorized requests (<a href="adr/0004-saba-compile-time-html-no-request-rendering.md">ADR 0004</a>).</p></div>
 
-<div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" font-family="Menlo,Consolas,monospace" viewBox="0 0 1240 520" role="img" aria-labelledby="ui-t ui-d">
+<figure class="diagram"><figcaption><span><b>FIG. 06</b> · JSX to a live page</span><code>src/jsx · src/pages · src/modules</code></figcaption><div class="canvas"><svg xmlns="http://www.w3.org/2000/svg" font-family="Menlo,Consolas,monospace" viewBox="0 0 1240 520" role="img" aria-labelledby="ui-t ui-d">
 <title id="ui-t">From JSX to a live page</title>
 <desc id="ui-d">JSX sources and the page mount are parsed by Kessel. The jsx compiler emits proven markup as HTML and the rest as JavaScript modules, lowering proved-closed rows to direct DOM loops. The pages package groups documents and modules into a generation named by a SHA-256 digest, precompressed, and archives superseded generations. A request selects the route, language and authorization and returns the prebuilt document. In the browser the document is readable before scripts run; page-entry and attach check every marker, commit bindings and enable controls; the signal runtime, reads, mutations, the editor and windowed lists take over. If preflight fails the document stays readable with a reload link.</desc>
 <defs>
-<marker id="ua" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7a8899"/></marker>
-<marker id="ur" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#b4473b"/></marker>
+<marker id="ua" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--wire)"/></marker>
+<marker id="ur" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--stop)"/></marker>
 </defs>
-<g font-size="11" fill="#586777">
+<g font-size="11" style="fill:var(--muted)">
 <text x="20" y="22">SOURCES</text><text x="232" y="22">COMPILER</text><text x="470" y="22">BUILD GENERATION</text><text x="724" y="22">REQUEST</text><text x="930" y="22">BROWSER</text>
 </g>
 <!-- sources -->
 <g font-size="12">
-<rect x="16" y="50" width="180" height="60" rx="9" fill="#ffffff" stroke="#1457ba"/><text x="28" y="72" fill="#202b3a">page.jsx</text><text x="28" y="90" fill="#1457ba" font-size="10">one per route</text>
-<rect x="16" y="124" width="180" height="60" rx="9" fill="#ffffff" stroke="#1457ba"/><text x="28" y="146" fill="#202b3a">components/*.jsx</text><text x="28" y="164" fill="#1457ba" font-size="10">imported modules</text>
-<rect x="16" y="198" width="180" height="76" rx="9" fill="#ffffff" stroke="#c2621a"/><text x="28" y="220" fill="#202b3a">Page_Mount</text><text x="28" y="238" fill="#b4581a" font-size="10">routes · languages</text><text x="28" y="254" fill="#b4581a" font-size="10">language() · authorize()</text>
+<rect x="16" y="50" width="180" height="60" rx="9" style="fill:var(--node);stroke:var(--net)"/><text x="28" y="72" style="fill:var(--ink)">page.jsx</text><text x="28" y="90" font-size="10" style="fill:var(--net)">one per route</text>
+<rect x="16" y="124" width="180" height="60" rx="9" style="fill:var(--node);stroke:var(--net)"/><text x="28" y="146" style="fill:var(--ink)">components/*.jsx</text><text x="28" y="164" font-size="10" style="fill:var(--net)">imported modules</text>
+<rect x="16" y="198" width="180" height="76" rx="9" style="fill:var(--node);stroke:var(--route)"/><text x="28" y="220" style="fill:var(--ink)">Page_Mount</text><text x="28" y="238" font-size="10" style="fill:var(--route)">routes · languages</text><text x="28" y="254" font-size="10" style="fill:var(--route)">language() · authorize()</text>
 </g>
-<g stroke="#7a8899" stroke-width="1.5" fill="none" marker-end="url(#ua)">
-<path d="M196 80C212 80 212 140 228 140"/><path d="M196 154L228 150"/><path d="M196 236C212 236 212 160 228 160"/>
+<g stroke-width="1.5" fill="none" marker-end="url(#ua)" style="stroke:var(--wire)">
+<path d="M196 80C212 80 212 140 228 140" style="fill:none"/><path d="M196 154L228 150" style="fill:none"/><path d="M196 236C212 236 212 160 228 160" style="fill:none"/>
 </g>
 <!-- compiler -->
-<rect x="230" y="50" width="200" height="56" rx="10" fill="#ffffff" stroke="#6b4fb3" stroke-width="1.2"/>
-<text x="244" y="72" font-size="13" fill="#6b4fb3" font-weight="600">kessel</text><text x="244" y="92" font-size="10" fill="#586777">parse JS + JSX with spans</text>
-<path d="M330 106L330 116" stroke="#7a8899" stroke-width="1.4" marker-end="url(#ua)"/>
-<rect x="230" y="118" width="200" height="192" rx="10" fill="#ffffff" stroke="#6b4fb3" stroke-width="1.5"/>
-<text x="244" y="142" font-size="13" fill="#6b4fb3" font-weight="600">jsx</text>
-<text x="244" y="162" font-size="10" fill="#586777">proved markup → HTML</text>
-<text x="244" y="178" font-size="10" fill="#586777">escaped for its context</text>
-<text x="244" y="194" font-size="10" fill="#586777">the rest → JS module</text>
-<text x="244" y="210" font-size="10" fill="#586777">holes get target markers</text>
-<text x="244" y="226" font-size="10" fill="#586777">closed rows → DOM loops</text>
-<text x="244" y="242" font-size="10" fill="#586777">URL attrs checked at runtime</text>
-<text x="244" y="258" font-size="10" fill="#586777">imports rewritten to build</text>
-<text x="244" y="274" font-size="10" fill="#586777">dev: source maps</text>
-<text x="244" y="296" font-size="10" fill="#b4473b">unsafe? declined, not guessed</text>
+<rect x="230" y="50" width="200" height="56" rx="10" stroke-width="1.2" style="fill:var(--node);stroke:var(--ui)"/>
+<text x="244" y="72" font-size="13" font-weight="600" style="fill:var(--ui)">kessel</text><text x="244" y="92" font-size="10" style="fill:var(--muted)">parse JS + JSX with spans</text>
+<path d="M330 106L330 116" stroke-width="1.4" marker-end="url(#ua)" style="stroke:var(--wire);fill:none"/>
+<rect x="230" y="118" width="200" height="192" rx="10" stroke-width="1.5" style="fill:var(--node);stroke:var(--ui)"/>
+<text x="244" y="142" font-size="13" font-weight="600" style="fill:var(--ui)">jsx</text>
+<text x="244" y="162" font-size="10" style="fill:var(--muted)">proved markup → HTML</text>
+<text x="244" y="178" font-size="10" style="fill:var(--muted)">escaped for its context</text>
+<text x="244" y="194" font-size="10" style="fill:var(--muted)">the rest → JS module</text>
+<text x="244" y="210" font-size="10" style="fill:var(--muted)">holes get target markers</text>
+<text x="244" y="226" font-size="10" style="fill:var(--muted)">closed rows → DOM loops</text>
+<text x="244" y="242" font-size="10" style="fill:var(--muted)">URL attrs checked at runtime</text>
+<text x="244" y="258" font-size="10" style="fill:var(--muted)">imports rewritten to build</text>
+<text x="244" y="274" font-size="10" style="fill:var(--muted)">dev: source maps</text>
+<text x="244" y="296" font-size="10" style="fill:var(--stop)">unsafe? declined, not guessed</text>
 <!-- generation -->
-<path d="M430 200L466 200" stroke="#7a8899" stroke-width="1.5" marker-end="url(#ua)"/>
-<rect x="468" y="96" width="220" height="214" rx="10" fill="#ffffff"/><rect x="468" y="96" width="220" height="214" rx="10" fill="rgba(47,122,82,0.12)" stroke="#2f7a52" stroke-width="1.5"/>
-<text x="482" y="120" font-size="13" fill="#2f7a52" font-weight="600">generation</text>
-<text x="482" y="140" font-size="10" fill="#586777">SHA-256 of every byte</text>
-<text x="482" y="156" font-size="10" fill="#586777">→ 32 hex digits</text>
-<text x="482" y="176" font-size="10" fill="#586777">one document per language</text>
-<text x="482" y="192" font-size="10" fill="#586777">entry + every module under</text>
-<text x="482" y="208" font-size="10" fill="#202b3a">/__saba/build/&lt;gen&gt;/</text>
-<text x="482" y="228" font-size="10" fill="#586777">gzip + Brotli prepared</text>
-<text x="482" y="244" font-size="10" fill="#586777">validated, then switched</text>
-<text x="482" y="260" font-size="10" fill="#586777">atomically; a failed build</text>
-<text x="482" y="276" font-size="10" fill="#586777">keeps the previous one</text>
-<text x="482" y="296" font-size="10" fill="#586777">same sources → same name</text>
-<rect x="468" y="336" width="220" height="92" rx="10" fill="#ffffff" stroke="#2f7a52" stroke-dasharray="4 3"/>
-<text x="482" y="358" font-size="12" fill="#2f7a52">archive_directory</text>
-<text x="482" y="376" font-size="10" fill="#586777">superseded generations</text>
-<text x="482" y="392" font-size="10" fill="#586777">7 days · 8 generations</text>
-<text x="482" y="408" font-size="10" fill="#586777">shared across processes</text>
-<path d="M578 310L578 332" stroke="#2f7a52" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#ua)"/>
+<path d="M430 200L466 200" stroke-width="1.5" marker-end="url(#ua)" style="stroke:var(--wire);fill:none"/>
+<rect x="468" y="96" width="220" height="214" rx="10" style="fill:var(--node)"/><rect x="468" y="96" width="220" height="214" rx="10" stroke-width="1.5" style="fill:var(--tint-lib);stroke:var(--lib)"/>
+<text x="482" y="120" font-size="13" font-weight="600" style="fill:var(--lib)">generation</text>
+<text x="482" y="140" font-size="10" style="fill:var(--muted)">SHA-256 of every byte</text>
+<text x="482" y="156" font-size="10" style="fill:var(--muted)">→ 32 hex digits</text>
+<text x="482" y="176" font-size="10" style="fill:var(--muted)">one document per language</text>
+<text x="482" y="192" font-size="10" style="fill:var(--muted)">entry + every module under</text>
+<text x="482" y="208" font-size="10" style="fill:var(--ink)">/__saba/build/&lt;gen&gt;/</text>
+<text x="482" y="228" font-size="10" style="fill:var(--muted)">gzip + Brotli prepared</text>
+<text x="482" y="244" font-size="10" style="fill:var(--muted)">validated, then switched</text>
+<text x="482" y="260" font-size="10" style="fill:var(--muted)">atomically; a failed build</text>
+<text x="482" y="276" font-size="10" style="fill:var(--muted)">keeps the previous one</text>
+<text x="482" y="296" font-size="10" style="fill:var(--muted)">same sources → same name</text>
+<rect x="468" y="336" width="220" height="92" rx="10" stroke-dasharray="4 3" style="fill:var(--node);stroke:var(--lib)"/>
+<text x="482" y="358" font-size="12" style="fill:var(--lib)">archive_directory</text>
+<text x="482" y="376" font-size="10" style="fill:var(--muted)">superseded generations</text>
+<text x="482" y="392" font-size="10" style="fill:var(--muted)">7 days · 8 generations</text>
+<text x="482" y="408" font-size="10" style="fill:var(--muted)">shared across processes</text>
+<path d="M578 310L578 332" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#ua)" style="stroke:var(--lib);fill:none"/>
 <!-- request -->
-<path d="M688 200L716 200" stroke="#7a8899" stroke-width="1.5" marker-end="url(#ua)"/>
-<rect x="718" y="120" width="180" height="160" rx="10" fill="#ffffff" stroke="#c2621a" stroke-width="1.5"/>
-<text x="732" y="144" font-size="13" fill="#c2621a" font-weight="600">page route</text>
-<text x="732" y="164" font-size="10" fill="#586777">match the route</text>
-<text x="732" y="180" font-size="10" fill="#586777">authorize() first</text>
-<text x="732" y="196" font-size="10" fill="#586777">language() picks variant</text>
-<text x="732" y="216" font-size="10" fill="#586777">prebuilt bytes, no</text>
-<text x="732" y="232" font-size="10" fill="#586777">per-request rendering</text>
-<text x="732" y="252" font-size="10" fill="#586777">no user data inside</text>
-<text x="732" y="268" font-size="10" fill="#586777">old gen → 404 no-store</text>
+<path d="M688 200L716 200" stroke-width="1.5" marker-end="url(#ua)" style="stroke:var(--wire);fill:none"/>
+<rect x="718" y="120" width="180" height="160" rx="10" stroke-width="1.5" style="fill:var(--node);stroke:var(--route)"/>
+<text x="732" y="144" font-size="13" font-weight="600" style="fill:var(--route)">page route</text>
+<text x="732" y="164" font-size="10" style="fill:var(--muted)">match the route</text>
+<text x="732" y="180" font-size="10" style="fill:var(--muted)">authorize() first</text>
+<text x="732" y="196" font-size="10" style="fill:var(--muted)">language() picks variant</text>
+<text x="732" y="216" font-size="10" style="fill:var(--muted)">prebuilt bytes, no</text>
+<text x="732" y="232" font-size="10" style="fill:var(--muted)">per-request rendering</text>
+<text x="732" y="252" font-size="10" style="fill:var(--muted)">no user data inside</text>
+<text x="732" y="268" font-size="10" style="fill:var(--muted)">old gen → 404 no-store</text>
 <!-- browser -->
-<path d="M898 200L924 200" stroke="#7a8899" stroke-width="1.5" marker-end="url(#ua)"/>
+<path d="M898 200L924 200" stroke-width="1.5" marker-end="url(#ua)" style="stroke:var(--wire);fill:none"/>
 <g font-size="10">
-<rect x="926" y="50" width="296" height="74" rx="9" fill="#ffffff" stroke="#586777"/><text x="940" y="72" fill="#202b3a" font-size="12" font-weight="600">1 document</text><text x="940" y="90" fill="#586777">readable before scripts run</text><text x="940" y="106" fill="#586777">host: data-saba-pending · aria-busy</text>
-<rect x="926" y="140" width="296" height="90" rx="9" fill="#ffffff" stroke="#1457ba"/><text x="940" y="162" fill="#1457ba" font-size="12" font-weight="600">2 page-entry · attach</text><text x="940" y="180" fill="#586777">check generation, page, every marker</text><text x="940" y="196" fill="#586777">run setup in a disposable scope</text><text x="940" y="212" fill="#586777">commit bindings, enable controls</text>
-<rect x="926" y="246" width="296" height="92" rx="9" fill="rgba(47,122,82,0.10)" stroke="#2f7a52"/><text x="940" y="268" fill="#2f7a52" font-size="12" font-weight="600">3 live page</text><text x="940" y="286" fill="#586777">signals · computed · effects · bindings</text><text x="940" y="302" fill="#586777">reads: results belong to their key</text><text x="940" y="318" fill="#586777">mutations · editor · windowed lists</text>
+<rect x="926" y="50" width="296" height="74" rx="9" style="fill:var(--node);stroke:var(--muted)"/><text x="940" y="72" font-size="12" font-weight="600" style="fill:var(--ink)">1 document</text><text x="940" y="90" style="fill:var(--muted)">readable before scripts run</text><text x="940" y="106" style="fill:var(--muted)">host: data-saba-pending · aria-busy</text>
+<rect x="926" y="140" width="296" height="90" rx="9" style="fill:var(--node);stroke:var(--net)"/><text x="940" y="162" font-size="12" font-weight="600" style="fill:var(--net)">2 page-entry · attach</text><text x="940" y="180" style="fill:var(--muted)">check generation, page, every marker</text><text x="940" y="196" style="fill:var(--muted)">run setup in a disposable scope</text><text x="940" y="212" style="fill:var(--muted)">commit bindings, enable controls</text>
+<rect x="926" y="246" width="296" height="92" rx="9" style="fill:var(--tint-lib);stroke:var(--lib)"/><text x="940" y="268" font-size="12" font-weight="600" style="fill:var(--lib)">3 live page</text><text x="940" y="286" style="fill:var(--muted)">signals · computed · effects · bindings</text><text x="940" y="302" style="fill:var(--muted)">reads: results belong to their key</text><text x="940" y="318" style="fill:var(--muted)">mutations · editor · windowed lists</text>
 </g>
-<path d="M1074 124L1074 136" stroke="#7a8899" stroke-width="1.4" marker-end="url(#ua)"/>
-<path d="M1074 230L1074 242" stroke="#7a8899" stroke-width="1.4" marker-end="url(#ua)"/>
-<rect x="926" y="372" width="296" height="70" rx="9" fill="#fff6f4" stroke="#b4473b" stroke-dasharray="4 3"/>
-<text x="940" y="394" font-size="12" fill="#8e453b">preflight or setup fails</text>
-<text x="940" y="412" font-size="10" fill="#586777">scope revoked, document unchanged,</text>
-<text x="940" y="428" font-size="10" fill="#586777">a visible reload link stays</text>
-<path d="M1210 230C1236 260 1236 360 1222 380" stroke="#b4473b" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#ur)"/>
+<path d="M1074 124L1074 136" stroke-width="1.4" marker-end="url(#ua)" style="stroke:var(--wire);fill:none"/>
+<path d="M1074 230L1074 242" stroke-width="1.4" marker-end="url(#ua)" style="stroke:var(--wire);fill:none"/>
+<rect x="926" y="372" width="296" height="70" rx="9" stroke-dasharray="4 3" style="fill:var(--tint-stop);stroke:var(--stop)"/>
+<text x="940" y="394" font-size="12" style="fill:var(--stop)">preflight or setup fails</text>
+<text x="940" y="412" font-size="10" style="fill:var(--muted)">scope revoked, document unchanged,</text>
+<text x="940" y="428" font-size="10" style="fill:var(--muted)">a visible reload link stays</text>
+<path d="M1210 230C1236 260 1236 360 1222 380" stroke-width="1.2" stroke-dasharray="3 3" fill="none" marker-end="url(#ur)" style="stroke:var(--stop)"/>
 <!-- development loop -->
-<path d="M106 274V446H790V284" stroke="#a35a15" stroke-width="1.5" fill="none" stroke-dasharray="6 4" marker-end="url(#ua)"/>
-<text x="120" y="468" font-size="11" fill="#a35a15">development: the watcher rebuilds on change, publishes only a good build, keeps the previous generation, and reloads the page over /__reload</text>
-<text x="20" y="500" font-size="12" fill="#394d61">→ Build once, serve the same bytes, attach in the browser. There is no hydration mode and no server-side JavaScript.</text>
-</svg></div>
+<path d="M106 274V446H790V284" stroke-width="1.5" fill="none" stroke-dasharray="6 4" marker-end="url(#ua)" style="stroke:var(--wait)"/>
+<text x="120" y="468" font-size="11" style="fill:var(--wait)">development: the watcher rebuilds on change, publishes only a good build, keeps the previous generation, and reloads the page over /__reload</text>
+<text x="20" y="500" font-size="12" style="fill:var(--muted)">→ Build once, serve the same bytes, attach in the browser. There is no hydration mode and no server-side JavaScript.</text>
+</svg></div></figure>
 
   <div class="cards three">
     <div class="card c-purple"><div class="q">What may become HTML?</div><h3>Only what the compiler can prove</h3><p>Intrinsic markup, static attributes and escaped text whose value and parsing context are known. Imported, recursive or parser-sensitive subtrees become browser-owned ranges. Nothing is executed during extraction.</p></div>
@@ -479,7 +564,7 @@ th,td{padding:10px}td:first-child{width:auto}td,th{overflow-wrap:anywhere}.table
 
 <!-- ============================================================ 07 limits -->
 <section id="limits">
-  <div class="section-head"><div class="eyebrow">07 / Limits and deadlines</div>
+  <div class="section-head"><div class="eyebrow"><b>07</b>Limits and deadlines</div>
     <h2>Every wait has a deadline and every byte has an owner</h2>
     <p>Memory is charged to budget scopes (operation, connection, global), so one request cannot starve the rest. Time is measured on a monotonic clock. Defaults below; all are configurable on <code>Server</code>.</p></div>
   <div class="table-wrap"><table>
@@ -499,7 +584,7 @@ th,td{padding:10px}td:first-child{width:auto}td,th{overflow-wrap:anywhere}.table
 
 <!-- ============================================================ 08 libraries -->
 <section id="libraries">
-  <div class="section-head"><div class="eyebrow">08 / The libraries</div>
+  <div class="section-head"><div class="eyebrow"><b>08</b>The libraries</div>
     <h2>What Saba stands on</h2>
     <p>All are Odin packages pinned in <code>.krs/packages.json</code> and installed with <code>krs install --frozen</code>. Saba builds only with the owner's Odin fork.</p></div>
   <div class="table-wrap"><table>
@@ -514,7 +599,8 @@ th,td{padding:10px}td:first-child{width:auto}td,th{overflow-wrap:anywhere}.table
     </tbody></table></div>
 </section>
 
-<footer>Saba · MIT License · Drawn from the sources on <code>develop</code>. When the code and this page disagree, the code wins.</footer>
-</main>
+<footer><span>鯖 saba · MIT License</span><span>Drawn from the sources on develop. When the code and this page disagree, the code wins.</span></footer>
+</div></main>
+</div>
 </body>
 </html>

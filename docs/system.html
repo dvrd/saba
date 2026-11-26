@@ -9,7 +9,7 @@
 <!-- Sources: src/saba.odin (facade), src/application/application.odin (preparation and
      routing order), src/core/connection.odin and server.odin (listeners, phases, deadlines),
      src/core/http2.odin, http3.odin, response.odin, content_coding.odin, src/pages/build.odin,
-     src/jsx/*.odin, src/modules/*.js, docs/adr/0004 and 0006, README.md. -->
+     src/jsx/*.odin, src/modules/*.js, README.md. -->
 <style>
 /* Saba is mackerel (鯖). Sumi-ink ground, the fish's iridescent back as the one
    brand gradient, its wavy stripes as the motif, a vermilion seal for the mark
@@ -72,9 +72,15 @@ h1 em{font-style:normal;background:var(--sheen);-webkit-background-clip:text;bac
 .lead{font-size:17px;color:var(--muted);max-width:620px;margin:0}
 .lead+.lead{margin-top:12px;font-size:14.5px}
 .fish{position:relative;aspect-ratio:5/4;border-radius:16px;overflow:hidden;border:1px solid var(--line-2);background:#0b1418}
-.fish svg{position:absolute;inset:0;width:100%;height:100%}
-.fish .stamp{position:absolute;right:18px;bottom:18px;width:64px;height:64px;border-radius:9px;background:var(--seal);color:#fff4ec;display:grid;place-items:center;font:600 38px/1 "Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;transform:rotate(-4deg);box-shadow:0 10px 30px -10px rgba(229,67,47,.6),inset 0 0 0 2px rgba(255,255,255,.16)}
-.fish .tag{position:absolute;left:18px;top:16px;font:11px var(--mono);letter-spacing:.1em;color:rgba(230,238,239,.75)}
+.fish .skin{position:absolute;inset:0;width:100%;height:100%;opacity:.55}
+.fish::after{content:"";position:absolute;left:50%;bottom:16%;width:44%;height:7%;transform:translateX(-50%);border-radius:50%;background:rgba(5,12,16,.35);filter:blur(6px);animation:shadow 3.6s ease-in-out infinite}
+.fish .chan{position:absolute;left:50%;top:48%;width:66%;transform:translate(-50%,-50%);z-index:1;filter:drop-shadow(0 14px 18px rgba(4,10,14,.35));animation:bob 3.6s ease-in-out infinite}
+@keyframes bob{0%,100%{transform:translate(-50%,-50%) rotate(-3deg)}50%{transform:translate(-50%,-56%) rotate(2deg)}}
+@keyframes shadow{0%,100%{width:44%;opacity:1}50%{width:36%;opacity:.7}}
+.side-mascot{display:block;width:120px;margin:8px 0 0 10px;opacity:.9;transform:rotate(-6deg)}
+.foot-chan{width:34px;vertical-align:middle;margin-right:8px}
+.fish .stamp{position:absolute;z-index:2;right:18px;bottom:18px;width:64px;height:64px;border-radius:9px;background:var(--seal);color:#fff4ec;display:grid;place-items:center;font:600 38px/1 "Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;transform:rotate(-4deg);box-shadow:0 10px 30px -10px rgba(229,67,47,.6),inset 0 0 0 2px rgba(255,255,255,.16)}
+.fish .tag{position:absolute;left:18px;top:16px;z-index:2;font:11px var(--mono);letter-spacing:.1em;color:rgba(230,238,239,.8)}
 
 /* sections */
 section{padding:56px 0 8px}
@@ -139,15 +145,42 @@ footer{margin-top:64px;padding:22px 0 0;border-top:1px solid var(--line);display
 @media(max-width:1180px){.steps{grid-template-columns:repeat(2,minmax(0,1fr))}.cards{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:980px){.shell{grid-template-columns:1fr}.side{display:none}.hero{grid-template-columns:1fr}.top nav{display:none}}
 @media(max-width:640px){:root{--gut:16px}.cards,.cards.three,.steps{grid-template-columns:1fr}.canvas{padding:8px}table{min-width:0}td:first-child{width:auto}}
-@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.canvas path[stroke-dasharray]{animation:none}*{transition:none!important}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.fish .chan,.fish::after{animation:none}.canvas path[stroke-dasharray]{animation:none}*{transition:none!important}}
 @media print{.top,.side{display:none}.shell{display:block}.canvas svg{min-width:0}.canvas path{animation:none}}
 </style>
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="chan-back" x1="0" y1="0" x2="1" y2=".6"><stop offset="0" stop-color="#3fc6d4"/><stop offset=".5" stop-color="#3f84e6"/><stop offset="1" stop-color="#8b6cf0"/></linearGradient>
+    <linearGradient id="chan-fin" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4fa2ec"/><stop offset="1" stop-color="#8b6cf0"/></linearGradient>
+    <clipPath id="chan-body"><path d="M30 100C30 56 74 31 124 32C170 33 198 62 200 96C198 129 168 152 122 154C72 156 30 141 30 100Z"/></clipPath>
+    <symbol id="saba-chan" viewBox="0 0 240 180">
+      <path d="M190 84C204 70 214 56 230 48C234 66 226 82 220 96C226 110 234 126 230 144C214 136 204 122 190 108Z" fill="url(#chan-fin)" stroke="#14202a" stroke-width="5" stroke-linejoin="round"/>
+      <path d="M112 36C118 20 136 12 156 16C152 26 146 34 140 40Z" fill="url(#chan-fin)" stroke="#14202a" stroke-width="5" stroke-linejoin="round"/>
+      <g clip-path="url(#chan-body)">
+        <rect x="20" y="20" width="200" height="150" fill="url(#chan-back)"/>
+        <g fill="none" stroke="#1a2f5c" stroke-width="6" stroke-linecap="round">
+          <path d="M100 34c-7 9 7 17 0 26s7 17 0 26"/><path d="M126 32c-7 9 7 17 0 26s7 17 0 26"/>
+          <path d="M152 36c-7 9 7 17 0 26s7 17 0 24"/><path d="M176 46c-6 8 6 15 0 23s6 14 0 20"/>
+        </g>
+        <path d="M18 106C60 96 104 116 148 104S196 98 214 104V176H18Z" fill="#f4efe4"/>
+        <path d="M18 106C60 96 104 116 148 104S196 98 214 104" fill="none" stroke="#c9d9de" stroke-width="3"/>
+        <ellipse cx="128" cy="52" rx="34" ry="8" fill="#fff" opacity=".22" transform="rotate(-8 128 52)"/>
+      </g>
+      <path d="M30 100C30 56 74 31 124 32C170 33 198 62 200 96C198 129 168 152 122 154C72 156 30 141 30 100Z" fill="none" stroke="#14202a" stroke-width="5"/>
+      <path d="M96 116C112 110 126 116 128 132C114 136 100 130 96 116Z" fill="url(#chan-fin)" stroke="#14202a" stroke-width="4" stroke-linejoin="round"/>
+      <ellipse cx="64" cy="84" rx="8" ry="10.5" fill="#14202a"/>
+      <circle cx="61.5" cy="79.5" r="3.2" fill="#fff"/><circle cx="66.5" cy="89" r="1.4" fill="#fff"/>
+      <ellipse cx="60" cy="108" rx="10" ry="5.5" fill="#ff8fa6" opacity=".85"/>
+      <path d="M40 114q5 6 10 0" fill="none" stroke="#14202a" stroke-width="3.5" stroke-linecap="round"/>
+    </symbol>
+  </defs>
+</svg>
 <header class="top">
   <a class="mark" href="system.html" aria-label="Saba"><span class="seal" aria-hidden="true">鯖</span><span class="word">saba</span></a>
   <span class="ver">develop</span>
-  <nav aria-label="Documentation"><a href="system.html" aria-current="page">System</a><a href="architecture.html">In motion</a><a href="features.html">Features</a><a href="adr/">Decisions</a></nav>
+  <nav aria-label="Documentation"><a href="system.html" aria-current="page">System</a><a href="https://github.com/dvrd/saba#readme">Guide</a></nav>
   <a class="gh" href="https://github.com/dvrd/saba">dvrd/saba ↗</a>
 </header>
 <div class="shell">
@@ -157,7 +190,8 @@ footer{margin-top:64px;padding:22px 0 0;border-top:1px solid var(--line);display
   <div class="group"><h4>Behavior</h4>
     <a href="#responses"><span>05</span>Kinds of response</a><a href="#ui"><span>06</span>From JSX to a live page</a><a href="#limits"><span>07</span>Limits and deadlines</a><a href="#libraries"><span>08</span>The libraries</a></div>
   <div class="group"><h4>Elsewhere</h4>
-    <a href="architecture.html"><span>↗</span>Saba in motion</a><a href="features.html"><span>↗</span>Features</a><a href="adr/"><span>↗</span>Decision records</a></div>
+    <a href="https://github.com/dvrd/saba#readme"><span>↗</span>README</a><a href="https://github.com/dvrd/saba"><span>↗</span>Source</a></div>
+  <svg class="side-mascot" viewBox="0 0 240 180" aria-hidden="true"><use href="#saba-chan"/></svg>
 </aside>
 <main><div class="col">
 <header class="hero">
@@ -165,10 +199,10 @@ footer{margin-top:64px;padding:22px 0 0;border-top:1px solid var(--line);display
     <div class="kicker">System architecture</div>
     <h1>From a socket<br>to a <em>live page</em>.</h1>
     <p class="lead">Saba is one Odin process that speaks HTTP/1.1, HTTP/2 and HTTP/3, serves documents its compiler built ahead of time, and ships a small JavaScript runtime that attaches to them in the browser.</p>
-    <p class="lead">Read it with <a href="architecture.html">Saba in motion</a>, which animates the same path, and the decisions in <a href="adr/">docs/adr</a>.</p>
+    <p class="lead">Every figure names the sources it was drawn from. When the code and this page disagree, the code wins.</p>
   </div>
-  <div class="fish" aria-hidden="true">
-    <svg viewBox="0 0 500 400" preserveAspectRatio="xMidYMid slice">
+  <div class="fish">
+    <svg class="skin" viewBox="0 0 500 400" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
       <defs>
         <linearGradient id="back" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0d4f5c"/><stop offset=".38" stop-color="#1f6fb0"/><stop offset=".68" stop-color="#5a4fc4"/><stop offset="1" stop-color="#2a2f63"/></linearGradient>
         <linearGradient id="belly" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cfe1e6" stop-opacity="0"/><stop offset=".45" stop-color="#c9d6db" stop-opacity=".55"/><stop offset="1" stop-color="#eef3f4" stop-opacity=".9"/></linearGradient>
@@ -186,8 +220,9 @@ footer{margin-top:64px;padding:22px 0 0;border-top:1px solid var(--line);display
       <rect y="150" width="500" height="250" fill="url(#belly)"/>
       <path d="M-10 236C120 214 300 252 510 226" stroke="#8fd6e0" stroke-opacity=".55" stroke-width="1.2" fill="none"/>
     </svg>
-    <span class="tag">SABA · 鯖 · MACKEREL</span>
-    <span class="stamp">鯖</span>
+    <svg class="chan" viewBox="0 0 240 180" role="img" aria-label="Saba-chan, the mackerel mascot"><use href="#saba-chan"/></svg>
+    <span class="tag">SABA-CHAN · 鯖</span>
+    <span class="stamp" aria-hidden="true">鯖</span>
   </div>
 </header>
 
@@ -468,7 +503,7 @@ footer{margin-top:64px;padding:22px 0 0;border-top:1px solid var(--line);display
 <section id="ui">
   <div class="section-head"><div class="eyebrow"><b>06</b>From JSX to a live page</div>
     <h2>The document is built once. The browser attaches to it.</h2>
-    <p>Before the server listens, the compiler turns each page into HTML for every declared language plus the JavaScript that attaches to it. All of it is one build generation, named by a digest of its bytes. Every reader of a page in one language gets the same document; private data arrives later through authorized requests (<a href="adr/0004-saba-compile-time-html-no-request-rendering.md">ADR 0004</a>).</p></div>
+    <p>Before the server listens, the compiler turns each page into HTML for every declared language plus the JavaScript that attaches to it. All of it is one build generation, named by a digest of its bytes. Every reader of a page in one language gets the same document; private data arrives later through authorized requests.</p></div>
 
 <figure class="diagram"><figcaption><span><b>FIG. 06</b> · JSX to a live page</span><code>src/jsx · src/pages · src/modules</code></figcaption><div class="canvas"><svg xmlns="http://www.w3.org/2000/svg" font-family="Menlo,Consolas,monospace" viewBox="0 0 1240 520" role="img" aria-labelledby="ui-t ui-d">
 <title id="ui-t">From JSX to a live page</title>
@@ -599,7 +634,7 @@ footer{margin-top:64px;padding:22px 0 0;border-top:1px solid var(--line);display
     </tbody></table></div>
 </section>
 
-<footer><span>鯖 saba · MIT License</span><span>Drawn from the sources on develop. When the code and this page disagree, the code wins.</span></footer>
+<footer><span><svg class="foot-chan" viewBox="0 0 240 180" aria-hidden="true"><use href="#saba-chan"/></svg>saba · MIT License</span><span>Drawn from the sources on develop. When the code and this page disagree, the code wins.</span></footer>
 </div></main>
 </div>
 </body>

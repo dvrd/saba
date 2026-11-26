@@ -12,12 +12,12 @@ Saba is a web server and UI framework written in Odin.
 - **UI**: JSX components compiled at build time. Markup the compiler can prove
   is emitted as HTML; the rest becomes plain JavaScript that attaches in the
   browser with signals and fine-grained bindings. There is no per-request
-  rendering and no hydration ([ADR 0004](docs/adr/0004-saba-compile-time-html-no-request-rendering.md)).
+  rendering and no hydration.
 - **Adapters**: offloaded work (`src/offload`), upstream HTTP (`src/upstream`),
   WebSocket (`src/websocket`) and S3 (`src/s3`).
 
-Design notes live in [docs/](docs/) and [docs/adr/](docs/adr/). [docs/system.html](docs/system.html)
-explains the architecture with diagrams.
+[docs/system.html](docs/system.html) explains the architecture with diagrams;
+the other notes in [docs/](docs/) record UI work and measurements.
 
 ## Requirements
 
@@ -144,8 +144,7 @@ below.
   looked for: zero selects two seconds and a negative value turns the lookup
   off. Generations loaded this way live until `release_build`, which the
   facade calls; an application that prepares pages itself calls it once no
-  request can reach the build. See
-  [ADR 0004](docs/adr/0004-saba-compile-time-html-no-request-rendering.md#running-this-implementation).
+  request can reach the build.
 - **Development source maps.** In development a module compiled from JSX ends
   with `//# sourceMappingURL=<module>.js.map`, and that URL serves a map
   whose file and source names are relative to it and which embeds the JSX

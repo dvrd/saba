@@ -2,7 +2,7 @@
 
 Open the synthetic Saba test form, edit item 42 with 1,000 items loaded, then rename it so it enters another visible list. These measurements use seven implementations of that one screen. They include the existing Saba mount path and a hand-authored prototype of the planned reactive compiler output. The earlier measurements exercised the legacy sheet module with synthetic rows. [Sheet benchmark](SABA_UI_PERFORMANCE.md)
 
-Measured before 2026-11-25. The compiler now lowers some keyed and checkbox lists and element-or-nothing holes to direct DOM code, which may change the compiled Saba figures below. They are kept as recorded until new measurements replace them. All runs used Chromium. [Lowering rules](adr/0007-saba-reactive-props-and-bindings.md#shapes-the-compiler-lowers-to-direct-dom-code)
+Measured before 2026-11-25. The compiler now lowers some keyed and checkbox lists and element-or-nothing holes to direct DOM code, which may change the compiled Saba figures below. They are kept as recorded until new measurements replace them. All runs used Chromium.
 
 The [project board and million-record grid](SABA_RICH_RENDERING.md) extend this comparison to bulk edits, animated pointer moves and mounted-component capacity.
 

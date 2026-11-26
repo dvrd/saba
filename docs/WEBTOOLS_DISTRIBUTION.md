@@ -2,8 +2,7 @@
 
 Current implementation inventory, 2026-11-09. Tracking:
 [OKAMI-108](https://linear.app/devoured/issue/OKAMI-108).
-The [architecture decision](adr/0001-webtools-native-network-stack.md) preserves
-the original design; this guide distinguishes shipped owners from planned work.
+This guide distinguishes shipped owners from planned work.
 A package existing on disk, an executable consumer, a native protocol test and
 application integration are different evidence levels.
 

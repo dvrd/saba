@@ -2,7 +2,7 @@
 
 These benchmarks exercise two different screens. The project board measures cold startup, state changes, a cross-lane drag and the resulting animation. The telemetry grid measures how much work it takes to mount data-bearing components, update sparse records and scroll to the final record. The [single-record editor](SABA_FRAMEWORK_COMPARISON.md) remains a separate workload.
 
-Measured before 2026-11-25. The compiler now lowers some keyed and checkbox lists and element-or-nothing holes to direct DOM code, which may change the compiled Saba figures below. They are kept as recorded until new measurements replace them. All runs used Chromium. [Lowering rules](adr/0007-saba-reactive-props-and-bindings.md#shapes-the-compiler-lowers-to-direct-dom-code)
+Measured before 2026-11-25. The compiler now lowers some keyed and checkbox lists and element-or-nothing holes to direct DOM code, which may change the compiled Saba figures below. They are kept as recorded until new measurements replace them. All runs used Chromium.
 
 ## Project board
 
@@ -107,7 +107,7 @@ Desktop medians from six fresh Chromium processes per implementation, three in e
 
 ### Buffered scrolling
 
-The buffered scenario uses the same keyed renderer and one million local records. It initially mounts eight extra rows on each available side. It starts replenishing the band when three rows of runway remain, coalesces normal boundary crossings into one animation frame, and fills immediately if another scroll step of the same size could expose missing rows. [Controller and ownership](adr/0002-saba-ui-signals-with-incremental-borrowings.md#buffered-windows-for-fixed-height-rows) · [Scroll animation](features.html#op/buffered-row-window)
+The buffered scenario uses the same keyed renderer and one million local records. It initially mounts eight extra rows on each available side. It starts replenishing the band when three rows of runway remain, coalesces normal boundary crossings into one animation frame, and fills immediately if another scroll step of the same size could expose missing rows.
 
 Four matched rounds ran 82 scripted positions with reversals, 12 trusted wheel inputs including 32-row steps, a resize from 416 to 728 px, and a jump to the last edited record. Both implementations used fresh Chromium processes. Each sampled frame hit-tested the cells at the four corners of the viewport against their expected identities and displayed scores.
 

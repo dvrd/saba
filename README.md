@@ -16,8 +16,11 @@ Saba is a web server and UI framework written in Odin.
 - **Adapters**: offloaded work (`src/offload`), upstream HTTP (`src/upstream`),
   WebSocket (`src/websocket`) and S3 (`src/s3`).
 
-[docs/system.html](docs/system.html) explains the architecture with diagrams;
-the other notes in [docs/](docs/) record UI work and measurements.
+[docs/system.html](docs/system.html) explains the architecture with diagrams,
+[docs/architecture.html](docs/architecture.html) steps through a page from JSX
+to a live binding with the real source at each step, and
+[docs/features.html](docs/features.html) walks through each feature the same way.
+The other notes in [docs/](docs/) record UI work and measurements.
 
 ## Requirements
 

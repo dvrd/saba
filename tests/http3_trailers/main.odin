@@ -1,9 +1,7 @@
 package main
 
 import core "shared:saba/core"
-import surf "shared:surf"
 import http "shared:async/http"
-import h3 "shared:async/http/v3"
 import "shared:async/tls"
 import credentials "shared:async/tls/credentials"
 import store "shared:async/tls/credentials/store"
@@ -12,6 +10,7 @@ import "core:log"
 import "core:net"
 import "core:os"
 import "core:sync"
+import "core:strconv"
 import "core:strings"
 import "core:thread"
 import "core:time"
@@ -85,43 +84,36 @@ server :: proc(cert_path, key_path: string) {
 	thread.join(worker)
 	fmt.printf("RESULT calls=%d\n", state.calls)
 }
-client :: proc(port, cert_path: string, invalid: bool = false) {
+client :: proc(port_text, cert_path: string, invalid: bool = false) {
 	roots: tls.Root_Pool
 	assert(tls.root_pool_load_file(&roots, cert_path) == nil)
 	defer tls.root_pool_destroy(&roots)
-	pool: h3.Pool
-	defer h3.pool_close(&pool)
-	config := surf.Config {
-		http3 = true,
-		http3_pool = &pool,
-		timeout = 5 * time.Second,
-		tls = {root_cas = roots.roots[:roots.count]},
-	}
+	port, valid := strconv.parse_int(port_text)
+	assert(valid)
+	c: Client
+	client_open(&c, port, &roots)
+	defer client_close(&c)
 
-	url := fmt.aprintf("https://localhost:%s/trailers", port)
+	url := fmt.aprintf("https://localhost:%s/trailers", port_text)
 	defer delete(url)
 
 	if invalid {
-		bad_url := fmt.aprintf("https://localhost:%s/bad", port)
+		bad_url := fmt.aprintf("https://localhost:%s/bad", port_text)
 		defer delete(bad_url)
-		response, error := surf.execute({method = .POST, url = bad_url}, config)
-		assert(error.kind != .None)
-		surf.response_destroy(&response)
+		bad := post(&c, bad_url, nil, nil)
+		assert(bad.error.kind != .None)
+		post_destroy(bad)
 	}
 
 	trailer_headers := [1]http.Header{{"X-Request-Checksum", "abc"}}
 
 	for body in ([]string{"payload", ""}) {
-		response, error := surf.execute(
-			{method = .POST, url = url, trailers = trailer_headers[:], body = transmute([]u8)body},
-			config,
-		)
-		assert(error.kind == .None && response.status == 200 && string(response.body) == "echo")
-		value, found := surf.response_trailer(&response, "X-Response-Checksum")
+		response := post(&c, url, transmute([]u8)body, trailer_headers[:])
+		assert(response.error.kind == .None && response.status == 200 && string(response.response[:]) == "echo")
+		value, found := post_trailer(response, "X-Response-Checksum")
 		assert(found && value == "ack")
-		_, merged := surf.response_header(&response, "x-response-checksum")
-		assert(!merged)
-		surf.response_destroy(&response)
+		assert(!response.merged)
+		post_destroy(response)
 	}
 
 	fmt.println("OK native HTTP3 trailers")

@@ -10,9 +10,8 @@ import core "../core"
 import rt "base:runtime"
 import "core:fmt"
 import "core:mem"
-import charged "shared:async/mem/budget"
-import budget "shared:async/sync/budget"
-import owned "shared:async/mem/owned"
+import budget "shared:async/budget"
+import owned "shared:async/owned"
 import "core:os"
 import "core:time"
 
@@ -508,7 +507,7 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 	producer, error := new(File_Producer, allocator)
 
 	if error != nil || producer == nil {
-		charged.release(&binding)
+		budget.binding_release(&binding)
 		return {status = .Internal_Server_Error}
 	}
 
@@ -537,7 +536,7 @@ serve_file_stream :: proc(request: ^Request, root, relative: string, config := F
 }
 
 File_Producer :: struct {
-	binding:           charged.Binding,
+	binding:           budget.Binding,
 	file:              ^os.File,
 	offset, remaining: i64,
 	chunk_bytes:       int,
@@ -607,7 +606,7 @@ file_drop :: proc(data: rawptr) {
 	delete(producer.storage, producer.allocator)
 	allocator, binding := producer.allocator, producer.binding
 	mem.free_with_size(producer, size_of(File_Producer), allocator)
-	charged.release(&binding)
+	budget.binding_release(&binding)
 }
 
 file_strong_tag :: proc(tag: string) -> bool {
@@ -691,7 +690,7 @@ file_storage_allocator :: proc(
 	configured: mem.Allocator,
 ) -> (
 	mem.Allocator,
-	charged.Binding,
+	budget.Binding,
 	bool,
 ) {
 	managed := scope_managed(request.resources)
@@ -705,15 +704,15 @@ file_storage_allocator :: proc(
 	if !managed {
 		return configured, {}, true
 	}
-	if charged.is_managed_allocator(configured) {
-		scope, valid := charged.allocator_scope(configured)
+	if budget.is_managed_allocator(configured) {
+		scope, valid := budget.allocator_scope(configured)
 		return configured, {}, valid && budget.covers(scope, request.resources)
 	}
-	binding, error := charged.create(request.resources, {backing = configured})
+	binding, error := budget.create(request.resources, {backing = configured})
 	if error.kind != .None {
 		return {}, {}, false
 	}
-	return charged.allocator(binding), binding, true
+	return budget.allocator(binding), binding, true
 }
 
 // Buffers one regular file of at most FILE_BYTES_MAX; larger files belong to

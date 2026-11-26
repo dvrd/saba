@@ -3,10 +3,9 @@ package saba_core
 import exchange "shared:async/http/exchange"
 import rt "base:runtime"
 import "core:mem"
-import charged "shared:async/mem/budget"
-import owned "shared:async/mem/owned"
+import owned "shared:async/owned"
 import "core:strings"
-import budget "shared:async/sync/budget"
+import budget "shared:async/budget"
 import "core:testing"
 import async "shared:async"
 
@@ -30,7 +29,7 @@ resource_test_init :: proc(fixture: ^Resource_Test, config: Resource_Config = {}
 	fixture.task.request = {
 		allocator         = mem.dynamic_arena_allocator(&fixture.task.arena),
 		resources         = fixture.task.resource_operation,
-		backing_allocator = charged.allocator(fixture.task.resource_binding),
+		backing_allocator = budget.allocator(fixture.task.resource_binding),
 		method            = "GET",
 	}
 
@@ -43,7 +42,7 @@ resource_test_finish :: proc(fixture: ^Resource_Test) {
 	drop_upgrade(&fixture.task)
 	mem.dynamic_arena_destroy(&fixture.task.arena)
 	finish_operation_resources(&fixture.task)
-	charged.release(&fixture.task.resource_transport)
+	budget.binding_release(&fixture.task.resource_transport)
 	_ = budget.close(fixture.task.resource_connection)
 	budget.release_scope(&fixture.task.resource_connection)
 	assert(async.destroy(&fixture.runtime.executor).kind == .None)
@@ -80,9 +79,9 @@ charged_backing_and_late_context_survive_operation_retirement :: proc(t: ^testin
 	testing.expect(t, view.used.bytes >= 16 * mem.Kilobyte)
 	retained, ok := retain_request_context(fixture.task.request.cancellation)
 	assert(ok)
-	job_binding, created := charged.create(request_resources(retained))
+	job_binding, created := budget.create(request_resources(retained))
 	assert(created.kind == .None)
-	data, allocated := charged.allocate(job_binding, 1024)
+	data, allocated := budget.allocate(job_binding, 1024)
 	assert(allocated.kind == .None)
 	job, accepted := budget.reserve(request_resources(retained), {jobs = 1}, .Running)
 	assert(accepted == .None)
@@ -93,7 +92,7 @@ charged_backing_and_late_context_survive_operation_retirement :: proc(t: ^testin
 	assert(le == .None)
 	testing.expect(t, late.used.bytes > 1024 && late.used.jobs == 1 && late.used.running == 1)
 	testing.expect_value(t, request_context_status(retained), .Failed)
-	_, denied := charged.allocate(job_binding, 1)
+	_, denied := budget.allocate(job_binding, 1)
 	testing.expect_value(t, denied.kind, .Budget_Rejected)
 	testing.expect_value(t, denied.budget, .Closed)
 	assert(budget.set_job_phase(&job, .Held) == .None)
@@ -108,8 +107,8 @@ charged_backing_and_late_context_survive_operation_retirement :: proc(t: ^testin
 	assert(ne == .None)
 	testing.expect_value(t, new_view.used.bytes, u64(0))
 	testing.expect_value(t, new_view.used.jobs, u64(0))
-	testing.expect_value(t, charged.deallocate(job_binding, raw_data(data)).kind, .None)
-	charged.release(&job_binding)
+	testing.expect_value(t, budget.deallocate(job_binding, raw_data(data)).kind, .None)
+	budget.binding_release(&job_binding)
 	budget.release(&job)
 	release_request_context(&retained)
 	recovered, re := budget.snapshot(fixture.runtime.resources)
@@ -250,7 +249,7 @@ review_chunk_decoder_budget_reject_uses_fixed_503 :: proc(t: ^testing.T) {
 }
 
 Review_KA_Pressure :: struct {
-	binding:   charged.Binding,
+	binding:   budget.Binding,
 	busy:      []u8,
 	busy_size: int,
 	armed:     bool,
@@ -269,7 +268,7 @@ review_ka_metadata :: proc(
 	state := cast(^Review_KA_Pressure)data
 	if mode == .Free && state.armed {
 		state.armed = false
-		allocated, error := charged.allocate(state.binding, state.busy_size)
+		allocated, error := budget.allocate(state.binding, state.busy_size)
 		assert(error.kind == .None)
 		state.busy = allocated
 	}
@@ -282,10 +281,10 @@ review_keepalive_prefetch_growth_pressure_uses_fixed_503 :: proc(t: ^testing.T) 
 	state: Review_KA_Pressure
 	parent, error := budget.create_root({64 * mem.Kilobyte, 2, 2}, {review_ka_metadata, &state})
 	assert(error == .None)
-	binding, created := charged.create(parent)
+	binding, created := budget.create(parent)
 	assert(created.kind == .None)
 	state.binding = binding
-	one, computed := charged.allocation_cost(1, mem.DEFAULT_ALIGNMENT)
+	one, computed := budget.allocation_cost(1, mem.DEFAULT_ALIGNMENT)
 	assert(computed.kind == .None)
 	state.busy_size = 64 * mem.Kilobyte - int(one) + 1
 	fixture: Resource_Test
@@ -313,8 +312,8 @@ review_keepalive_prefetch_growth_pressure_uses_fixed_503 :: proc(t: ^testing.T) 
 		queued,
 	)
 	resource_test_finish(&fixture)
-	assert(charged.deallocate(binding, raw_data(state.busy)).kind == .None)
-	charged.release(&binding)
+	assert(budget.deallocate(binding, raw_data(state.busy)).kind == .None)
+	budget.binding_release(&binding)
 	budget.release_scope(&parent)
 }
 

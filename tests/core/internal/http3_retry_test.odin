@@ -109,7 +109,7 @@ http3_retry_normal_serve_uses_explicit_store_before_dispatch :: proc(t: ^testing
 	testing.expect_value(t, h3_test_body(&native), "saba-retry-validated")
 	response, surf_error := surf.execute(
 		{method = .GET, url = url},
-		{http3 = true, timeout = 8 * time.Second, tls = {root_cas = roots.roots[:roots.count]}},
+		{http3 = true, timeout = 8 * time.Second, tls = {roots = &roots}},
 	)
 	defer surf.response_destroy(&response)
 	testing.expect_value(t, surf_error.kind, .None)

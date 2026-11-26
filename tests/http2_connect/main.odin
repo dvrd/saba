@@ -2,7 +2,7 @@ package main
 
 import core "shared:saba/core"
 import ws "shared:saba/websocket"
-import surf "shared:surf"
+import async "shared:async"
 import codec "shared:async/websocket"
 import tls "shared:async/tls"
 import credentials "shared:async/tls/credentials"
@@ -13,6 +13,7 @@ import "core:bytes"
 import "core:log"
 import "core:mem"
 import "core:os"
+import "core:strconv"
 import "core:sync"
 import "core:thread"
 import "core:time"
@@ -182,7 +183,7 @@ identity_replace :: proc(identity: ^store.Store, cert, key: string) {
 	assert(e == .None)
 	assert(store.replace(identity, &owner).kind == .None)
 }
-identity_check :: proc(identity: ^store.Store, response: ^surf.Response) {
+identity_text :: proc(identity: ^store.Store) -> [64]u8 {
 	lease, e := store.acquire(identity)
 	assert(e.kind == .None)
 	defer store.release(identity, &lease)
@@ -196,8 +197,29 @@ identity_check :: proc(identity: ^store.Store, response: ^surf.Response) {
 		text[i * 2 + 1] = digits[byte & 15]
 	}
 
-	actual, found := surf.response_header(response, "x-client-identity")
-	assert(found && actual == string(text[:]))
+	return text
+}
+// One GET of /health on connection conn: the body must be http-ok. Returns
+// the identity the server saw on that connection.
+health :: proc(d: ^Driver, conn: int, label: string = "") -> string {
+	error := call(d, .Get, conn)
+	g := &d.get
+	if label != "" {
+		fmt.printf("%s kind=%v status=%d body=%s\n", label, error.kind, g.status, string(g.body[:]))
+	}
+	assert(error.kind == .None && g.status == 200 && string(g.body[:]) == "http-ok")
+
+	return string(g.identity[:g.identity_n])
+}
+send :: proc(d: ^Driver, socket: int, kind: async.WS_Message_Kind, payload: []u8) {
+	d.kind, d.payload = kind, payload
+	error := call(d, .Send, socket)
+	assert(error.kind == .None)
+}
+receive :: proc(d: ^Driver, socket: int) -> (async.WS_Message_Kind, []u8, async.Error) {
+	error := call(d, .Recv, socket)
+
+	return d.message.kind, d.message.data, error
 }
 client :: proc(
 	port, cert_path: string,
@@ -218,57 +240,54 @@ client :: proc(
 	defer if identity != nil {
 		assert(store.destroy(&identity).kind == .None)
 	}
-	http: surf.HTTP_Client
-	protocols := [2]string{"h2", "http/1.1"}
-	assert(
-		surf.http_client_init(&http, {tls = {root_cas = roots.roots[:roots.count], alpn_protocols = protocols[:], client_credentials = identity}, timeout = 3 * time.Second}, {}, context.allocator).kind ==
-		.None,
-	)
-	defer surf.http_client_close(&http)
-	url := fmt.aprintf("https://localhost:%s/socket", port)
-	defer delete(url)
-	health := fmt.aprintf("https://localhost:%s/health", port)
-	defer delete(health)
-	conn: surf.WebSocket_Conn
-	tunnel: surf.HTTP2_Tunnel
-	error := surf.websocket_http2_open(
-		&http,
-		&tunnel,
-		&conn,
-		url,
-		{origin = "https://allowed.invalid", subprotocols = {"chat.v2"}},
-	)
-	fmt.printf("OPEN error=%v phase=%v\n", error.kind, error.phase)
+	number, number_ok := strconv.parse_int(port)
+	assert(number_ok)
+	d := new(Driver)
+	defer free(d)
+	driver_start(d, number, &roots, identity)
+	d.authority = fmt.aprintf("localhost:%s", port)
+	defer delete(d.authority)
+	d.path = fmt.aprintf("https://localhost:%s/health", port)
+	defer delete(d.path)
+	// Connection 0 carries both websockets and the plain requests.
+	assert(call(d, .Dial, 0).kind == .None)
+	assert(sync.atomic_load(&d.dials) == 1)
+	d.sockets[0].conn = 0
+	error := call(d, .Open, 0)
+	fmt.printf("OPEN error=%v\n", error.kind)
 	assert(error.kind == .None)
-	defer codec.message_release(&conn.message_state)
-	assert(surf.websocket_subprotocol(&conn) == "chat.v2")
-	conn2: surf.WebSocket_Conn
-	tunnel2: surf.HTTP2_Tunnel
-	assert(
-		surf.websocket_http2_open(&http, &tunnel2, &conn2, url, {origin = "https://allowed.invalid", subprotocols = {"chat.v2"}}).kind ==
-		.None,
-	)
-	defer codec.message_release(&conn2.message_state)
-	response, re := surf.http_client_exchange(&http, {method = .GET, url = health})
-	assert(re.kind == .None && string(response.body) == "http-ok")
+	assert(string(d.sockets[0].protocol[:d.sockets[0].protocol_n]) == "chat.v2")
+	d.sockets[1].conn = 0
+	assert(call(d, .Open, 1).kind == .None)
+	assert(string(d.sockets[1].protocol[:d.sockets[1].protocol_n]) == "chat.v2")
+	seen := health(d, 0)
 	if identity != nil {
-		identity_check(identity, &response)
+		expected := identity_text(identity)
+		assert(seen == string(expected[:]))
 	}
-	surf.response_destroy(&response)
 	if replacement_cert != "" {
-		dials := surf.http_client_dials(&http)
+		// The identity is fixed by a connection's handshake: after rotating
+		// it, the open connection still presents the old one, and exactly one
+		// new dial presents the new one.
+		old := identity_text(identity)
+		dials := sync.atomic_load(&d.dials)
 		identity_replace(identity, replacement_cert, replacement_key)
-		response, re = surf.http_client_exchange(&http, {method = .GET, url = health})
-		assert(re.kind == .None && string(response.body) == "http-ok")
-		identity_check(identity, &response)
-		surf.response_destroy(&response)
-		assert(surf.http_client_dials(&http) == dials + 1)
+		assert(call(d, .Dial, 1).kind == .None)
+		assert(sync.atomic_load(&d.dials) == dials + 1)
+		expected := identity_text(identity)
+		assert(expected != old)
+		seen = health(d, 1)
+		assert(seen == string(expected[:]))
+		seen = health(d, 0)
+		assert(seen == string(old[:]))
+		assert(call(d, .Shutdown, 1).kind == .None)
+		assert(sync.atomic_load(&d.dials) == dials + 1)
 	}
-	assert(surf.websocket_write_message(&conn, .Text, transmute([]u8)string("native-hello")).kind == .None)
-	buffer: [128]u8
-	opcode, n, read := surf.websocket_read_message(&conn, buffer[:])
-	fmt.printf("READ kind=%v n=%d\n", read.kind, n)
-	assert(read.kind == .None && opcode == .Text && string(buffer[:n]) == "native-hello")
+	send(d, 0, .Text, transmute([]u8)string("native-hello"))
+	kind, data, read := receive(d, 0)
+	fmt.printf("READ kind=%v n=%d\n", read.kind, len(data))
+	assert(read.kind == .None && kind == .Text && string(data) == "native-hello")
+	delete(data, rt.heap_allocator())
 	// This exceeds both the HTTP2 stream window and Saba's64KiB body queue.
 	// Incremental backpressure must complete without buffering an unbounded body.
 	payload := make([]u8, 128 * 1024)
@@ -276,22 +295,24 @@ client :: proc(
 	for &byte, i in payload {
 		byte = u8(i % 251)
 	}
-	assert(surf.websocket_write_message(&conn, .Binary, payload).kind == .None)
-	received := make([]u8, len(payload))
-	defer delete(received)
-	opcode, n, read = surf.websocket_read_message(&conn, received)
-	fmt.printf("LARGE kind=%v n=%d opcode=%v\n", read.kind, n, opcode)
-	assert(read.kind == .None && opcode == .Binary && n == len(payload) && bytes.equal(payload, received))
-	assert(surf.websocket_close(&conn, 1000, "").kind == .None)
-	assert(surf.websocket_write_message(&conn2, .Text, transmute([]u8)string("second-stream")).kind == .None)
-	opcode, n, read = surf.websocket_read_message(&conn2, buffer[:])
-	assert(read.kind == .None && string(buffer[:n]) == "second-stream")
-	assert(surf.websocket_close(&conn2, 1000, "").kind == .None)
-	response, re = surf.http_client_exchange(&http, {method = .GET, url = health})
-	fmt.printf("AFTER kind=%v phase=%v status=%d body=%s\n", re.kind, re.phase, response.status, string(response.body))
-	assert(re.kind == .None && string(response.body) == "http-ok")
-	surf.response_destroy(&response)
-	surf.http_client_close(&http)
+	send(d, 0, .Binary, payload)
+	kind, data, read = receive(d, 0)
+	fmt.printf("LARGE kind=%v n=%d opcode=%v\n", read.kind, len(data), kind)
+	assert(read.kind == .None && kind == .Binary && len(data) == len(payload) && bytes.equal(payload, data))
+	delete(data, rt.heap_allocator())
+	assert(call(d, .Close, 0).kind == .None)
+	assert(d.sockets[0].close.reason == .Local_Close && d.sockets[0].close.clean)
+	send(d, 1, .Text, transmute([]u8)string("second-stream"))
+	kind, data, read = receive(d, 1)
+	assert(read.kind == .None && string(data) == "second-stream")
+	delete(data, rt.heap_allocator())
+	assert(call(d, .Close, 1).kind == .None)
+	assert(d.sockets[1].close.reason == .Local_Close && d.sockets[1].close.clean)
+	seen = health(d, 0, "AFTER")
+	assert(call(d, .Shutdown, 0).kind == .None)
+	// Every connection the client made was one it asked for.
+	assert(sync.atomic_load(&d.dials) == (2 if replacement_cert != "" else 1))
+	driver_stop(d)
 	if identity != nil {
 		view, e := store.stats(identity)
 		assert(e.kind == .None && view.active_leases == 0)

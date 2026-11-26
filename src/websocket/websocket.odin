@@ -4,8 +4,7 @@ import "core:time"
 import core "../core"
 import codec "shared:async/websocket"
 import "core:mem"
-import charged "shared:async/mem/budget"
-import budget "shared:async/sync/budget"
+import budget "shared:async/budget"
 import async "shared:async"
 import "core:unicode/utf8"
 import rt "base:runtime"
@@ -102,14 +101,14 @@ new_session :: proc(
 	if !scope_managed(scope) {
 		return nil, {kind = .Invalid_Context}
 	}
-	binding, binding_error := charged.create(scope, {backing = backing})
+	binding, binding_error := budget.create(scope, {backing = backing})
 	if binding_error.kind != .None {
 		return nil, {kind = .Budget_Rejected, budget = binding_error.budget, allocation = binding_error.allocation}
 	}
-	allocator := charged.allocator(binding)
+	allocator := budget.allocator(binding)
 	session, allocation := new(Session, allocator)
 	if allocation != nil {
-		charged.release(&binding)
+		budget.binding_release(&binding)
 		return nil, {kind = .Allocation_Failed, allocation = allocation}
 	}
 	resolved.check_origin, resolved.select_subprotocol, resolved.policy_data = nil, nil, nil
@@ -175,7 +174,7 @@ drop_session :: proc(data: rawptr) {
 	binding, allocator := session.binding, session.allocator
 	mem.zero(session, size_of(Session))
 	free(session, allocator)
-	charged.release(&binding)
+	budget.binding_release(&binding)
 
 	if owned {
 		if app.on_close != nil {
@@ -803,7 +802,7 @@ Session :: struct {
 	config:                                                      Config,
 	app:                                                         Application,
 	allocator:                                                   mem.Allocator,
-	binding:                                                     charged.Binding,
+	binding:                                                     budget.Binding,
 	request_context:                                             core.Request_Context,
 	owns_app, opened, dropped, writable_wanted:                  bool,
 	protocol:                                                    string,

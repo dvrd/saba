@@ -2,12 +2,12 @@ package main
 
 import core "shared:saba/core"
 import ws "shared:saba/websocket"
-import surf "shared:surf"
+import async "shared:async"
 import codec "shared:async/websocket"
 import tls "shared:async/tls"
 import credentials "shared:async/tls/credentials"
 import store "shared:async/tls/credentials/store"
-import budget "shared:async/sync/budget"
+import budget "shared:async/budget"
 import rt "base:runtime"
 import "core:fmt"
 import "core:bytes"
@@ -16,6 +16,7 @@ import "core:mem"
 import "core:net"
 import h3 "shared:async/http/v3"
 import "core:os"
+import "core:strconv"
 import "core:sync"
 import "core:thread"
 import "core:time"
@@ -217,7 +218,7 @@ identity_replace :: proc(identity: ^store.Store, cert, key: string) {
 	assert(e == .None)
 	assert(store.replace(identity, &owner).kind == .None)
 }
-identity_check :: proc(identity: ^store.Store, response: ^surf.Response) {
+identity_text :: proc(identity: ^store.Store) -> [64]u8 {
 	lease, e := store.acquire(identity)
 	assert(e.kind == .None)
 	defer store.release(identity, &lease)
@@ -231,8 +232,32 @@ identity_check :: proc(identity: ^store.Store, response: ^surf.Response) {
 		text[i * 2 + 1] = digits[byte & 15]
 	}
 
-	actual, found := surf.response_header(response, "x-client-identity")
-	assert(found && actual == string(text[:]))
+	return text
+}
+// One GET of /health: the body must be http-ok. Returns the identity the
+// server saw on the lane that carried it.
+health :: proc(c: ^Client, label: string = "") -> [64]u8 {
+	g := get(c, "/health")
+	defer get_destroy(g)
+	if g.error.kind != .None {
+		fmt.printf("GET failed error=%v failure=%v\n", g.error, g.failure)
+	}
+	if label != "" {
+		fmt.printf("%s kind=%v status=%d body=%s\n", label, g.error.kind, g.status, string(g.body[:]))
+	}
+	assert(g.error.kind == .None && g.status == 200 && string(g.body[:]) == "http-ok")
+	identity: [64]u8
+	copy(identity[:], g.identity[:g.identity_n])
+
+	return identity
+}
+lanes_inserted :: proc(pool: ^h3.Pool, user: rawptr) {
+	inserts := cast(^u64)user
+	for slot in pool.slots {
+		if slot.used && slot.client != nil {
+			inserts^ += slot.client.qpack.stats.encoded_inserts
+		}
+	}
 }
 client :: proc(
 	port, cert_path: string,
@@ -253,79 +278,52 @@ client :: proc(
 	defer if identity != nil {
 		assert(store.destroy(&identity).kind == .None)
 	}
-	pool: h3.Pool
-	defer h3.pool_close(&pool)
-	cache: surf.Alt_Svc_Cache
-	value := fmt.aprintf("h3=\":%s\"; ma=60", port)
-	defer delete(value)
-	assert(surf.alt_svc_note(&cache, "localhost", value, true, true, time.now(), 8443))
-	http: surf.HTTP_Client
-	protocols := [2]string{"h2", "http/1.1"}
-	assert(
-		surf.http_client_init(&http, {tls = {root_cas = roots.roots[:roots.count], alpn_protocols = protocols[:], client_credentials = identity}, timeout = 5 * time.Second, http3 = true, http3_pool = &pool, alt_svc = &cache, http3_qpack = {table_capacity = 4096, blocked_streams = 4}}, {}, context.allocator).kind ==
-		.None,
-	)
-	defer surf.http_client_close(&http)
-	url := fmt.aprintf("https://localhost:8443/socket")
-	defer delete(url)
-	health := fmt.aprintf("https://localhost:8443/health")
-	defer delete(health)
-	conn: surf.WebSocket_Conn
-	tunnel: surf.HTTP3_Tunnel
-	error := surf.websocket_http3_open(
-		&http,
-		&tunnel,
-		&conn,
-		url,
-		{origin = "https://allowed.invalid", subprotocols = {"chat.v2"}},
-	)
-	fmt.printf("OPEN error=%v phase=%v\n", error.kind, error.phase)
-	assert(error.kind == .None)
-	defer codec.message_release(&conn.message_state)
-	assert(surf.websocket_subprotocol(&conn) == "chat.v2")
-	conn2: surf.WebSocket_Conn
-	tunnel2: surf.HTTP3_Tunnel
-	assert(
-		surf.websocket_http3_open(&http, &tunnel2, &conn2, url, {origin = "https://allowed.invalid", subprotocols = {"chat.v2"}}).kind ==
-		.None,
-	)
-	defer codec.message_release(&conn2.message_state)
-	conn3: surf.WebSocket_Conn
-	tunnel3: surf.HTTP3_Tunnel
-	assert(
-		surf.websocket_http3_open(&http, &tunnel3, &conn3, url, {origin = "https://allowed.invalid", subprotocols = {"chat.v2"}}).kind ==
-		.None,
-	)
-	tunnel3.read_deadline = time.time_add(time.now(), -time.Millisecond)
-	expired: [1]u8
-	_, _, expired_error := surf.websocket_read_message(&conn3, expired[:])
-	assert(expired_error.kind != .None)
-	codec.message_release(&conn3.message_state)
+	number, number_ok := strconv.parse_int(port)
+	assert(number_ok)
+	// Requests name the origin localhost:8443 while the pool dials the HTTP/3
+	// port, as an Alt-Svc alternative would be reached.
+	c := new(Client)
+	defer free(c)
+	client_start(c, number, "localhost:8443", &roots, identity)
+	conn, error := socket_open(c)
+	fmt.printf("OPEN error=%v status=%d\n", error.kind, conn.status)
+	assert(error.kind == .None && conn.status == 200)
+	assert(socket_protocol(conn) == "chat.v2")
+	conn2, error2 := socket_open(c)
+	assert(error2.kind == .None && socket_protocol(conn2) == "chat.v2")
+	// A websocket whose reads wait too long fails: nothing arrives within its
+	// idle timeout, so the read ends with .Timeout instead of blocking.
+	conn3, error3 := socket_open(c, {idle_timeout = 500 * time.Millisecond, ping_interval = async.WS_PING_OFF})
+	assert(error3.kind == .None)
+	_, expired, expired_error := socket_receive(conn3)
+	assert(expired_error.kind != .None && expired == nil && conn3.close.reason == .Timeout)
+	socket_wait(conn3)
+	socket_destroy(conn3)
 	for _ in 0 ..< 6 {
-		health_response, health_error := surf.http_client_exchange(&http, {method = .GET, url = health})
-		assert(health_error.kind == .None && string(health_response.body) == "http-ok")
-		surf.response_destroy(&health_response)
+		_ = health(c)
 	}
-	response, re := surf.http_client_exchange(&http, {method = .GET, url = health})
-	assert(re.kind == .None && string(response.body) == "http-ok")
+	seen := health(c)
 	if identity != nil {
-		identity_check(identity, &response)
+		expected := identity_text(identity)
+		assert(seen == expected)
 	}
-	surf.response_destroy(&response)
 	if replacement_cert != "" {
-		dials := surf.http_client_dials(&http)
+		// A rotated identity is presented on exactly one new lane: the pool
+		// does not reuse a lane whose credentials are stale.
+		old := identity_text(identity)
+		dials := sync.atomic_load(&c.dials)
 		identity_replace(identity, replacement_cert, replacement_key)
-		response, re = surf.http_client_exchange(&http, {method = .GET, url = health})
-		assert(re.kind == .None && string(response.body) == "http-ok")
-		identity_check(identity, &response)
-		surf.response_destroy(&response)
-		_ = dials
+		expected := identity_text(identity)
+		assert(expected != old)
+		seen = health(c)
+		assert(seen == expected)
+		assert(sync.atomic_load(&c.dials) == dials + 1)
 	}
-	assert(surf.websocket_write_message(&conn, .Text, transmute([]u8)string("native-hello")).kind == .None)
-	buffer: [128]u8
-	opcode, n, read := surf.websocket_read_message(&conn, buffer[:])
-	fmt.printf("READ kind=%v n=%d\n", read.kind, n)
-	assert(read.kind == .None && opcode == .Text && string(buffer[:n]) == "native-hello")
+	assert(socket_send(conn, .Text, transmute([]u8)string("native-hello")).kind == .None)
+	kind, data, read := socket_receive(conn)
+	fmt.printf("READ kind=%v n=%d\n", read.kind, len(data))
+	assert(read.kind == .None && kind == .Text && string(data) == "native-hello")
+	delete(data, rt.heap_allocator())
 	// This exceeds both the HTTP2 stream window and Saba's64KiB body queue.
 	// Incremental backpressure must complete without buffering an unbounded body.
 	payload := make([]u8, 128 * 1024)
@@ -333,32 +331,34 @@ client :: proc(
 	for &byte, i in payload {
 		byte = u8(i % 251)
 	}
-	assert(surf.websocket_write_message(&conn, .Binary, payload).kind == .None)
-	received := make([]u8, len(payload))
-	defer delete(received)
-	opcode, n, read = surf.websocket_read_message(&conn, received)
-	fmt.printf("LARGE kind=%v n=%d opcode=%v\n", read.kind, n, opcode)
-	assert(read.kind == .None && opcode == .Binary && n == len(payload) && bytes.equal(payload, received))
-	assert(surf.websocket_close(&conn, 1000, "").kind == .None)
-	assert(surf.websocket_write_message(&conn2, .Text, transmute([]u8)string("second-stream")).kind == .None)
-	opcode, n, read = surf.websocket_read_message(&conn2, buffer[:])
-	assert(read.kind == .None && string(buffer[:n]) == "second-stream")
-	assert(surf.websocket_close(&conn2, 1000, "").kind == .None)
-	response, re = surf.http_client_exchange(&http, {method = .GET, url = health})
-	fmt.printf("AFTER kind=%v phase=%v status=%d body=%s\n", re.kind, re.phase, response.status, string(response.body))
-	assert(re.kind == .None && string(response.body) == "http-ok")
-	surf.response_destroy(&response)
-	assert(pool.slots[0].client.qpack.stats.encoded_inserts > 0)
-	live_tunnel: surf.HTTP3_Tunnel
-	live_socket: surf.WebSocket_Conn
-	assert(
-		surf.websocket_http3_open(&http, &live_tunnel, &live_socket, url, {origin = "https://allowed.invalid", subprotocols = {"chat.v2"}}).kind ==
-		.None,
-	)
-	surf.http_client_close(&http)
-	assert(live_tunnel.wire.owner == nil)
-	codec.message_release(&live_socket.message_state)
-	h3.pool_close(&pool)
+	assert(socket_send(conn, .Binary, payload).kind == .None)
+	kind, data, read = socket_receive(conn)
+	fmt.printf("LARGE kind=%v n=%d opcode=%v\n", read.kind, len(data), kind)
+	assert(read.kind == .None && kind == .Binary && len(data) == len(payload) && bytes.equal(payload, data))
+	delete(data, rt.heap_allocator())
+	assert(socket_close(conn).kind == .None)
+	assert(conn.close.reason == .Local_Close && conn.close.clean)
+	assert(socket_send(conn2, .Text, transmute([]u8)string("second-stream")).kind == .None)
+	kind, data, read = socket_receive(conn2)
+	assert(read.kind == .None && string(data) == "second-stream")
+	delete(data, rt.heap_allocator())
+	assert(socket_close(conn2).kind == .None)
+	assert(conn2.close.reason == .Local_Close && conn2.close.clean)
+	_ = health(c, "AFTER")
+	inserts: u64
+	with_pool(c, lanes_inserted, &inserts)
+	assert(inserts > 0)
+	// A websocket still open when the client goes away is reset with
+	// H3_REQUEST_CANCELLED, and its tunnel gives back everything it held.
+	live, live_error := socket_open(c)
+	assert(live_error.kind == .None)
+	socket_cancel(live)
+	assert(live.ended && live.tunnel._self == nil && live.close.reason == .Cancelled)
+	socket_destroy(live)
+	socket_destroy(conn)
+	socket_destroy(conn2)
+	assert(client_drain(c))
+	client_stop(c)
 	if identity != nil {
 		view, e := store.stats(identity)
 		assert(e.kind == .None && view.active_leases == 0)
@@ -369,20 +369,23 @@ negative :: proc(port, cert_path: string) {
 	roots: tls.Root_Pool
 	assert(tls.root_pool_load_file(&roots, cert_path) == nil)
 	defer tls.root_pool_destroy(&roots)
-	pool: h3.Pool
-	defer h3.pool_close(&pool)
-	http: surf.HTTP_Client
-	assert(
-		surf.http_client_init(&http, {tls = {root_cas = roots.roots[:roots.count]}, http3 = true, http3_pool = &pool, timeout = 3 * time.Second}, {}, context.allocator).kind ==
-		.None,
-	)
-	defer surf.http_client_close(&http)
-	url := fmt.aprintf("https://localhost:%s/socket", port)
-	defer delete(url)
-	tunnel: surf.HTTP3_Tunnel
-	connection: surf.WebSocket_Conn
-	error := surf.websocket_http3_open(&http, &tunnel, &connection, url, {subprotocols = {"chat.v2"}})
-	assert(error.kind != .None && error.write_effect == .Not_Sent && tunnel.wire.owner == nil)
+	number, number_ok := strconv.parse_int(port)
+	assert(number_ok)
+	c := new(Client)
+	defer free(c)
+	authority := fmt.aprintf("localhost:%s", port)
+	defer delete(authority)
+	client_start(c, number, authority, &roots, nil)
+	socket, error := socket_open(c)
+	socket_wait(socket)
+	fmt.printf("NEGATIVE error=%v failure=%v client=%v\n", error.kind, socket.failure.error.kind, socket.failure.client)
+	// The server did not enable extended CONNECT: the tunnel fails before its
+	// request is sent (the peer fails the run if a CONNECT arrives), no
+	// answer came, and the tunnel freed what it held.
+	assert(error.kind != .None && socket.status == 0 && socket.tunnel._self == nil)
+	assert(socket.failure.error.kind != .None)
+	socket_destroy(socket)
+	client_stop(c)
 	fmt.println("OK no CONNECT before negotiation")
 }
 main :: proc() {

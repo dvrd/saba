@@ -3,7 +3,7 @@ package saba_core
 import "core:testing"
 import "core:sync"
 import rt "base:runtime"
-import budget "shared:async/sync/budget"
+import budget "shared:async/budget"
 
 @(test)
 upgrade_prefetched_bytes_release_their_charged_backing :: proc(t: ^testing.T) {

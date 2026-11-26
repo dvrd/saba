@@ -4,15 +4,15 @@
     {
       "name": "async",
       "source": "https://github.com/dvrd/async.git",
-      "tag": "v0.3.1",
-      "commit": "5573991e43a6d8689b57a0377413763bd1cb36e0",
-      "hash": "1c2aabc5c9806eccdfc02241bb2441eb337de3d39e791c173f0eba5e09ef8172"
+      "tag": "v0.4.0",
+      "commit": "5052c582ac9d03f2e92fd96a50868f15a24cc447",
+      "hash": "58932e02587d7592ad453163b3966df726fec074f78f05b1a496afb852ddac70"
     },
     {
       "name": "aws",
       "source": "https://github.com/dvrd/aws.git",
       "tag": "v0.2.0",
-      "commit": "b16522954ead6f0037bc10888be8bf376d2b6c59",
+      "commit": "19a1a8550a72e15923b8edf037cd0d6db4bf2a6a",
       "hash": "01a5feac363e8d767caa2b9a4ef6bc7143204631b43e6e5abb437ef0560af0f1"
     },
     {
@@ -32,16 +32,9 @@
     {
       "name": "surf",
       "source": "https://github.com/dvrd/surf.git",
-      "tag": "v0.1.4",
-      "commit": "8a3cc55b9ee42b040b55cf30bd25fcd9a2ddc714",
-      "hash": "45b5f8a133a32909c32df90d8c6a9e00a2c5bd47fa07dc9b048b1fa0e53d0280"
-    },
-    {
-      "name": "websocket",
-      "source": "local",
-      "tag": "v0.1.2",
-      "commit": "18cf35aef3d5dcd6f75d36a927eeac1ae4417371",
-      "hash": "9b7484afce706bc15ceaba7f37b3f89ff59240f07861656bcf8020c0d04ff844"
+      "tag": "v0.3.0",
+      "commit": "4570cf9477e52f97fd6ae93e914ce9d7c24c77b7",
+      "hash": "fd0057099d1b62c2ad3a3288a679631ca07bec4af8038309a9bb72769e85e978"
     }
   ]
 }

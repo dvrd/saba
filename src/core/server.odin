@@ -5,8 +5,7 @@ import http "shared:async/http"
 import http1 "shared:async/http/v1"
 import "core:log"
 import "core:mem"
-import charged "shared:async/mem/budget"
-import budget "shared:async/sync/budget"
+import budget "shared:async/budget"
 import "core:net"
 import "core:strings"
 import "core:sync"
@@ -65,7 +64,7 @@ connection_storage_free :: proc(task: ^Connection_Task) {
 
 Connection_Task :: struct {
 	resource_connection, resource_operation:           budget.Scope,
-	resource_binding, resource_transport:              charged.Binding,
+	resource_binding, resource_transport:              budget.Binding,
 	// HTTP/1 only; nil for HTTP/2 streams (see Connection_Storage).
 	resource_emergency:                                []u8,
 	task:                                              async.Task,
@@ -582,7 +581,7 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 	task.request = request
 	task.request.allocator = allocator
 	task.request.resources = task.resource_operation
-	task.request.backing_allocator = charged.allocator(task.resource_binding)
+	task.request.backing_allocator = budget.allocator(task.resource_binding)
 	task.request.request_id = task.event.request_id
 	task.request._observe = task.observed
 
@@ -786,9 +785,9 @@ write_progress :: proc(task: ^Connection_Task, count: int) {
 }
 
 init_connection_arena :: proc(task: ^Connection_Task) {
-	allocator := charged.allocator(task.resource_binding)
+	allocator := budget.allocator(task.resource_binding)
 	if allocator.procedure == nil {
-		allocator = charged.allocator(task.resource_transport)
+		allocator = budget.allocator(task.resource_transport)
 	}
 	if allocator.procedure == nil {
 		allocator = rt.heap_allocator()
@@ -1047,7 +1046,7 @@ finish_connection :: proc(data: rawptr) {
 	}
 
 	finish_operation_resources(task)
-	charged.release(&task.resource_transport)
+	budget.binding_release(&task.resource_transport)
 	budget.release_scope(&task.resource_connection)
 	sync.atomic_sub(&task.runtime.active_connections, 1)
 	drain_connection_finished(task.runtime)
@@ -1516,7 +1515,7 @@ start_operation_resources :: proc(task: ^Connection_Task) -> bool {
 	if error != .None {
 		return false
 	}
-	binding, binding_error := charged.create(owner)
+	binding, binding_error := budget.create(owner)
 
 	if binding_error.kind != .None {
 		budget.release_scope(&owner)
@@ -1529,18 +1528,18 @@ start_operation_resources :: proc(task: ^Connection_Task) -> bool {
 }
 finish_operation_resources :: proc(task: ^Connection_Task) {
 	_ = budget.close(task.resource_operation)
-	charged.release(&task.resource_binding)
+	budget.binding_release(&task.resource_binding)
 	budget.release_scope(&task.resource_operation)
 }
 release_task_storage :: proc(task: ^Connection_Task) {
 	mem.dynamic_arena_destroy(&task.arena)
 	finish_operation_resources(task)
-	charged.release(&task.resource_transport)
+	budget.binding_release(&task.resource_transport)
 	budget.release_scope(&task.resource_connection)
 }
 
 resource_pressure :: proc(task: ^Connection_Task) -> bool {
-	return charged.stats(task.resource_binding).rejected != 0
+	return budget.stats(task.resource_binding).rejected != 0
 }
 // Fixed task storage remains usable after payload admission is exhausted.
 resource_reject :: proc(task: ^Connection_Task, status: HTTP_Status = .Service_Unavailable) -> bool {
@@ -1634,15 +1633,15 @@ connection_storage_allocator :: proc(task: ^Connection_Task) -> mem.Allocator {
 		return rt.heap_allocator()
 	}
 
-	allocator := charged.allocator(task.resource_transport)
+	allocator := budget.allocator(task.resource_transport)
 
 	if allocator.procedure == nil {
-		binding, error := charged.create(task.resource_connection)
+		binding, error := budget.create(task.resource_connection)
 		if error.kind != .None {
 			return {}
 		}
 		task.resource_transport = binding
-		allocator = charged.allocator(binding)
+		allocator = budget.allocator(binding)
 	}
 
 	return allocator

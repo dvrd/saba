@@ -6,7 +6,7 @@ import http1 "shared:async/http/v1"
 import "core:strings"
 import "core:encoding/json"
 import "core:mem"
-import budget "shared:async/sync/budget"
+import budget "shared:async/budget"
 
 // Only the generic read_json uses these; a program that never instantiates
 // it would otherwise fail -vet on unused imports.

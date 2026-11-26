@@ -6,7 +6,7 @@ import "shared:async/compress/brotli"
 import incremental "shared:async/compress/step"
 import "core:compress/deflate"
 import "core:mem"
-import owned "shared:async/mem/owned"
+import owned "shared:async/owned"
 import "core:strings"
 
 // Identity is always acceptable. Gzip (x-gzip is an alias) and Brotli (br) are the

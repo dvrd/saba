@@ -8,7 +8,7 @@ import "core:strings"
 import "core:testing"
 import "core:time"
 import async "shared:async"
-import budget "shared:async/sync/budget"
+import budget "shared:async/budget"
 import credential_store "shared:async/tls/credentials/store"
 
 Saba_Hit :: struct {

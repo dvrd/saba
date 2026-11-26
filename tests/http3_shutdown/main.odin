@@ -2,7 +2,6 @@ package main
 
 import core "shared:saba/core"
 import ws "shared:saba/websocket"
-import surf "shared:surf"
 import codec "shared:async/websocket"
 import tls "shared:async/tls"
 import credentials "shared:async/tls/credentials"
@@ -19,7 +18,7 @@ import "core:thread"
 import "core:time"
 import "core:strconv"
 import async "shared:async"
-import owned "shared:async/mem/owned"
+import owned "shared:async/owned"
 
 State :: struct {
 	control:                                               core.Server_Control,
@@ -181,11 +180,17 @@ route :: proc(data: rawptr, connection: ^core.Connection, request: ^core.Request
 	}
 
 	if request.path == "/drain" {
+		// Per-peer GOAWAY: the connection that carries this request, and every
+		// connection that carries an open websocket. A client lane carries one
+		// tunnel at a time, so a client's websocket and this request may
+		// arrive on different connections; a client on one connection sees
+		// both on it. Other connections keep serving.
 		for p in connection._task.runtime.http3.live.peers {
 			if p != nil {
 				for slot in p.in_streams {
-					if slot.request.target == "/drain" && !slot.released {
+					if slot.used && !slot.released && (slot.request.target == "/drain" || slot.extended) {
 						_ = h3.live_begin_shutdown(p)
+						break
 					}
 				}
 			}
@@ -290,162 +295,171 @@ server :: proc(cert_path, key_path: string, root_path: string = "") {
 	)
 	assert(state.opened == state.dropped)
 }
+lanes_used :: proc(pool: ^h3.Pool, user: rawptr) {
+	used := cast(^int)user
+	for slot in pool.slots {
+		if slot.used {
+			used^ += 1
+		}
+	}
+}
+Lane_Check :: struct {
+	lane:     ^h3.Client,
+	socket:   ^Socket,
+	goaway:   bool,
+	retired:  bool,
+	same:     bool,
+	deadline: time.Time,
+}
+lane_goaway :: proc(pool: ^h3.Pool, user: rawptr) {
+	check := cast(^Lane_Check)user
+	check.goaway = check.lane.shutdown.received
+	// The websocket's tunnel is still on the lane it opened on.
+	check.same = check.socket.tunnel._connect != nil && check.socket.tunnel._connect.owner == check.lane
+}
+lane_retire :: proc(pool: ^h3.Pool, user: rawptr) {
+	check := cast(^Lane_Check)user
+	check.retired = h3.client_retire_ready(check.lane)
+	if !check.retired {
+		_ = h3.pool_maintain(pool, check.deadline)
+		check.retired = h3.client_retire_ready(check.lane)
+	}
+}
+lane_print :: proc(pool: ^h3.Pool, user: rawptr) {
+	owner := (cast(^Lane_Check)user).lane
+	fmt.printf(
+		"RETIRE phase=%v dead=%v err=%v state=%v control=%d/%d pending=%d\n",
+		owner.transport.phase,
+		owner.dead,
+		owner.err,
+		owner.shutdown,
+		owner.control.sent,
+		owner.control.n,
+		owner.pending_output.n,
+	)
+
+	for b in owner.transport.bufs {
+		if b.used {
+			fmt.printf(
+				"BUF id=%d n=%d fin=%v ack=%v stop=%v stopack=%v recv=%d recvfin=%v reset=%v\n",
+				b.id,
+				b.n,
+				b.fin,
+				b.fin_acked,
+				b.want_stop,
+				b.stop_acked,
+				b.recv_n,
+				b.recv_fin,
+				b.reset,
+			)
+		}
+	}
+}
+echo :: proc(socket: ^Socket, text: string) {
+	assert(socket_send(socket, .Text, transmute([]u8)text).kind == .None)
+	_, data, error := socket_receive(socket)
+	assert(error.kind == .None && string(data) == text)
+	delete(data, rt.heap_allocator())
+}
+expect_ok :: proc(c: ^Client, path: string) {
+	g := get(c, path)
+	defer get_destroy(g)
+	assert(g.error.kind == .None && g.status == 200 && string(g.body[:]) == "http-ok")
+}
 client_shutdown :: proc(port, cert_path: string) {
 	roots: tls.Root_Pool
 	assert(tls.root_pool_load_file(&roots, cert_path) == nil)
 	defer tls.root_pool_destroy(&roots)
-	pool: h3.Pool
-	defer h3.pool_close(&pool)
-	http: surf.HTTP_Client
-	assert(
-		surf.http_client_init(&http, {tls = {root_cas = roots.roots[:roots.count]}, http3 = true, http3_pool = &pool, timeout = 5 * time.Second}, {}, context.allocator).kind ==
-		.None,
-	)
-	defer surf.http_client_close(&http)
-	url := fmt.aprintf("https://localhost:%s/socket", port)
-	defer delete(url)
-	tunnel: surf.HTTP3_Tunnel
-	socket: surf.WebSocket_Conn
-	assert(
-		surf.websocket_http3_open(&http, &tunnel, &socket, url, {origin = "https://allowed.invalid", subprotocols = {"chat.v2"}}).kind ==
-		.None,
-	)
-	owner := tunnel.wire.owner
-	drain := fmt.aprintf("https://localhost:%s/drain", port)
-	defer delete(drain)
-	response, error := surf.http_client_exchange(&http, {method = .GET, url = drain})
-	assert(error.kind == .None && string(response.body) == "http-ok")
-	surf.response_destroy(&response)
-	assert(surf.websocket_write_message(&socket, .Text, transmute([]u8)string("after-goaway")).kind == .None)
-	buffer: [64]u8
-	_, n, we := surf.websocket_read_message(&socket, buffer[:])
-	assert(we.kind == .None && string(buffer[:n]) == "after-goaway")
-	assert(owner.shutdown.received && tunnel.wire.owner == owner)
-	health := fmt.aprintf("https://localhost:%s/health", port)
-	defer delete(health)
-	response, error = surf.http_client_exchange(&http, {method = .GET, url = health})
-	assert(error.kind == .None && string(response.body) == "http-ok")
-	surf.response_destroy(&response)
+	number, number_ok := strconv.parse_int(port)
+	assert(number_ok)
+	authority := fmt.aprintf("localhost:%s", port)
+	defer delete(authority)
+	c := new(Client)
+	defer free(c)
+	client_start(c, number, authority, &roots, nil)
+	socket, error := socket_open(c)
+	assert(error.kind == .None && socket.lane != nil)
+	check := Lane_Check {
+		lane   = socket.lane,
+		socket = socket,
+	}
+	// The server drains the websocket's connection (and the request's own)
+	// while the slow response is still in flight: that response completes.
+	expect_ok(c, "/drain")
+	echo(socket, "after-goaway")
+	until := time.time_add(time.now(), 3 * time.Second)
+	for !check.goaway && time.diff(time.now(), until) > 0 {
+		with_pool(c, lane_goaway, &check)
+		if !check.goaway {
+			echo(socket, "after-goaway")
+		}
+	}
+	assert(check.goaway && check.same)
+	expect_ok(c, "/health")
 	used := 0
+	with_pool(c, lanes_used, &used)
+	with_pool(c, lane_goaway, &check)
+	assert(used >= 2 && check.same)
+	assert(socket_close(socket).kind == .None)
+	assert(socket.close.reason == .Local_Close && socket.close.clean)
+	check.deadline = time.time_add(time.now(), 3 * time.Second)
 
-	for slot in pool.slots {
-		if slot.used {
-			used += 1
+	for !check.retired && time.diff(time.now(), check.deadline) > 0 {
+		with_pool(c, lane_retire, &check)
+		if !check.retired {
+			time.sleep(time.Millisecond)
 		}
 	}
 
-	assert(used >= 2 && tunnel.wire.owner == owner)
-	assert(surf.websocket_close(&socket, 1000, "").kind == .None)
-	deadline := time.time_add(time.now(), 3 * time.Second)
-
-	for !h3.client_retire_ready(owner) && time.diff(time.now(), deadline) > 0 {
-		_ = h3.pool_maintain(&pool, deadline)
+	if !check.retired {
+		g := get(c, "/inspect")
+		get_destroy(g)
+		with_pool(c, lane_print, &check)
 	}
 
-	if !h3.client_retire_ready(owner) {
-		inspect := fmt.aprintf("https://localhost:%s/inspect", port)
-		defer delete(inspect)
-		result, _ := surf.http_client_exchange(&http, {method = .GET, url = inspect})
-		surf.response_destroy(&result)
-		fmt.printf(
-			"RETIRE phase=%v dead=%v err=%v state=%v control=%d/%d pending=%d\n",
-			owner.transport.phase,
-			owner.dead,
-			owner.err,
-			owner.shutdown,
-			owner.control.sent,
-			owner.control.n,
-			owner.pending_output.n,
-		)
-
-		for b in owner.transport.bufs {
-			if b.used {
-				fmt.printf(
-					"BUF id=%d n=%d fin=%v ack=%v stop=%v stopack=%v recv=%d recvfin=%v reset=%v\n",
-					b.id,
-					b.n,
-					b.fin,
-					b.fin_acked,
-					b.want_stop,
-					b.stop_acked,
-					b.recv_n,
-					b.recv_fin,
-					b.reset,
-				)
-			}
-		}
-	}
-
-	assert(h3.client_retire_ready(owner))
-	second: surf.HTTP3_Tunnel
-	second_socket: surf.WebSocket_Conn
-	assert(
-		surf.websocket_http3_open(&http, &second, &second_socket, url, {origin = "https://allowed.invalid", subprotocols = {"chat.v2"}}).kind ==
-		.None,
-	)
-	global := fmt.aprintf("https://localhost:%s/global-drain", port)
-	defer delete(global)
-	response, error = surf.http_client_exchange(&http, {method = .GET, url = global})
-	assert(error.kind == .None)
-	surf.response_destroy(&response)
-	assert(surf.websocket_write_message(&second_socket, .Text, transmute([]u8)string("global-live")).kind == .None)
-	_, n, we = surf.websocket_read_message(&second_socket, buffer[:])
-	assert(we.kind == .None && string(buffer[:n]) == "global-live")
-	assert(surf.websocket_close(&second_socket, 1000, "").kind == .None)
-	h3.pool_drain(&pool)
-	deadline = time.time_add(time.now(), 3 * time.Second)
-
-	for h3.pool_pending(&pool) && time.diff(time.now(), deadline) > 0 {
-		_ = h3.pool_maintain(&pool, deadline)
-	}
-
-	assert(!h3.pool_pending(&pool))
-	codec.message_release(&socket.message_state)
-	codec.message_release(&second_socket.message_state)
+	assert(check.retired)
+	second, second_error := socket_open(c)
+	assert(second_error.kind == .None)
+	expect_ok(c, "/global-drain")
+	echo(second, "global-live")
+	assert(socket_close(second).kind == .None)
+	assert(second.close.reason == .Local_Close && second.close.clean)
+	assert(client_drain(c))
+	socket_destroy(socket)
+	socket_destroy(second)
+	client_stop(c)
 	fmt.println("OK per-peer and global GOAWAY preserve WebSockets and ordinary requests")
 }
 client_peer :: proc(mode, port, cert_path: string) {
 	roots: tls.Root_Pool
 	assert(tls.root_pool_load_file(&roots, cert_path) == nil)
 	defer tls.root_pool_destroy(&roots)
-	pool: h3.Pool
-	defer h3.pool_close(&pool)
 	number, ok := strconv.parse_int(port)
 	assert(ok)
-	endpoint := net.Endpoint{net.IP4_Loopback, int(number)}
 
 	if mode == "graceful" {
-		http: surf.HTTP_Client
-		assert(
-			surf.http_client_init(&http, {tls = {root_cas = roots.roots[:roots.count]}, http3 = true, http3_pool = &pool, timeout = 4 * time.Second}, {}, context.allocator).kind ==
-			.None,
-		)
-		defer surf.http_client_close(&http)
-		url := fmt.aprintf("https://localhost:%s/socket", port)
-		defer delete(url)
-		tunnel: surf.HTTP3_Tunnel
-		socket: surf.WebSocket_Conn
-		assert(
-			surf.websocket_http3_open(&http, &tunnel, &socket, url, {origin = "https://allowed.invalid", subprotocols = {"chat.v2"}}).kind ==
-			.None,
-		)
-		h3.pool_drain(&pool)
-		assert(surf.websocket_write_message(&socket, .Text, transmute([]u8)string("client-drain-live")).kind == .None)
-		buffer: [64]u8
-		_, n, e := surf.websocket_read_message(&socket, buffer[:])
-		assert(e.kind == .None && string(buffer[:n]) == "client-drain-live")
-		assert(surf.websocket_close(&socket, 1000, "").kind == .None)
-		codec.message_release(&socket.message_state)
-		deadline := time.time_add(time.now(), 4 * time.Second)
-
-		for h3.pool_pending(&pool) && time.diff(time.now(), deadline) > 0 {
-			_ = h3.pool_maintain(&pool, deadline)
-		}
-
-		assert(!h3.pool_pending(&pool))
+		authority := fmt.aprintf("localhost:%s", port)
+		defer delete(authority)
+		c := new(Client)
+		defer free(c)
+		client_start(c, int(number), authority, &roots, nil)
+		socket, error := socket_open(c)
+		assert(error.kind == .None)
+		// The client's own GOAWAY: the open websocket keeps working, then
+		// every lane closes with H3_NO_ERROR.
+		with_pool(c, proc(pool: ^h3.Pool, _: rawptr) {h3.pool_drain(pool)})
+		echo(socket, "client-drain-live")
+		assert(socket_close(socket).kind == .None)
+		assert(client_drain(c, 4 * time.Second))
+		socket_destroy(socket)
+		client_stop(c)
 		fmt.println("OK client GOAWAY preserves WS and closes H3_NO_ERROR")
 		return
 	}
+
+	pool: h3.Pool
+	defer h3.pool_close(&pool)
+	endpoint := net.Endpoint{net.IP4_Loopback, int(number)}
 
 	request := h3.Client_Request {
 		method    = "GET",

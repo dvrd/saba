@@ -81,7 +81,7 @@ client :: proc(port_text, cert_path, mode: string) {
 	if mode == "client" {
 		response, error := surf.execute(
 			{method = .GET, url = url},
-			{http3 = true, timeout = 5 * time.Second, tls = {root_cas = roots.roots[:roots.count]}},
+			{http3 = true, timeout = 5 * time.Second, tls = {roots = &roots}},
 		)
 
 		if error.kind != .None {

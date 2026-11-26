@@ -17,6 +17,10 @@ TESTS = Path(__file__).resolve().parent
 SABA = TESTS.parent
 TLS = TESTS / 'testdata/tls'
 SKIP = 77
+# Vet Saba's packages and the test program, not the dependencies: async, surf
+# and the rest are vetted in their own repositories.
+VET = ['-vet', '-vet-packages:main,server,saba_application,saba_assets,saba_core,saba_development,'
+       'saba_jsx,saba_modules,saba_offload,saba_pages,saba_s3,saba_upstream,saba_websocket']
 
 
 def skip(reason):

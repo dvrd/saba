@@ -285,7 +285,7 @@ footer{margin-top:64px;padding:22px 0 0;border-top:1px solid var(--line);display
 
 <figure class="diagram"><figcaption><span><b>FIG. 02</b> · Package map</span><code>src/ · .krs/packages.json</code></figcaption><div class="canvas"><svg xmlns="http://www.w3.org/2000/svg" font-family="Menlo,Consolas,monospace" role="img" aria-labelledby="map-t map-d" viewBox="0 0 1400 760">
 <title id="map-t">Package map</title>
-<desc id="map-d">The application's main program configures shared:saba, which hands it to the application package. The application prepares assets, modules and pages and serves through core. JSX sources are compiled by the jsx package with the Kessel parser. Core stands on async. The adapters use Surf, aws and the WebSocket codec. The optional database is a kakunou SQLite handle. The browser runtime is served under /__saba/.</desc>
+<desc id="map-d">The application's main program configures shared:saba, which hands it to the application package. The application prepares assets, modules and pages and serves through core. JSX sources are compiled by the jsx package with the Kessel parser. Core stands on async. The adapters use Surf and aws; the WebSocket codec comes from async. The optional database is a kakunou SQLite handle. The browser runtime is served under /__saba/.</desc>
 <defs>
 <marker id="m-cyan" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0 L9 3.5 L0 7Z" style="fill:var(--net)"/></marker>
 <marker id="m-orange" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><path d="M0 0 L9 3.5 L0 7Z" style="fill:var(--route)"/></marker>
@@ -338,7 +338,7 @@ footer{margin-top:64px;padding:22px 0 0;border-top:1px solid var(--line);display
 <g><rect x="1030" y="280" width="340" height="62" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--ui)"/><text x="1048" y="305" font-size="14" font-weight="600" style="fill:var(--ink)">kessel</text><text x="1048" y="326" font-size="11" style="fill:var(--muted)">JavaScript and JSX parser</text></g>
 <g><rect x="1030" y="360" width="340" height="50" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--wait)"/><text x="1048" y="382" font-size="14" font-weight="600" style="fill:var(--ink)">surf</text><text x="1048" y="400" font-size="11" style="fill:var(--muted)">HTTP client · address policy</text></g>
 <g><rect x="1030" y="420" width="340" height="50" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--wait)"/><text x="1048" y="442" font-size="14" font-weight="600" style="fill:var(--ink)">aws</text><text x="1048" y="460" font-size="11" style="fill:var(--muted)">SigV4 signing · credential providers</text></g>
-<g><rect x="1030" y="480" width="340" height="50" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--wait)"/><text x="1048" y="502" font-size="14" font-weight="600" style="fill:var(--ink)">websocket</text><text x="1048" y="520" font-size="11" style="fill:var(--muted)">RFC 6455 codec</text></g>
+<g><rect x="1030" y="480" width="340" height="50" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--wait)"/><text x="1048" y="502" font-size="14" font-weight="600" style="fill:var(--ink)">async/websocket</text><text x="1048" y="520" font-size="11" style="fill:var(--muted)">RFC 6455 codec, part of async</text></g>
 <g><rect x="1030" y="540" width="340" height="50" rx="8" stroke-width="1.2" style="fill:var(--node);stroke:var(--muted)"/><text x="1048" y="562" font-size="14" font-weight="600" style="fill:var(--ink)">kakunou</text><text x="1048" y="580" font-size="11" style="fill:var(--muted)">SQLite</text></g>
 
 <!-- browser runtime -->
@@ -346,7 +346,7 @@ footer{margin-top:64px;padding:22px 0 0;border-top:1px solid var(--line);display
 <text x="30" y="742" font-size="13" style="fill:var(--muted)">→ Program → facade → packages → libraries. Solid arrows are calls at run time; dashed ones are preparation, build or optional paths.</text>
 </svg></div></figure>
   <div class="legend"><span><span class="swatch" style="color:var(--net)"></span>your code · server core</span><span><span class="swatch" style="color:var(--route)"></span>facade</span><span><span class="swatch" style="color:var(--ui)"></span>UI build</span><span><span class="swatch" style="color:var(--wait)"></span>adapters</span><span><span class="swatch" style="color:var(--lib)"></span>shared libraries</span></div>
-  <p class="note">The facade is optional. <code>shared:saba/core</code> runs alone with a <code>proc(data, connection, request) -> Response</code> handler; <code>shared:saba/application</code> adds preparation and routing without the database. The WebSocket codec is moving into <code>shared:async/websocket</code>; Saba switches once a tagged <code>async</code> and <code>surf</code> carry it.</p>
+  <p class="note">The facade is optional. <code>shared:saba/core</code> runs alone with a <code>proc(data, connection, request) -> Response</code> handler; <code>shared:saba/application</code> adds preparation and routing without the database.</p>
 </section>
 
 <!-- ============================================================ 03 request -->
@@ -657,11 +657,10 @@ footer{margin-top:64px;padding:22px 0 0;border-top:1px solid var(--line);display
   <div class="table-wrap"><table>
     <thead><tr><th>Library</th><th>What Saba uses it for</th><th>Used by</th></tr></thead>
     <tbody>
-      <tr><td><code>async</code></td><td>The executor and reactor, TLS, QUIC, the HTTP/1, HTTP/2 and HTTP/3 codecs, memory budgets and owned chunks, the offload pool, wake signals, gzip and Brotli. WebSocket joins it in the next tag.</td><td><code>core</code>, <code>assets</code>, <code>offload</code>, <code>upstream</code>, <code>websocket</code>, <code>development</code></td></tr>
+      <tr><td><code>async</code></td><td>The executor and reactor, TLS, QUIC, the HTTP/1, HTTP/2 and HTTP/3 codecs, memory budgets and owned chunks, the offload pool, wake signals, gzip and Brotli, and the RFC 6455 WebSocket codec (<code>shared:async/websocket</code>).</td><td><code>core</code>, <code>assets</code>, <code>offload</code>, <code>upstream</code>, <code>websocket</code>, <code>development</code></td></tr>
       <tr><td><code>kessel</code></td><td>Parsing JavaScript and JSX with source spans, so the compiler can copy author code untouched and rewrite only what it proved.</td><td><code>jsx</code>, <code>pages</code></td></tr>
       <tr><td><code>surf</code></td><td>The outbound HTTP client, with an address policy that refuses non-public upstreams by default.</td><td><code>upstream</code></td></tr>
       <tr><td><code>aws</code></td><td>SigV4 signing and credential providers.</td><td><code>s3</code></td></tr>
-      <tr><td><code>websocket</code></td><td>The RFC 6455 frame codec.</td><td><code>websocket</code>, <code>development</code></td></tr>
       <tr><td><code>kakunou</code></td><td>The optional SQLite handle on <code>Server.database</code>.</td><td><code>shared:saba</code></td></tr>
     </tbody></table></div>
 </section>

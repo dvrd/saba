@@ -2,7 +2,7 @@ package main
 
 import rt "base:runtime"
 import "core:fmt"
-import owned "shared:async/mem/owned"
+import owned "shared:async/owned"
 import "core:os"
 import "core:strconv"
 import "core:sync"

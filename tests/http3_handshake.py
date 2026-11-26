@@ -26,7 +26,7 @@ def main():
         report['compiler_version']=run([a.odin,'version']).strip()
         peer_root=Path(run([a.python,'-c','import aioquic,pathlib;print(pathlib.Path(aioquic.__file__).parent)']).strip())
         peer_before=manifest([peer_root]);report['peer_before']=peer_before
-        run([a.odin,'build',HERE/'http3_handshake',f'-collection:shared={SHARED}','-warnings-as-errors','-vet',*harness_env.sanitize_for(a.sanitize),f'-out:{binary}'])
+        run([a.odin,'build',HERE/'http3_handshake',f'-collection:shared={SHARED}','-warnings-as-errors',*harness_env.VET,*harness_env.sanitize_for(a.sanitize),f'-out:{binary}'])
         report['binary_sha256']=sha(binary)
         for case in a.cases:
             run([a.python,HERE/'http3_handshake/peer.py',case,'--binary',binary,'--cert',HERE / 'testdata/tls/localhost.pem','--key',HERE / 'testdata/tls/rsa2048.pem'],40)

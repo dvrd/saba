@@ -48,7 +48,7 @@ def main():
         binary = Path(work) / 'server'
         command = [str(args.odin.resolve()), 'build', str(HERE / 'http3_phases'),
                    '-collection:shared=' + str(SHARED), '-thread-count:1',
-                   '-warnings-as-errors', '-vet', '-out:' + str(binary)]
+                   '-warnings-as-errors', *harness_env.VET, '-out:' + str(binary)]
         if args.sanitize:
             command.append('-sanitize:' + args.sanitize)
         build = subprocess.run(command, capture_output=True, text=True,

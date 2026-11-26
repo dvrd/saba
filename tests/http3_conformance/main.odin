@@ -1,6 +1,7 @@
 package main
 
 import core "shared:saba/core"
+import async "shared:async"
 import surf "shared:surf"
 import http "shared:async/http"
 import "core:strconv"
@@ -100,7 +101,7 @@ client :: proc(port_text, cert_path, mode: string) {
 		defer delete(url)
 		response, error := surf.execute(
 			{method = .GET, url = url},
-			{http3 = true, timeout = 10 * time.Second, tls = {root_cas = roots.roots[:roots.count]}},
+			{http3 = true, timeout = 10 * time.Second, tls = {roots = &roots}},
 		)
 
 		if error.kind != .None {
@@ -111,13 +112,14 @@ client :: proc(port_text, cert_path, mode: string) {
 		assert(error.kind == .None && response.status == 200 && string(response.body) == "wire-ok")
 		surf.response_destroy(&response)
 	} else if mode == "client-head" {
-		pool: h3.Pool
-		defer h3.pool_close(&pool)
+		pool: async.H3_Pool
+		assert(async.h3_pool_init(&pool, {}).kind == .None)
+		defer async.h3_pool_destroy(&pool)
 		config := surf.Config {
 			http3 = true,
 			http3_pool = &pool,
 			timeout = 10 * time.Second,
-			tls = {root_cas = roots.roots[:roots.count]},
+			tls = {roots = &roots},
 		}
 
 		cases := [3]struct {

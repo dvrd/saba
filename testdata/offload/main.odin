@@ -4,13 +4,12 @@ import rt "base:runtime"
 import "core:fmt"
 import "core:mem"
 import "core:net"
-import charged "shared:async/mem/budget"
-import owned "shared:async/mem/owned"
+import owned "shared:async/owned"
 import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:sync"
-import budgets "shared:async/sync/budget"
+import budget "shared:async/budget"
 import "core:thread"
 import "core:time"
 import pool "shared:async/offload"
@@ -18,7 +17,7 @@ import server "shared:saba/core"
 import adapter "shared:saba/offload"
 
 State :: struct {
-	resources:             budgets.Scope,
+	resources:             budget.Scope,
 	resource_mode:         string,
 	file_pool:             pool.Pool,
 	file_path:             string,
@@ -30,7 +29,7 @@ State :: struct {
 	tracker:               mem.Tracking_Allocator,
 }
 Job :: struct {
-	binding:   charged.Binding,
+	binding:   budget.Binding,
 	allocator: mem.Allocator,
 	state:     ^State,
 	bytes:     []u8,
@@ -49,7 +48,7 @@ drop :: proc(p: rawptr) {
 	sync.atomic_add(&job.state.drops, 1)
 	delete(job.bytes, allocator)
 	free(job, allocator)
-	charged.release(&binding)
+	budget.binding_release(&binding)
 }
 build :: proc(p: rawptr, allocator: mem.Allocator) -> (server.Response, bool) {
 	job := cast(^Job)p
@@ -128,7 +127,7 @@ observe :: proc(p: rawptr, event: ^server.Request_Event) {
 	}
 }
 serve :: proc(state: ^State) {
-	budget, _ := strconv.parse_int(os.get_env("SABA_OFFLOAD_BUDGET_MS", context.temp_allocator))
+	budget_ms, _ := strconv.parse_int(os.get_env("SABA_OFFLOAD_BUDGET_MS", context.temp_allocator))
 	state.result = server.serve(
 		{
 			port = 0,
@@ -140,7 +139,7 @@ serve :: proc(state: ^State) {
 			handler = route,
 			handler_data = state,
 			control = &state.control,
-			handler_timeout = time.Duration(budget) * time.Millisecond,
+			handler_timeout = time.Duration(budget_ms) * time.Millisecond,
 			keep_alive = {enabled = true},
 			timeouts = {response = 5 * time.Second},
 			observability = {on_complete = observe, data = state},
@@ -204,10 +203,10 @@ main :: proc() {
 	}
 
 	assert(state.tracker.current_memory_allocated == 0 && len(state.tracker.bad_free_array) == 0)
-	view, error := budgets.snapshot(state.resources)
+	view, error := budget.snapshot(state.resources)
 	assert(error == .None)
-	assert(view.used == (budgets.Usage{}) && view.scope_nodes == 1)
-	budgets.release_scope(&state.resources)
+	assert(view.used == (budget.Usage{}) && view.scope_nodes == 1)
+	budget.release_scope(&state.resources)
 	mem.tracking_allocator_destroy(&state.tracker)
 	fmt.printf("stopped %d %d\n", state.runs, state.drops)
 	os.flush(os.stdout)
@@ -280,7 +279,7 @@ resource_body_limit :: proc(_: ^server.Request) -> int {
 }
 initialize_resource_parent :: proc(state: ^State) {
 	state.resource_mode = os.get_env("SABA_RESOURCE_MODE", context.temp_allocator)
-	limits := budgets.Limits{256 * mem.Megabyte, 128, 128}
+	limits := budget.Limits{256 * mem.Megabyte, 128, 128}
 	if state.resource_mode == "bytes" {
 		limits.bytes = 3 * mem.Megabyte
 	}
@@ -290,7 +289,7 @@ initialize_resource_parent :: proc(state: ^State) {
 	if state.resource_mode == "mixed" {
 		limits = {20 * mem.Megabyte, 2, 2}
 	}
-	owner, error := budgets.create_root(limits)
+	owner, error := budget.create_root(limits)
 	assert(error == .None)
 	state.resources = owner
 }
@@ -302,7 +301,7 @@ resource_command :: proc(state: ^State) -> u8 {
 		if command[0] != 'p' {
 			return command[0]
 		}
-		view, result := budgets.snapshot(state.resources)
+		view, result := budget.snapshot(state.resources)
 		assert(result == .None)
 		capacity, _ := server.server_capacity(&state.control)
 		fmt.printf(
@@ -343,15 +342,15 @@ large_response :: proc(state: ^State, request: ^server.Request) -> server.Respon
 }
 work_response :: proc(state: ^State, request: ^server.Request) -> server.Response {
 	backing := mem.tracking_allocator(&state.tracker)
-	binding, error := charged.create(request.resources, {backing = backing, metadata_allocator = backing})
+	binding, error := budget.create(request.resources, {backing = backing, metadata_allocator = backing})
 	if error.kind != .None {
 		return {status = .Internal_Server_Error}
 	}
-	allocator := charged.allocator(binding)
+	allocator := budget.allocator(binding)
 	job, je := new(Job, allocator)
 
 	if je != nil {
-		charged.release(&binding)
+		budget.binding_release(&binding)
 		return {status = .Service_Unavailable}
 	}
 
@@ -427,21 +426,21 @@ resource_config :: proc(state: ^State) -> server.Resource_Config {
 	}
 
 	if state.resource_mode == "operation" {
-		config.operation_limits = budgets.Limits{512 * mem.Kilobyte, 1, 1}
+		config.operation_limits = budget.Limits{512 * mem.Kilobyte, 1, 1}
 	}
 
 	if state.resource_mode == "connection" {
-		config.connection_limits = budgets.Limits{512 * mem.Kilobyte, 1, 4}
+		config.connection_limits = budget.Limits{512 * mem.Kilobyte, 1, 4}
 	}
 
 	return config
 }
 resource_views :: proc(state: ^State, request: ^server.Request) -> server.Response {
-	op, oe := budgets.snapshot(request.resources)
+	op, oe := budget.snapshot(request.resources)
 	assert(oe == .None)
-	connection, ce := budgets.snapshot(server.request_connection_resources(request.cancellation))
+	connection, ce := budget.snapshot(server.request_connection_resources(request.cancellation))
 	assert(ce == .None)
-	global, ge := budgets.snapshot(state.resources)
+	global, ge := budget.snapshot(state.resources)
 	assert(ge == .None)
 	body := fmt.aprintf(
 		"%d %d %d %d %d %d",

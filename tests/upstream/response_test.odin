@@ -5,7 +5,7 @@ import "core:fmt"
 import "core:mem"
 import "core:net"
 import "core:sync"
-import budget "shared:async/sync/budget"
+import budget "shared:async/budget"
 import "core:testing"
 import "core:thread"
 import "core:time"
@@ -13,11 +13,10 @@ import async "shared:async"
 import server "shared:saba/core"
 import upstream "shared:saba/upstream"
 import surf "shared:surf"
-import client "shared:surf/async"
 
 Fixture :: struct {
 	runtime:    async.Runtime,
-	client:     client.Client,
+	client:     surf.Client,
 	dispatcher: upstream.Dispatcher,
 	control:    server.Server_Control,
 	served:     bool,
@@ -48,23 +47,17 @@ attach :: proc(
 		async.init(&f.runtime, {workers = 1, task_capacity = tasks, io_capacity = 4, allocator = allocator}).kind ==
 		.None,
 	)
-	config := client.Client_Config {
+	config := surf.Client_Config {
 		http = {
 			allow_http = true,
 			timeout = timeout,
 			max_body_size = 8192,
 			address_policy = policy,
 		},
-		capacities = client.Capacities {
-			requests = 2,
-			origins = 2,
-			connections = 2,
-			connections_per_origin = 2,
-			waiters_per_origin = 2,
-			dns_ids = 0,
-			work_per_resume = 8,
-		},
 	}
+	capacities := surf.DEFAULT_CAPACITIES
+	capacities.requests, capacities.origins, capacities.connections_per_origin = 2, 2, 2
+	config.capacities = capacities
 	assert(upstream.attach(&f.dispatcher, &f.client, &f.runtime, config, allocator))
 }
 
@@ -132,16 +125,31 @@ start :: proc(
 	return endpoint
 }
 
+// Closes the client and lets its task end. Only the client's task acts on a
+// close or a cancel, so a runtime that never started is started here.
+retire :: proc(f: ^Fixture, started := false) {
+	if !started {
+		assert(async.start(&f.runtime).kind == .None)
+	}
+	_ = surf.client_close(&f.client)
+	until := time.tick_add(time.tick_now(), 4 * time.Second)
+	for !surf.client_quiescent(&f.client) && time.tick_diff(time.tick_now(), until) > 0 {
+		time.sleep(time.Millisecond)
+	}
+	async.shutdown(&f.runtime)
+	assert(async.join(&f.runtime).kind == .None)
+}
+
 stop :: proc(f: ^Fixture) {
 	server.stop_server(&f.control)
 	thread.join(f.worker)
 	thread.destroy(f.worker)
 	assert(f.served)
-	_ = client.client_close(&f.client)
+	_ = surf.client_close(&f.client)
 	async.shutdown(&f.runtime)
 	assert(async.join(&f.runtime).kind == .None)
 	assert(upstream.detach(&f.dispatcher))
-	assert(client.client_destroy(&f.client).kind == .None)
+	assert(surf.client_destroy(&f.client).kind == .None)
 	assert(async.destroy(&f.runtime).kind == .None)
 }
 
@@ -192,9 +200,6 @@ default_policy_refuses_a_loopback_upstream :: proc(t: ^testing.T) {
 	testing.expect_value(t, result.status, 502)
 	testing.expect(t, string(result.body) != "private")
 	surf.response_destroy(&result)
-	stats, ok := client.client_stats(&f.client)
-	testing.expect(t, ok)
-	testing.expect_value(t, stats.active_connections + stats.idle_connections + stats.connecting_connections, 0)
 }
 
 // An explicit policy is the opt-out for an internal upstream.
@@ -293,14 +298,15 @@ open_held_request :: proc(endpoint: net.Endpoint) -> net.TCP_Socket {
 	return peer
 }
 
-wait_for_cancellations :: proc(f: ^Fixture, cancelled, still_active: int) -> bool {
+// Waits until the dispatcher holds exactly still_active requests: each
+// abandoned one was cancelled, retired by the client and disposed.
+wait_for_cancellations :: proc(f: ^Fixture, still_active: int) -> bool {
 	until := time.tick_add(time.tick_now(), 3 * time.Second)
 	for time.tick_diff(time.tick_now(), until) > 0 {
-		stats, ok := client.client_stats(&f.client)
-		if ok &&
-		   stats.cancel_count == u64(cancelled) &&
-		   stats.active_requests == still_active &&
-		   stats.completed_requests + stats.returning_requests + stats.queued_requests == 0 {
+		sync.lock(&f.dispatcher.mu)
+		settled := f.dispatcher.owners == still_active && f.dispatcher.pending == still_active
+		sync.unlock(&f.dispatcher.mu)
+		if settled {
 			return true
 		}
 		time.sleep(time.Millisecond)
@@ -345,7 +351,7 @@ peer_disconnect_releases_its_slot_while_another_request_is_pending :: proc(t: ^t
 
 	net.close(first)
 	first_open = false
-	if !testing.expect(t, wait_for_cancellations(&f, 1, 1)) {
+	if !testing.expect(t, wait_for_cancellations(&f, 1)) {
 		return
 	}
 	response, cause := surf.execute(
@@ -359,7 +365,7 @@ peer_disconnect_releases_its_slot_while_another_request_is_pending :: proc(t: ^t
 
 	net.close(second)
 	second_open = false
-	testing.expect(t, wait_for_cancellations(&f, 2, 0))
+	testing.expect(t, wait_for_cancellations(&f, 0))
 }
 
 @(test)
@@ -391,13 +397,13 @@ abandoned_request_keeps_its_budget_until_physical_retirement :: proc(t: ^testing
 	view, error := budget.snapshot(root)
 	assert(error == .None)
 	testing.expect_value(t, view.used.jobs, 1)
-	testing.expect_value(t, client.client_close(&f.client).kind, .None)
+	retire(&f)
 	testing.expect(t, upstream.detach(&f.dispatcher))
 	view, error = budget.snapshot(root)
 	testing.expect_value(t, error, .None)
 	testing.expect_value(t, view.used.jobs, 0)
 	testing.expect_value(t, view.used.bytes, 0)
-	testing.expect_value(t, client.client_destroy(&f.client).kind, .None)
+	testing.expect_value(t, surf.client_destroy(&f.client).kind, .None)
 	testing.expect_value(t, async.destroy(&f.runtime).kind, .None)
 }
 
@@ -425,9 +431,9 @@ expired_request_deadline_answers_gateway_timeout :: proc(t: ^testing.T) {
 	testing.expect_value(t, outbound.status, server.HTTP_Status.Gateway_Timeout)
 	testing.expect(t, outbound.deferred.poll == nil)
 	server.release_request_context(&request.cancellation)
-	testing.expect_value(t, client.client_close(&f.client).kind, .None)
+	retire(&f)
 	testing.expect(t, upstream.detach(&f.dispatcher))
-	testing.expect_value(t, client.client_destroy(&f.client).kind, .None)
+	testing.expect_value(t, surf.client_destroy(&f.client).kind, .None)
 	testing.expect_value(t, async.destroy(&f.runtime).kind, .None)
 }
 
@@ -468,10 +474,10 @@ refused_detach_leaves_the_dispatcher_serving :: proc(t: ^testing.T) {
 	testing.expect(t, f.dispatcher.registered)
 	sync.sema_post(&blocker.release)
 
-	_ = client.client_close(&f.client)
+	_ = surf.client_close(&f.client)
 	async.shutdown(&f.runtime)
 	assert(async.join(&f.runtime).kind == .None)
 	testing.expect(t, upstream.detach(&f.dispatcher))
-	assert(client.client_destroy(&f.client).kind == .None)
+	assert(surf.client_destroy(&f.client).kind == .None)
 	assert(async.destroy(&f.runtime).kind == .None)
 }

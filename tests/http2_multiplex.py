@@ -33,7 +33,7 @@ def exercise_all(args, env, go, work):
     sanitize = [f'-sanitize:{args.sanitize}'] if args.sanitize else []
     records = [run([go, 'build', '-o', peer, HERE / 'http2_multiplex/peer.go'], env),
                run([args.odin, 'build', HERE / 'http2_multiplex', f'-collection:shared={SHARED}',
-                    '-vet', '-warnings-as-errors', *sanitize, f'-out:{binary}'], env)]
+                    *harness_env.VET, '-warnings-as-errors', *sanitize, f'-out:{binary}'], env)]
     records += exercise(binary, [HERE / 'testdata/tls/localhost.pem', HERE / 'testdata/tls/rsa2048.pem'],
                         [lambda port: [peer, f'127.0.0.1:{port}']], env)
     assert 'created=23 disposed=23 cancelled=3' in records[-1]['stdout'], records[-1]

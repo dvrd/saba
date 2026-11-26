@@ -5,8 +5,7 @@ import http "shared:async/http"
 import exchange "shared:async/http/exchange"
 import rt "base:runtime"
 import "core:mem"
-import charged "shared:async/mem/budget"
-import budget "shared:async/sync/budget"
+import budget "shared:async/budget"
 import "core:net"
 import "shared:async/tls"
 import "shared:async/quic"
@@ -285,7 +284,7 @@ http3_create_request :: proc(owner: ^Http3, wire: ^http3.Server_Request) -> ^Htt
 	allocator := mem.dynamic_arena_allocator(&task.arena)
 	task.request = {
 		resources          = task.resource_operation,
-		backing_allocator  = charged.allocator(task.resource_binding),
+		backing_allocator  = budget.allocator(task.resource_binding),
 		allocator          = allocator,
 		method             = wire.method,
 		path               = wire.target,

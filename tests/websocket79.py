@@ -209,7 +209,7 @@ def main():
             directory = Path(temporary)
             native, peer, surf = directory/'server', directory/'go-peer', directory/'surf-peer'
             flags = ['-collection:shared='+str(shared), '-thread-count:1',
-                     '-warnings-as-errors', '-vet', *(['-sanitize:'+args.sanitize] if args.sanitize else [])]
+                     '-warnings-as-errors', *harness_env.VET, *(['-sanitize:'+args.sanitize] if args.sanitize else [])]
             report['builds'] = [run([compiler, 'build', SOURCE, *flags, '-out:'+str(native)]),
                                 run([compiler, 'build', SOURCE/'surf_client', *flags, '-out:'+str(surf)]),
                                 run([args.go, 'build', '-o', peer, SOURCE/'peer.go'], env=environment)]

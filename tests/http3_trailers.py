@@ -10,7 +10,7 @@ def main():
     p=argparse.ArgumentParser();p.add_argument('--odin',type=Path,default=Path(harness_env.odin()));p.add_argument('--sanitize',choices=['address','thread'],default=harness_env.sanitizer());p.add_argument('--python',default=None);p.add_argument('--report',type=Path);a=p.parse_args();a.python=a.python or harness_env.aioquic_python()
     env=os.environ.copy();env.setdefault('ODIN_ROOT',str(harness_env.sdk()))
     binary=harness_env.workdir('saba-http3-trailers-')/'server';cert=HERE / 'testdata/tls/localhost.pem';key=HERE / 'testdata/tls/rsa2048.pem';peer=HERE/'http3_trailers/peer.py'
-    records=[h.run([a.odin,'build',HERE/'http3_trailers',f'-collection:shared={SHARED}','-warnings-as-errors','-vet',*harness_env.sanitize_for(a.sanitize),f'-out:{binary}'],env)]
+    records=[h.run([a.odin,'build',HERE/'http3_trailers',f'-collection:shared={SHARED}','-warnings-as-errors',*harness_env.VET,*harness_env.sanitize_for(a.sanitize),f'-out:{binary}'],env)]
     records+=h.exercise(binary,['server',cert,key],[lambda port:[binary,'client',port,cert],lambda port:[a.python,peer,'client',port,'--cert',cert]],env)
     with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
     server=subprocess.Popen([a.python,str(peer),'server',str(port),'--cert',str(cert),'--key',str(key)],stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=env)

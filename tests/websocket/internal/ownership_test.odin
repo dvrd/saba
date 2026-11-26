@@ -3,7 +3,7 @@ package saba_websocket
 import core "../core"
 import rt "base:runtime"
 import "core:mem"
-import budget "shared:async/sync/budget"
+import budget "shared:async/budget"
 import "core:testing"
 
 WS79_Application_Probe :: struct {

@@ -52,19 +52,10 @@ concurrent backing allocator; retain its context through late physical frees.
 | `shared:http/v2/hpack` | Native HPACK primitives, tables and incremental field sections. Delivered header storage is independent of dynamic-table eviction. |
 | `shared:http/testsupport` | Shared conformance corpus/test support, not a production networking driver. |
 | `shared:http/v3` | HTTP/3 framing/QPACK and explicit endpoint/credential QUIC listener/client. Authenticated application traffic uses Core connection recovery; caller limits and ownership remain explicit. |
-| `shared:websocket` | Pure upgrade/frame validation and caller-driven message assembly. No dial/client/socket/TLS/session execution. |
-| `shared:surf` | Blocking native HTTP and blocking `websocket_*` connection operations, response ownership and service-facing HTTP seams. Its buffered compatibility API uses the native stack; HTTP/3 is opt-in. |
-| `shared:surf/async` | Persistent native HTTP/1 Client with buffered compatibility and optional owned upload/response streams, explicit identity/gzip decoding, bounded retained credits, deadlines/cancellation, redirects and physical retirement on an existing Runtime. Async WebSocket and HTTP/2 adapters remain separate work. |
-| `shared:surf/async/exchange` | Incremental HTTP/1 request/response engine over explicit async connection/executor interfaces. Client pool/trust/admission policy remains with its host. |
+| `shared:async/websocket` | Pure upgrade/frame validation and caller-driven message assembly, shipped inside async. Sessions and dials are async's `ws_*` facade. |
+| `shared:surf` | One client over async's facades: `execute` for a blocking request, and a `Client` (`client_start` on its own runtime thread, or `client_init` on a caller's runtime) whose requests are submitted, polled, taken, cancelled or streamed from any thread. Redirects, the address policy, Alt-Svc, budgets and error classification stay in surf. Its websocket client is HTTP/1.1 only. |
 | `shared:aws` | Credentials, SigV4, S3/SES service semantics and provider seams; depends on `files`/Surf, not Saba or private Mesa helpers. |
 | `shared:google` | Strict credential/token JSON and Google service clients; depends on files/HTTP/Surf. Its documented serialized token-cache contract remains in force. |
-
-`surf/async/stream` supplies internal detached channel/credit ownership for the
-Client and exchange; it is not an additional standalone application consumer
-root. Public stream handles, heads and owned chunks are documented in
-`shared/surf/async/STREAMING.md`. Taking a head/chunk does not refund retained
-credit; the owner can outlive its request, Client and Runtime. Only a successful
-stream End certifies framing and decoding integrity.
 
 The streaming implementation requires paired Core `18bd5dad0` sources: incremental
 DEFLATE/gzip and Decode_Error from `66aab4299` plus the owned-length validation

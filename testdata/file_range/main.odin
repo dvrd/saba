@@ -3,7 +3,7 @@ package main
 import rt "base:runtime"
 import "core:fmt"
 import "core:mem"
-import charged "shared:async/mem/budget"
+import budget "shared:async/budget"
 import "core:os"
 import "core:strconv"
 import "core:strings"
@@ -32,7 +32,7 @@ allocate :: proc(
 	[]u8,
 	mem.Allocator_Error,
 ) {
-	maximum, validation := charged.allocation_cost(16384, mem.DEFAULT_ALIGNMENT)
+	maximum, validation := budget.allocation_cost(16384, mem.DEFAULT_ALIGNMENT)
 	assert(validation.kind == .None)
 	assert(size <= int(maximum), "file backing exceeds one chunk plus accounting overhead")
 	backing := rt.heap_allocator()

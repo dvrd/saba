@@ -4,20 +4,19 @@ import server "../core"
 import "core:net"
 import "core:mem"
 import "core:sync"
-import budget "shared:async/sync/budget"
+import budget "shared:async/budget"
 import "core:time"
 import async "shared:async"
 import signal "shared:async/signal"
 import http "shared:async/http"
 import surf "shared:surf"
-import client "shared:surf/async"
 
 // Build runs on the connection owner. Copy any borrowed headers/body needed by
 // the outgoing response into allocator. The Surf response is destroyed on return.
 Build :: #type proc(source: ^surf.Response, allocator: mem.Allocator) -> (server.Response, bool)
 
 Dispatcher :: struct {
-	client:     ^client.Client,
+	client:     ^surf.Client,
 	runtime:    ^async.Runtime,
 	allocator:  mem.Allocator,
 	interval:   time.Duration,
@@ -34,13 +33,13 @@ Dispatcher :: struct {
 Slot :: struct {
 	state: ^State,
 	// A fast completion can beat publication of its handle by the submitter.
-	early: client.Request_Handle,
+	early: surf.Request_Handle,
 }
 
 @(private)
 State :: struct {
 	dispatcher: ^Dispatcher,
-	handle:     client.Request_Handle,
+	handle:     surf.Request_Handle,
 	build:      Build,
 	lease:      budget.Lease,
 	wake:       signal.Signal,
@@ -58,9 +57,9 @@ address_policy_public_only :: surf.address_policy_public_only
 Address_Policy :: surf.Address_Policy
 
 // Initialize c from config and attach to it and the runtime that hosts it. The
-// dispatcher exclusively consumes that client. Give it one runtime task slot and
+// dispatcher exclusively consumes that surf. Give it one runtime task slot and
 // a thread-safe allocator. Keep all three at stable addresses through detach.
-// Surf has no per-request completion notification. While requests are active,
+// The dispatcher polls the client for completions. While requests are active,
 // interval sets the polling cadence; a completion may wait up to one interval
 // plus scheduler delay. The task parks without a timer when idle.
 //
@@ -76,9 +75,9 @@ Address_Policy :: surf.Address_Policy
 // it. On failure c is left zeroed.
 attach :: proc(
 	d: ^Dispatcher,
-	c: ^client.Client,
+	c: ^surf.Client,
 	runtime: ^async.Runtime,
-	config: client.Client_Config,
+	config: surf.Client_Config,
 	allocator: mem.Allocator,
 	interval: time.Duration = time.Millisecond,
 ) -> bool {
@@ -96,19 +95,19 @@ attach :: proc(
 		config.http.address_policy = address_policy_public_only
 		config.http.address_policy_data = nil
 	}
-	if client.client_init(c, runtime, config, allocator).kind != .None {
+	if surf.client_init(c, runtime, config, allocator).kind != .None {
 		return false
 	}
 	attached := false
 	defer if !attached {
-		_ = client.client_close(c)
-		_ = client.client_destroy(c)
+		_ = surf.client_close(c)
+		_ = surf.client_destroy(c)
 	}
-	stats, ok := client.client_stats(c)
-	if !ok || stats.capacities.requests < 1 {
+	capacities := config.capacities.? or_else surf.DEFAULT_CAPACITIES
+	if capacities.requests < 1 {
 		return false
 	}
-	slots, err := make([]Slot, stats.capacities.requests, allocator)
+	slots, err := make([]Slot, capacities.requests, allocator)
 	if err != nil {
 		return false
 	}
@@ -198,14 +197,14 @@ response :: proc(
 		return {status = .Service_Unavailable}
 	}
 	state.dispatcher, state.build, state.lease = d, build, lease
-	handle, cause := client.client_submit(d.client, outbound, deadline)
+	handle, cause := surf.client_submit(d.client, outbound, deadline)
 	if cause.kind != .None {
 		dispose(state)
 		return {status = failure_status(cause)}
 	}
 	state.handle = handle
 	sync.lock(&d.mu)
-	slot := &d.slots[int(handle.slot) - 1]
+	slot := &d.slots[handle.slot]
 	assert(slot.state == nil)
 	d.owners += 1
 	if slot.early == handle {
@@ -223,7 +222,7 @@ response :: proc(
 }
 
 @(private)
-failure_status :: proc(error: client.Client_Error) -> server.HTTP_Status {
+failure_status :: proc(error: surf.Client_Error) -> server.HTTP_Status {
 	transport := error.http.transport
 	if error.http.kind == .Deadline_Failed ||
 	   transport == net.TCP_Recv_Error.Timeout ||
@@ -238,7 +237,6 @@ failure_status :: proc(error: client.Client_Error) -> server.HTTP_Status {
 	}
 	if error.kind == .Closed ||
 	   error.kind == .Capacity ||
-	   error.kind == .Budget_Rejected ||
 	   error.kind == .Allocation_Failed ||
 	   error.http.kind == .Allocation_Failed {
 		return .Service_Unavailable
@@ -253,9 +251,9 @@ dispose :: proc(state: ^State) {
 }
 
 @(private)
-publish :: proc(d: ^Dispatcher, handle: client.Request_Handle) {
+publish :: proc(d: ^Dispatcher, handle: surf.Request_Handle) {
 	sync.lock(&d.mu)
-	slot := &d.slots[int(handle.slot) - 1]
+	slot := &d.slots[handle.slot]
 	state := slot.state
 	if state == nil {
 		slot.early = handle
@@ -271,7 +269,7 @@ publish :: proc(d: ^Dispatcher, handle: client.Request_Handle) {
 	sync.unlock(&d.mu)
 
 	if abandoned {
-		_ = client.client_release(d.client, handle)
+		_ = surf.client_release(d.client, handle)
 		dispose(state)
 	} else {
 		_ = signal.wake(wake)
@@ -285,7 +283,7 @@ dispatch :: proc(data: rawptr) -> async.Resume_Result {
 	// One timer for the client's queue. Limit each resume so a burst of
 	// completions shares the worker with network and protocol tasks.
 	for _ in 0 ..< 32 {
-		next, ok := client.client_poll(d.client)
+		next, ok := surf.client_poll(d.client)
 		if !ok {
 			sync.lock(&d.mu)
 			idle := d.pending == 0
@@ -345,7 +343,7 @@ poll :: proc(data: rawptr, io: ^server.Deferred_IO) -> (server.Response, server.
 	}
 	sync.unlock(&d.mu)
 	source: surf.Response
-	cause := client.client_take(d.client, state.handle, &source)
+	cause := surf.client_take(d.client, state.handle, &source)
 	if cause.kind != .None {
 		return {status = failure_status(cause)}, .Ready
 	}
@@ -373,11 +371,11 @@ drop :: proc(data: rawptr) {
 	if !complete {
 		// The dispatcher owns disposal from here. Cancellation can race
 		// physical completion/reuse; the Surf handle includes a generation.
-		_ = client.client_cancel(d.client, handle)
+		_ = surf.client_cancel(d.client, handle)
 		return
 	}
-	if handle.slot != 0 {
-		_ = client.client_release(d.client, handle)
+	if handle != {} {
+		_ = surf.client_release(d.client, handle)
 	}
 	dispose(state)
 }
@@ -421,7 +419,7 @@ detach :: proc(d: ^Dispatcher) -> bool {
 		d.registered = false
 	}
 	for {
-		next, ok := client.client_poll(d.client)
+		next, ok := surf.client_poll(d.client)
 		if !ok {
 			break
 		}

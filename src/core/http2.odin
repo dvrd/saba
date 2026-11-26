@@ -3,12 +3,11 @@ package saba_core
 import h2 "shared:async/http/v2"
 import "core:mem"
 import "core:strings"
-import budget "shared:async/sync/budget"
+import budget "shared:async/budget"
 import "core:time"
 import async "shared:async"
-import hpack "shared:async/http/v2/hpack"
-import charged "shared:async/mem/budget"
-import owned "shared:async/mem/owned"
+import hpack "shared:async/http/hpack"
+import owned "shared:async/owned"
 import "core:net"
 import http "shared:async/http"
 import exchange "shared:async/http/exchange"
@@ -1477,7 +1476,7 @@ H2_Request :: struct {
 	response:                                                          Response,
 }
 h2_request_allocator :: proc(task: ^Connection_Task) -> mem.Allocator {
-	allocator := charged.allocator(task.resource_binding)
+	allocator := budget.allocator(task.resource_binding)
 
 	if allocator.procedure == nil {
 		allocator = connection_storage_allocator(task)

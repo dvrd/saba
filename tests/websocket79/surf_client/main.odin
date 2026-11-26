@@ -1,7 +1,7 @@
 package main
 
 import client "shared:surf"
-import codec "shared:websocket"
+import codec "shared:async/websocket"
 import "core:fmt"
 import "core:net"
 import "core:os"

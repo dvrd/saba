@@ -2,7 +2,7 @@ package saba_websocket
 
 import core "../core"
 import async "shared:async"
-import codec "shared:websocket"
+import codec "shared:async/websocket"
 import budget "shared:async/sync/budget"
 import "core:testing"
 

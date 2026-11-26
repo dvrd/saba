@@ -13,7 +13,7 @@ import core "../core"
 import rt "base:runtime"
 import "core:unicode/utf8"
 import async "shared:async"
-import codec "shared:websocket"
+import codec "shared:async/websocket"
 
 Development :: struct {
 	// Empty preserves ODIN environment then the historical "odin" default.

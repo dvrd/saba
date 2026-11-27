@@ -77,6 +77,9 @@ Client :: struct {
 	peer_close:    Maybe(ngtcp2.Ccerr),
 	failure:       string,
 	datagrams_out: int,
+	// The time ngtcp2 was given for the datagram a send hook is called
+	// with: the time its loss timers count from.
+	written_at:    ngtcp2.Tstamp,
 	tp_buffer:     [dynamic]u8,
 	allocator:     runtime.Allocator,
 }
@@ -499,6 +502,7 @@ flush :: proc(cl: ^Client) {
 			flags |= ngtcp2.WRITE_STREAM_FLAG_FIN
 		}
 		accepted: ngtcp2.Ssize = -1
+		now := timestamp()
 		written := ngtcp2.conn_writev_stream_versioned(
 			cl.conn,
 			&cl.path,
@@ -511,7 +515,7 @@ flush :: proc(cl: ^Client) {
 			id,
 			cast([^]ngtcp2.Vec)&vectors[0],
 			c.size_t(count),
-			timestamp(),
+			now,
 		)
 		if accepted >= 0 {
 			if raw_index >= 0 {
@@ -552,6 +556,7 @@ flush :: proc(cl: ^Client) {
 			return
 		}
 		datagram := buffer[:written]
+		cl.written_at = now
 		if cl.config.send != nil {
 			cl.config.send(cl, datagram)
 		} else {
@@ -605,7 +610,11 @@ close :: proc(cl: ^Client, code: u64 = nghttp3.H3_NO_ERROR) {
 	cl.closed = true
 }
 
-handshake :: proc(cl: ^Client, timeout: time.Duration = 5 * time.Second) -> bool {
+// The default bound is a hang guard, not a measurement: a server that drops
+// an Initial (a one-slot server still draining its last connection, or one
+// slowed down by a loaded machine) is reached again only after ngtcp2's
+// Initial retransmissions, 1, 2, 4 and 8 seconds apart.
+handshake :: proc(cl: ^Client, timeout: time.Duration = 20 * time.Second) -> bool {
 	return(
 		run(
 			cl,

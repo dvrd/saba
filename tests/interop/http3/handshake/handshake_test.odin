@@ -12,6 +12,10 @@
 // source connection ID, non-ack-eliciting packets (which Saba must not
 // acknowledge on their own) and a CRYPTO stream split into 33 one-byte gaps.
 // After every case a fresh connection is served by the same one-slot server.
+//
+// Nothing here measures how fast Saba is: the bounds are hang guards, and the
+// one timing check (a held flight is released by ngtcp2's probe timeout)
+// counts from the timestamp ngtcp2 itself wrote the flight with.
 package handshake_test
 
 import ngtcp2 "../../../support/c/ngtcp2"
@@ -23,6 +27,8 @@ import "core:time"
 PROBE :: "tests/fixtures/apps/http3_probe"
 // The packet number every crafted packet uses: below ngtcp2's first.
 CRAFTED_PN :: 0
+// The bytes of the ClientHello the sparse CRYPTO frames copy: offsets 1 to 65.
+HELLO_PREFIX :: 66
 
 PROTOCOL_VIOLATION :: 0x0a
 FRAME_ENCODING_ERROR :: 0x07
@@ -49,8 +55,10 @@ Case :: enum {
 // The connection survives these.
 POSITIVE :: bit_set[Case]{.Bad_Tag, .Invalid_Initial, .Padding_Only, .Ack_Only, .Sparse_Crypto}
 // Non-ack-eliciting packets: the genuine flight is held back until ngtcp2's
-// loss timer fires, so any acknowledgement in that window would be one of
-// the crafted packet alone.
+// loss timer fires, so a packet of nothing but acknowledgements in that window
+// would answer the crafted packet alone. An ACK frame in a packet that carries
+// CRYPTO is allowed (RFC 9000 section 13.2.1): Saba's own probe timer may fire
+// before ngtcp2's, and its retransmission acknowledges what it has received.
 CONTROLS :: bit_set[Case]{.Padding_Only, .Ack_Only}
 
 // The Handshake payload of each fault and the error code Saba closes with
@@ -112,10 +120,16 @@ fault :: proc(c: Case) -> (payload: []u8, code: u64) {
 Injector :: struct {
 	fault:          Case,
 	injected:       bool,
-	injected_at:    time.Tick,
+	// ngtcp2's timestamp of the datagram the fault went out with.
+	injected_at:    ngtcp2.Tstamp,
 	bytes:          int,
 	types:          [dynamic]peer.Packet_Type,
 	held:           [dynamic][]u8,
+	// Sparse_Crypto: the Initial datagrams held until the first bytes of the
+	// ClientHello are known, and those bytes.
+	waiting:        [dynamic][]u8,
+	hello:          [HELLO_PREFIX]u8,
+	hello_known:    [HELLO_PREFIX]bool,
 	released:       bool,
 	released_after: time.Duration,
 	pto:            time.Duration,
@@ -124,7 +138,9 @@ Injector :: struct {
 	// The server's keys, to open its packets and seal them again.
 	initial:        Space,
 	handshake:      Space,
-	observed_acks:  int,
+	// ACK frames in packets of the watched space that carry nothing else
+	// (no CRYPTO or PING): acknowledgements sent on their own.
+	lone_acks:      int,
 	sparse_acked:   bool,
 	unexpected:     u64,
 	failure:        string,
@@ -144,6 +160,10 @@ injector_destroy :: proc(st: ^Injector) {
 		delete(datagram)
 	}
 	delete(st.held)
+	for datagram in st.waiting {
+		delete(datagram)
+	}
+	delete(st.waiting)
 }
 
 positive :: proc(c: Case) -> bool {
@@ -186,35 +206,36 @@ send :: proc(cl: ^peer.Client, data: []u8) {
 	}
 	payload, _ := fault(st.fault)
 	combined := make([dynamic]u8, context.temp_allocator)
+	rest: [][]u8
 	switch st.fault {
 	case .Sparse_Crypto:
-		keys, ok := peer.initial_keys(cl, false, false)
-		defer peer.keys_destroy(&keys)
-		_, plain, opened := peer.open(&keys, template)
-		hello: []u8
-		if frames, parsed := peer.frames(plain); ok && opened && parsed {
-			for f in frames {
-				if f.kind == .Crypto && f.offset == 0 {
-					hello = f.data
+		// ngtcp2 cuts the ClientHello into CRYPTO frames of random sizes in
+		// random order, and they may not all fit the first datagram: the
+		// Initial datagrams wait until the bytes the fault copies are known.
+		learn_hello(cl, st, template)
+		append(&st.waiting, clone(data))
+		if !hello_complete(st) {
+			if len(st.waiting) >= 4 {
+				st.failure = fmt.tprintf("the first %d ClientHello bytes are not in %d datagrams", HELLO_PREFIX, len(st.waiting))
+				st.injected = true
+				for datagram in st.waiting {
+					peer.transmit(cl, datagram)
 				}
 			}
-		}
-		if len(hello) < 66 {
-			st.failure = fmt.tprintf("the ClientHello is %d bytes", len(hello))
-			peer.transmit(cl, data)
 			return
 		}
 		// Genuine TLS bytes, separated before the real flight fills the
 		// gaps: 33 one-byte CRYPTO frames at offsets 1, 3, ..., 65.
 		sparse := make([dynamic]u8, context.temp_allocator)
-		for offset := 1; offset < 66; offset += 2 {
+		for offset := 1; offset < HELLO_PREFIX; offset += 2 {
 			append(&sparse, 0x06)
 			peer.varint(&sparse, u64(offset))
-			append(&sparse, 0x01, hello[offset])
+			append(&sparse, 0x01, st.hello[offset])
 		}
 		payload = sparse[:]
 		append(&combined, ..seal(cl, .Initial, template.dcid, template.scid, payload))
-		append(&combined, ..data)
+		append(&combined, ..st.waiting[0])
+		rest = st.waiting[1:]
 		st.watched = .Initial
 	case .Padding_Only, .Ack_Only:
 		append(&combined, ..seal(cl, .Handshake, template.dcid, template.scid, payload))
@@ -248,12 +269,49 @@ send :: proc(cl: ^peer.Client, data: []u8) {
 		st.failure = fmt.tprintf("the crafted datagram is %d bytes", len(combined))
 	}
 	st.injected = true
-	st.injected_at = time.tick_now()
+	st.injected_at = cl.written_at
 	st.bytes = len(combined)
 	for p in peer.packets(combined[:], 0) {
 		append(&st.types, p.type)
 	}
 	peer.transmit(cl, combined[:])
+	for datagram in rest {
+		peer.transmit(cl, datagram)
+	}
+}
+
+// Copies what an Initial packet of ngtcp2's carries of the first
+// HELLO_PREFIX bytes of the ClientHello.
+learn_hello :: proc(cl: ^peer.Client, st: ^Injector, template: peer.Packet) {
+	keys, ok := peer.initial_keys(cl, false, false)
+	defer peer.keys_destroy(&keys)
+	_, plain, opened := peer.open(&keys, template)
+	frames, parsed := peer.frames(plain)
+	if !ok || !opened || !parsed {
+		return
+	}
+	for f in frames {
+		if f.kind != .Crypto {
+			continue
+		}
+		for b, i in f.data {
+			at := int(f.offset) + i
+			if at >= HELLO_PREFIX {
+				break
+			}
+			st.hello[at] = b
+			st.hello_known[at] = true
+		}
+	}
+}
+
+hello_complete :: proc(st: ^Injector) -> bool {
+	for known in st.hello_known {
+		if !known {
+			return false
+		}
+	}
+	return true
 }
 
 seal :: proc(cl: ^peer.Client, type: peer.Packet_Type, dcid, scid: []u8, payload: []u8) -> []u8 {
@@ -320,14 +378,23 @@ receive :: proc(cl: ^peer.Client, data: []u8) -> []u8 {
 		}
 		if watching && p.type == watched && !st.released {
 			frames, ok := peer.frames(plain)
+			acks := 0
+			eliciting := false
 			for f in frames {
-				#partial switch f.kind {
+				switch f.kind {
 				case .Ack:
-					st.observed_acks += 1
+					acks += 1
 					st.sparse_acked ||= peer.acknowledges(f, CRAFTED_PN)
+				case .Padding, .Close:
+				case .Ping, .Crypto:
+					eliciting = true
 				case .Other:
+					eliciting = true
 					st.unexpected = f.type
 				}
+			}
+			if !eliciting {
+				st.lone_acks += acks
 			}
 			if !ok && st.unexpected == 0 {
 				st.failure = "the server sent a malformed frame"
@@ -351,7 +418,7 @@ expiry :: proc(cl: ^peer.Client) {
 		return
 	}
 	st.released = true
-	st.released_after = time.tick_since(st.injected_at)
+	st.released_after = time.Duration(peer.timestamp() - st.injected_at)
 	// The Handshake space probe timeout leaves out max_ack_delay (RFC 9002
 	// section 6.2.1); ngtcp2 reports the application one.
 	st.pto = time.Duration(ngtcp2.conn_get_pto2(cl.conn))
@@ -393,6 +460,10 @@ exercise :: proc(t: ^testing.T, c: Case) {
 	}
 	_, code := fault(c)
 	if positive(c) {
+		// The controls hold the client's flight for one probe timeout,
+		// which a loaded machine stretches: the handshake gets its own
+		// generous bound.
+		testing.expectf(t, peer.handshake(&cl, 30 * time.Second), "%v: handshake: %s", c, peer.describe(&cl))
 		s := peer.get(&cl, "/probe")
 		testing.expectf(
 			t,
@@ -442,11 +513,11 @@ exercise :: proc(t: ^testing.T, c: Case) {
 	if c in CONTROLS {
 		testing.expectf(
 			t,
-			st.released && st.observed_acks == 0,
-			"%v: released=%v acknowledgements=%d",
+			st.released && st.lone_acks == 0,
+			"%v: released=%v acknowledgements on their own=%d",
 			c,
 			st.released,
-			st.observed_acks,
+			st.lone_acks,
 		)
 		// The release was ngtcp2's probe timeout, not an earlier timer.
 		testing.expectf(
@@ -463,10 +534,15 @@ exercise :: proc(t: ^testing.T, c: Case) {
 		// injection: the server acknowledged that exact packet.
 		testing.expectf(t, st.sparse_acked, "%v: the sparse Initial was not acknowledged", c)
 	}
-	// The same one-slot server takes fresh work.
+	// The same one-slot server takes fresh work. Its slot stays taken while
+	// the last connection closes or drains (three of Saba's probe timeouts,
+	// which grow with the round trips a loaded machine measures), and the
+	// Initials it drops until then are sent again 1, 2, 4 and 8 seconds
+	// apart: the handshake waits as long as that takes.
 	fresh: peer.Client
 	defer peer.destroy(&fresh)
 	if testing.expect(t, peer.connect(&fresh, {port = server.port, roots = peer.CERTIFICATE})) {
+		testing.expectf(t, peer.handshake(&fresh, 30 * time.Second), "%v: fresh handshake: %s", c, peer.describe(&fresh))
 		s := peer.get(&fresh, "/probe")
 		testing.expectf(
 			t,

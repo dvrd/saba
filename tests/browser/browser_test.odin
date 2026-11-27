@@ -265,7 +265,10 @@ browser_fixture :: proc(t: ^testing.T, deployment: bool, engine := Engine.Chromi
 		thread.destroy(worker)
 		testing.expect(t, state.ok, "Saba could not prepare or serve the JSX fixture")
 	}
-	deadline := time.tick_add(time.tick_now(), 10 * time.Second)
+	// The fixture compiles its pages before it serves: on a loaded machine
+	// that takes more than ten seconds. A fixture that fails ends the wait
+	// at once (done); the bound only guards a hang.
+	deadline := time.tick_add(time.tick_now(), 60 * time.Second)
 	for !server.server_ready(&state.control) &&
 	    !sync.atomic_load(&state.done) &&
 	    time.tick_since(deadline) < 0 {

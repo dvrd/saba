@@ -21,6 +21,9 @@ Process :: struct {
 	// Set once the process was reaped: its pid may belong to another process
 	// by then, so stop must not signal it.
 	reaped:    bool,
+	// The exit code, kept when the process is reaped: once reaped it cannot
+	// be waited for again (-1: killed, or no exit code).
+	exit_code: int,
 	name:      string,
 	mutex:     sync.Mutex,
 	lines:     [dynamic]string,
@@ -261,7 +264,7 @@ expect_line :: proc(
 		}
 		if !p.reaped {
 			if state, error := os.process_wait(p.handle, 0); error == nil && state.exited {
-				p.reaped = true
+				reaped(p, state)
 			}
 		}
 		if p.reaped {
@@ -380,25 +383,39 @@ running :: proc(p: ^Process) -> bool {
 	}
 	state, error := os.process_wait(p.handle, 0)
 	if error == nil && state.exited {
-		p.reaped = true
+		reaped(p, state)
 		return false
 	}
 	return true
+}
+
+@(private)
+reaped :: proc(p: ^Process, state: os.Process_State) {
+	p.reaped = true
+	p.exit_code = state.exit_code
 }
 
 // Waits for the program to exit and returns its exit code, or -1 when it did
 // not exit in time (it is killed then). The default only guards a hang: a
 // program that frees and joins everything on its way out can take seconds on
 // a loaded machine.
+//
+// A program that expect_line or running already reaped (it exited while they
+// polled) is not waited for again: its pid may belong to another process, and
+// its exit code is the one kept then.
 wait :: proc(p: ^Process, timeout := 30 * time.Second) -> int {
+	if p.reaped {
+		return p.exit_code
+	}
 	state, error := os.process_wait(p.handle, timeout)
 	if error != nil || !state.exited {
 		_ = os.process_kill(p.handle)
 		_, _ = os.process_wait(p.handle)
 		p.reaped = true
+		p.exit_code = -1
 		return -1
 	}
-	p.reaped = true
+	reaped(p, state)
 	return state.exit_code
 }
 

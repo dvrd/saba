@@ -224,7 +224,8 @@ delivery_fixture :: proc(t: ^testing.T, engine: Engine) {
 		thread.destroy(worker)
 		testing.expect(t, s.ok)
 	}
-	until := time.tick_add(time.tick_now(), 8 * time.Second)
+	// A startup bound only, generous for a loaded machine.
+	until := time.tick_add(time.tick_now(), 60 * time.Second)
 	for !server.server_ready(&s.control) &&
 	    time.tick_since(until) < 0 {time.sleep(time.Millisecond)}
 	ep, ready := server.server_endpoint(&s.control)

@@ -33,8 +33,8 @@ const entries = scale ? {
   svelte: 'rich/svelte.js',
   htmx: 'rich/htmx.js',
 } : {
-  'saba-current': '../../testdata/mesa_perf/entry.js',
-  'saba-planned': '../../testdata/mesa_perf/planned.js',
+  'saba-current': '../../benchmarks/mesa/entry.js',
+  'saba-planned': '../../benchmarks/mesa/planned.js',
   vanilla: 'src/vanilla.js',
   react: 'src/react.jsx',
   solid: 'src/solid.jsx',

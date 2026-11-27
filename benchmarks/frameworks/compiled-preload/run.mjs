@@ -141,7 +141,7 @@ try {
     "-out:" + binary,
   ], { cwd: root, stdio: "inherit" });
   const portfile = path.join(temp, "port");
-  origin = spawn(binary, [path.join(root, "testdata/ui"), portfile, documentCoding], {
+  origin = spawn(binary, [path.join(root, "tests/fixtures/ui"), portfile, documentCoding], {
     stdio: ["ignore", "inherit", "inherit"],
   });
   exited = once(origin, "exit");
@@ -206,7 +206,7 @@ try {
     };
   }
   const result = {
-    fixture: "testdata/ui/item.jsx",
+    fixture: "tests/fixtures/ui/item.jsx",
     generatedAt: new Date().toISOString(),
     generation: prefix,
     chromium: browser.version(),

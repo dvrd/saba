@@ -1,4 +1,4 @@
-// The hand-authored signal/effect design used in testdata/mesa_perf/planned.js.
+// The hand-authored signal/effect design used in benchmarks/mesa/planned.js.
 let tracking = null;
 
 export function signal(initial) {

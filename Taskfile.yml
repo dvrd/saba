@@ -15,7 +15,7 @@ tasks:
       Run the Odin suites against an isolated copy of the checkout.
 
       task test
-      task test -- --package assets --internal-only
+      task test -- unit/assets
       task test -- -define:ODIN_TEST_THREADS=1
       task test -- --help
 
@@ -30,7 +30,7 @@ tasks:
   browser-driver:
     internal: true
     desc: Install the locked Playwright package for the Firefox and WebKit UI tests
-    dir: tests/browsers
+    dir: tests/browser/driver
     # Runs only when npm exists and the lock changed since the last install.
     # Without the package the Firefox and WebKit tests log a skip notice.
     status:
@@ -40,7 +40,7 @@ tasks:
         if npm ci --ignore-scripts --no-bin-links --no-audit --no-fund; then
           cp package-lock.json node_modules/.saba-installed-lock
         else
-          echo "Could not install tests/browsers; the Firefox and WebKit UI tests will be skipped." >&2
+          echo "Could not install tests/browser/driver; the Firefox and WebKit UI tests will be skipped." >&2
         fi
 
   bench:mesa:
@@ -61,7 +61,7 @@ tasks:
           krs install --frozen --root="$bench_root"
           bench_shared="$bench_root/shared"
         fi
-        "{{.COMPILER}}" run testdata/mesa_perf -o:speed -out:"{{.RUNNER}}" -collection:shared="$bench_shared" -- bench {{.MESA_SUITE_ARGS}} {{.CLI_ARGS}}
+        "{{.COMPILER}}" run benchmarks/mesa -o:speed -out:"{{.RUNNER}}" -collection:shared="$bench_shared" -- bench {{.MESA_SUITE_ARGS}} {{.CLI_ARGS}}
 
   bench:compiled-editor:
     desc: Compare the compiled editor with the original synthetic editor prototype
@@ -166,9 +166,9 @@ tasks:
     vars:
       BROWSER_DRIVER: '{{default "node" .SABA_BENCH_NODE}}'
     cmds:
-      - '"{{.BROWSER_DRIVER}}" testdata/mesa_perf/mesa-sheet.cjs {{.CLI_ARGS}}'
+      - '"{{.BROWSER_DRIVER}}" benchmarks/mesa/mesa-sheet.cjs {{.CLI_ARGS}}'
 
   bench:mesa-preload:
     desc: Compare constrained editor startup with and without preloading its shared modules
     cmds:
-      - 'bash testdata/mesa_perf/preload.sh {{.CLI_ARGS}}'
+      - 'bash benchmarks/mesa/preload.sh {{.CLI_ARGS}}'

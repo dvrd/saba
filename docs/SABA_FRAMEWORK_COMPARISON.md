@@ -79,13 +79,13 @@ The observations include the original bundled pages, HTML-only controls, timesta
 
 | Implementation | Initial screen and updates |
 | --- | --- |
-| Current Saba | The checkout’s DOM runtime mounts the screen in an empty host. Handwritten keyed rows retain their nodes. [Implementation](../testdata/mesa_perf/entry.js) |
-| Planned Saba prototype | Static form HTML with instance-local target validation. Signals update the form and keyed row text. The future compiler and general-purpose runtime are still planned. [Implementation](../testdata/mesa_perf/planned.js) |
+| Current Saba | The checkout’s DOM runtime mounts the screen in an empty host. Handwritten keyed rows retain their nodes. [Implementation](../benchmarks/mesa/entry.js) |
+| Planned Saba prototype | Static form HTML with instance-local target validation. Signals update the form and keyed row text. The future compiler and general-purpose runtime are still planned. [Implementation](../benchmarks/mesa/planned.js) |
 | Vanilla JavaScript | The same static form with native DOM listeners, a key-to-node map and direct text writes. It has no framework dependencies. [Implementation](../benchmarks/frameworks/src/vanilla.js) |
 | Solid | A client-compiled component uses native state and a keyed list with row accessors. [Implementation](../benchmarks/frameworks/src/solid.jsx) |
 | React | A production client root uses controlled input, keyed rows and memoized list panels so typing leaves unchanged lists alone. [Implementation](../benchmarks/frameworks/src/react.jsx) |
 | Svelte | A client-compiled component uses Svelte state and keyed each blocks. [Implementation](../benchmarks/frameworks/src/App.svelte) |
-| htmx | A static form declares its requests. Odin returns escaped HTML fragments and triggers four refreshes after a successful PATCH. Idiomorph uses list-local row IDs to preserve nodes. Typing previews the draft locally. [HTML](../benchmarks/frameworks/htmx.html) · [Server fragment rendering](../testdata/mesa_perf/frameworks.odin) |
+| htmx | A static form declares its requests. Odin returns escaped HTML fragments and triggers four refreshes after a successful PATCH. Idiomorph uses list-local row IDs to preserve nodes. Typing previews the draft locally. [HTML](../benchmarks/frameworks/htmx.html) · [Server fragment rendering](../benchmarks/mesa/frameworks.odin) |
 
 React, Solid, Svelte and current Saba build their initial UI in the browser. Vanilla, htmx and the Saba prototype receive the blank form in the first document. Every editor fetches its detail record before enabling the field. These startup strategies are part of the measured implementations. Server-rendered or hydrated variants of the client-rendered entries would be separate experiments.
 
@@ -111,4 +111,4 @@ Use Odin with Saba’s shared collection, Node 22 or newer, npm, and Playwright 
 task bench:frameworks -- --trials 28 --profiles desktop,constrained --out /tmp/web-frameworks.json
 ```
 
-The raw report includes each visit, individual key latencies, package versions, served bundle hashes and benchmark source hashes. [Raw measurements](benchmarks/web-frameworks.json) · [Browser harness](../testdata/mesa_perf/measure.cjs)
+The raw report includes each visit, individual key latencies, package versions, served bundle hashes and benchmark source hashes. [Raw measurements](benchmarks/web-frameworks.json) · [Browser harness](../benchmarks/mesa/measure.cjs)

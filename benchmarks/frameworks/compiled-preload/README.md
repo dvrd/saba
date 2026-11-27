@@ -1,6 +1,6 @@
 # Cold startup with compiled module preloads
 
-This experiment opens Saba’s compiled `/items/42` editor directly in Chromium. The Odin origin builds the same JSX used in the browser acceptance suite, including its real attachment, editor and mutation modules. It serves a fixed session and item response on loopback. Each pair uses one generation. The hinted document uses exactly the links the compiler emitted. Removing just those link tags must recreate the entire control document byte for byte. Both visits use the same entry and module URLs. [Authored item form](../../../testdata/ui/item.jsx) · [Odin origin](origin/main.odin)
+This experiment opens Saba’s compiled `/items/42` editor directly in Chromium. The Odin origin builds the same JSX used in the browser acceptance suite, including its real attachment, editor and mutation modules. It serves a fixed session and item response on loopback. Each pair uses one generation. The hinted document uses exactly the links the compiler emitted. Removing just those link tags must recreate the entire control document byte for byte. Both visits use the same entry and module URLs. [Authored item form](../../../tests/fixtures/ui/item.jsx) · [Odin origin](origin/main.odin)
 
 ## Run it
 

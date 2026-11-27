@@ -3981,7 +3981,7 @@ const operations = [
     "evidence": [
       "src/modules/mutations.js",
       "src/modules/editor.js",
-      "testdata/ui_store/adapter.odin"
+      "tests/fixtures/apps/ui_store/adapter.odin"
     ],
     "steps": [
       [
@@ -4007,7 +4007,7 @@ const operations = [
         3,
         "Commit A once",
         "The test server reserves the operation for this tenant and caller, then updates the item only if its revision still matches, recording the reply in the same transaction.",
-        "testdata/ui_store/adapter.odin:196",
+        "tests/fixtures/apps/ui_store/adapter.odin:196",
         "save-17 = 200 · revision 8",
         "UPDATE items … WHERE revision = 7"
       ],
@@ -4016,7 +4016,7 @@ const operations = [
         3,
         "Record B's conflict",
         "B's expected revision no longer matches, so no row changes. Its receipt records 409 with the current record.",
-        "testdata/ui_store/adapter.odin:208",
+        "tests/fixtures/apps/ui_store/adapter.odin:208",
         "save-18 = 409 · revision 8",
         "UPDATE operations SET status = 409, reply = {…}"
       ],
@@ -4339,8 +4339,8 @@ const sourceAnchors = {
   "src/modules/reads.js:106": "    const current = () => entries.get(entry.id) === entry && entry.controller === controller;",
   "src/modules/mutations.js:335": "      store.setItem(key, VERSION);",
   "src/modules/mutations.js:333": "      const bytes = JSON.stringify({...fields, operationId: id, expectedRevision: revision});",
-  "testdata/ui_store/adapter.odin:196": "\t\t\t\t\"UPDATE items SET title=?,revision=revision+1 WHERE tenant=? AND id='42' AND revision=?\",",
-  "testdata/ui_store/adapter.odin:208": "\t\t\t\tresult.status = .Conflict",
+  "tests/fixtures/apps/ui_store/adapter.odin:196": "\t\t\t\t\"UPDATE items SET title=?,revision=revision+1 WHERE tenant=? AND id='42' AND revision=?\",",
+  "tests/fixtures/apps/ui_store/adapter.odin:208": "\t\t\t\tresult.status = .Conflict",
   "src/modules/editor.js:386": "    retireView(\"closed\");",
   "src/modules/mutations.js:353": "    try { known = pointers(item); }",
   "src/modules/mutations.js:290": "        if (reply.status === 200 && reply.body?.state === \"terminal\") return settle(op, token, reply.body);",
@@ -4713,7 +4713,7 @@ const docTitles = {
   "src/modules/reads.js": "Scoped reads",
   "src/modules/mutations.js": "Saves, journal and receipts",
   "src/modules/editor.js": "Item editor",
-  "testdata/ui_store/adapter.odin": "Item store test server"
+  "tests/fixtures/apps/ui_store/adapter.odin": "Item store test server"
 };
 </script>
 <script>

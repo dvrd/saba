@@ -130,4 +130,4 @@ main :: proc() {
 }
 ```
 
-For a data-backed example, the item page uses a parameterized route, reads an authorized baseline and connects its JSX fields to an editor. Its API and editable title belong to the synthetic framework fixture. [Item page](../testdata/ui/item.jsx) · [Odin route registration](../tests/ui/browser_test.odin) · [Read-only Mesa v2 Operations comparison](../benchmarks/frameworks/operations/README.md)
+For a data-backed example, the item page uses a parameterized route, reads an authorized baseline and connects its JSX fields to an editor. Its API and editable title belong to the synthetic framework fixture. [Item page](../tests/fixtures/ui/item.jsx) · [Odin route registration](../tests/browser/browser_test.odin) · [Read-only Mesa v2 Operations comparison](../benchmarks/frameworks/operations/README.md)

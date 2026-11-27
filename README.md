@@ -27,30 +27,24 @@ The other notes in [docs/](docs/) record UI work and measurements.
 - The owner's Odin fork, [dvrd/Odin](https://github.com/dvrd/Odin). Saba does
   not build with upstream Odin. Set `ODIN` to use a compiler that is not on `PATH`.
 - [krs](https://github.com/dvrd/krs) to install the dependencies pinned in
-  `.krs/packages.json` (async, surf, websocket, aws, kakunou, kessel).
+  `.krs/packages.json` (async, surf, aws, kakunou, kessel).
 - [Task](https://taskfile.dev) to run the suites.
-- For the UI and JavaScript tests: Node (`SABA_NODE`) and Chrome or Chromium
-  (`SABA_CHROME`). The UI tests also run in Firefox and WebKit through the
-  Playwright package locked in `tests/browsers`, which `task test` installs
-  with `npm ci`. Download its browser builds once with
-  `cd tests/browsers && npx playwright install firefox webkit`
-  (`PLAYWRIGHT_PATH` selects another Playwright package).
-- For the loopback harnesses: `python3` (`SABA_PYTHON`); Go (`SABA_GO`) for
-  the HTTP/2, HTTPS and WebSocket harnesses; a Python with
-  [aioquic](https://github.com/aiortc/aioquic) in `SABA_AIOQUIC_PYTHON` for
-  the HTTP/3 harnesses.
-
-A suite whose optional tool is missing is skipped with a warning naming the
-variable to set.
+- Optional, for some suites: Node and Chrome for the browser and JavaScript
+  tests, and libcurl, OpenSSL, ngtcp2 and nghttp3 (through pkg-config) for the
+  interoperability tests. A suite whose tool is missing is skipped with a
+  notice. [tests/README.md](tests/README.md) lists them.
 
 ## Tests
 
 ```sh
-task test                                   # every suite
-task test -- --package core --internal-only # one package's private suite
-task test -- -- -define:ODIN_TEST_NAMES=saba_core.<test>
+task test                          # every suite
+task test -- unit                  # one kind: unit, integration, e2e, interop, browser, javascript
+task test -- integration/core      # one suite
 task test -- --help
 ```
+
+Every suite is Odin except the JavaScript runtime's own tests. What each kind
+covers and where fixtures live is in [tests/README.md](tests/README.md).
 
 `task test` copies the checkout to a temporary directory and runs
 `krs install --frozen` into a private root, so it tests the locked

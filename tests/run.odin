@@ -8,23 +8,31 @@ import "core:strings"
 import "core:sync"
 import "core:sys/posix"
 import "core:time"
+import harness "support/harness"
 
 SHARED_FLAG :: "-collection:shared="
 SUITE_CHILD :: "--saba-suite-child"
-USAGE :: `Usage: task test -- [options] -- [Odin flags]
+USAGE :: `Usage: task test -- [options] [selector...] -- [Odin flags]
 
-  --odin PATH       Odin compiler (default: ODIN or odin)
-  --shared PATH     use a development collection (also WEBTOOLS_SHARED). By default
-                    krs installs the project lock into a fresh, private test root.
-  --package NAME   limit to a package relative to tests/ (use . for the library root)
-  --internal-only  run only the private package suites
-  --help           show this help
+  A selector is a kind or a suite under tests/: unit, integration/core,
+  e2e/keep_alive. Without one every suite runs. Kinds run in this order:
+  unit, integration, e2e, interop, browser, javascript (see tests/README.md).
+
+  --odin PATH    Odin compiler (default: ODIN or odin)
+  --shared PATH  use a development collection (also WEBTOOLS_SHARED). By default
+                 krs installs the project lock into a fresh, private test root.
+  --help         show this help
 `
 
+KINDS :: []string{"unit", "integration", "e2e", "interop", "browser", "javascript"}
+// Directories under tests/ that hold no suites of their own.
+NOT_SUITES :: []string{"fixtures", "support", "driver", "node_modules"}
+
 Options :: struct {
-	compiler, shared, package_name: string,
-	internal_only, help:            bool,
-	flags:                          [dynamic]string,
+	compiler, shared: string,
+	selectors:        [dynamic]string,
+	help:             bool,
+	flags:            [dynamic]string,
 }
 
 interrupted: bool
@@ -88,8 +96,8 @@ run :: proc() -> int {
 	if error := os.make_directory(repository); error != nil {
 		return fail("Could not create staged repository", error)
 	}
-	// examples/ is built by the loopback harnesses (tests/streaming.py).
-	for directory in ([]string{"src", "tests", "testdata", "examples"}) {
+	// examples/ is built by e2e suites.
+	for directory in ([]string{"src", "tests", "examples"}) {
 		if !os.is_dir(directory) {
 			continue
 		}
@@ -117,10 +125,10 @@ run :: proc() -> int {
 	if error := os.symlink(join(repository, "src"), join(shared, "saba")); error != nil {
 		return fail("Could not mount Saba in the test collection", error)
 	}
-	// Private tests reach their fixtures as ../../testdata/... or ../../tests/...
-	// from src/<package>. A nested build that enters the library through the link
-	// above resolves those beside the link, so the fixtures are linked there too.
-	for directory in ([]string{"tests", "testdata"}) {
+	// White-box tests reach their fixtures as ../../tests/fixtures/... from
+	// src/<package>. A nested build that enters the library through the link
+	// above resolves those beside the link, so tests/ is linked there too.
+	for directory in ([]string{"tests"}) {
 		if error := os.symlink(join(repository, directory), join(shared, directory)); error != nil {
 			return fail(fmt.tprintf("Could not mount %s in the test collection", directory), error)
 		}
@@ -145,16 +153,46 @@ run :: proc() -> int {
 	if located != nil {
 		return fail("Could not locate test runner", located)
 	}
+	failed := make([dynamic]string, context.temp_allocator)
+	skipped := make([dynamic]string, context.temp_allocator)
 	for suite in suites {
+		// A suite that names C libraries in its LIBRARIES file links them,
+		// and is skipped where one is missing.
+		suite_options := options
+		if modules := harness.suite_libraries(join("tests", suite)); modules != nil {
+			flags, missing := harness.libraries(modules)
+			if missing != "" {
+				fmt.printf("Skipping %s: %s was not found (pkg-config)\n", join("tests", suite), missing)
+				append(&skipped, fmt.tprintf("%s (no %s)", suite, missing))
+				continue
+			}
+			suite_options.flags = make([dynamic]string, context.temp_allocator)
+			append(&suite_options.flags, ..options.flags[:])
+			append(&suite_options.flags, ..flags)
+		}
 		if sync.atomic_load(&interrupted) {
 			return 130
 		}
-		status := run_suite(options, repository, suite, runner)
-		if status != 0 {
+		status := run_suite(suite_options, repository, suite, runner)
+		if status == 130 {
 			return status
 		}
+		if status != 0 {
+			append(&failed, suite)
+		}
 	}
-	return 0
+	fmt.printf("\n%d of %d suites passed", len(suites) - len(failed) - len(skipped), len(suites))
+	if len(skipped) > 0 {
+		fmt.printf(", %d skipped", len(skipped))
+	}
+	fmt.println(".")
+	for suite in skipped {
+		fmt.println("  skipped:", join("tests", suite))
+	}
+	for suite in failed {
+		fmt.println("  failed:", join("tests", suite))
+	}
+	return 1 if len(failed) > 0 else 0
 }
 
 parse_options :: proc(args: []string) -> (options: Options, valid: bool) {
@@ -163,8 +201,8 @@ parse_options :: proc(args: []string) -> (options: Options, valid: bool) {
 		options.compiler = "odin"
 	}
 	options.shared = os.get_env("WEBTOOLS_SHARED", context.temp_allocator)
-	options.package_name = "all"
 	options.flags.allocator = context.temp_allocator
+	options.selectors.allocator = context.temp_allocator
 
 	args := args
 	forward := false
@@ -184,9 +222,7 @@ parse_options :: proc(args: []string) -> (options: Options, valid: bool) {
 			forward = true
 		case "--help", "-h":
 			options.help = true
-		case "--internal-only":
-			options.internal_only = true
-		case "--odin", "--shared", "--package":
+		case "--odin", "--shared":
 			if len(args) == 0 || strings.has_prefix(args[0], "-") {
 				fmt.fprintln(os.stderr, "Missing value for", arg)
 				return
@@ -196,12 +232,14 @@ parse_options :: proc(args: []string) -> (options: Options, valid: bool) {
 				options.compiler = args[0]
 			case "--shared":
 				options.shared = args[0]
-			case "--package":
-				options.package_name = args[0]
 			}
 			args = args[1:]
 		case:
-			append(&options.flags, arg)
+			if strings.has_prefix(arg, "-") {
+				append(&options.flags, arg)
+			} else {
+				append(&options.selectors, strings.trim_suffix(arg, "/"))
+			}
 		}
 	}
 	return options, true
@@ -228,6 +266,7 @@ locate_toolchain :: proc(options: ^Options) -> bool {
 	return true
 }
 
+// A suite is a directory under tests/ that holds *_test.odin files.
 discover_suites :: proc(options: Options) -> ([]string, bool) {
 	found := make(map[string]bool, context.temp_allocator)
 	test_root, located := filepath.abs("tests", context.temp_allocator)
@@ -239,31 +278,18 @@ discover_suites :: proc(options: Options) -> ([]string, bool) {
 	defer os.walker_destroy(&walker)
 	for entry in os.walker_walk(&walker) {
 		if entry.type == .Directory &&
-		   (strings.has_prefix(entry.name, ".") || entry.name == "__pycache__") {
+		   (strings.has_prefix(entry.name, ".") || slice.contains(NOT_SUITES, entry.name)) {
 			os.walker_skip_dir(&walker)
 		}
 		if entry.type != .Regular || !strings.has_suffix(entry.name, "_test.odin") {
 			continue
 		}
-		directory, error := filepath.rel(
-			test_root,
-			filepath.dir(entry.fullpath),
-			context.temp_allocator,
-		)
+		directory, error := filepath.rel(test_root, filepath.dir(entry.fullpath), context.temp_allocator)
 		if error != nil {
 			fmt.fprintln(os.stderr, "Could not resolve test suite:", entry.fullpath, error)
 			return nil, false
 		}
-		package_name := directory
-		private := filepath.base(directory) == "internal"
-		if private {
-			package_name = filepath.dir(directory)
-			if package_name == "" {
-				package_name = "."
-			}
-		}
-		if (!options.internal_only || private) &&
-		   (options.package_name == "all" || options.package_name == package_name) {
+		if selected(options.selectors[:], directory) {
 			found[directory] = true
 		}
 	}
@@ -281,8 +307,81 @@ discover_suites :: proc(options: Options) -> ([]string, bool) {
 		suites[index] = suite
 		index += 1
 	}
-	slice.sort(suites)
+	slice.sort_by(suites, proc(a, b: string) -> bool {
+		ka, kb := kind_rank(a), kind_rank(b)
+		return ka < kb || ka == kb && a < b
+	})
 	return suites, true
+}
+
+selected :: proc(selectors: []string, suite: string) -> bool {
+	if len(selectors) == 0 {
+		return true
+	}
+	for selector in selectors {
+		if suite == selector || strings.has_prefix(suite, selector) && suite[len(selector)] == '/' {
+			return true
+		}
+	}
+	return false
+}
+
+kind_rank :: proc(suite: string) -> int {
+	kind := suite
+	if slash := strings.index_byte(suite, '/'); slash >= 0 {
+		kind = suite[:slash]
+	}
+	for name, rank in KINDS {
+		if name == kind {
+			return rank
+		}
+	}
+	return len(KINDS)
+}
+
+// A unit or integration suite that declares the package of the source it
+// tests (tests/unit/core declares saba_core) is white-box: its files are
+// copied into that package for the run. tests/<kind>/saba is the root package.
+private_target :: proc(repository, suite: string) -> (string, bool) {
+	parts := strings.split(suite, "/", context.temp_allocator)
+	if len(parts) != 2 || parts[0] != "unit" && parts[0] != "integration" {
+		return "", false
+	}
+	source := join(repository, "src")
+	if parts[1] != "saba" {
+		source = join(source, parts[1])
+	}
+	if !os.is_dir(source) {
+		return "", false
+	}
+	wanted := package_of(source)
+	return source, wanted != "" && wanted == package_of(join(join(repository, "tests"), suite))
+}
+
+// The package clause of the first .odin file in directory.
+package_of :: proc(directory: string) -> string {
+	handle, error := os.open(directory)
+	if error != nil {
+		return ""
+	}
+	defer _ = os.close(handle)
+	entries, _ := os.read_directory(handle, -1, context.temp_allocator)
+	for entry in entries {
+		if entry.type != .Regular || !strings.has_suffix(entry.name, ".odin") {
+			continue
+		}
+		bytes, read := os.read_entire_file(entry.fullpath, context.temp_allocator)
+		if read != nil {
+			continue
+		}
+		text := string(bytes)
+		for line in strings.split_lines_iterator(&text) {
+			if strings.has_prefix(line, "package ") {
+				return strings.trim_space(line[len("package "):])
+			}
+		}
+	}
+	return ""
 }
 
 install_locked :: proc(root, repository: string) -> bool {
@@ -323,14 +422,14 @@ stage_shared :: proc(source, destination: string) -> os.Error {
 run_suite :: proc(options: Options, repository, suite, runner: string) -> int {
 	source := join(join(repository, "tests"), suite)
 	target := source
-	if filepath.base(suite) == "internal" {
-		target = join(join(repository, "src"), filepath.dir(suite))
+	if private, ok := private_target(repository, suite); ok {
+		target = private
 		if error := stage_private(source, target); error != nil {
 			return fail(fmt.tprintf("Could not stage private tests for %s", suite), error)
 		}
 	}
-	// Later suites build the staged library itself (the loopback harnesses do,
-	// some with -vet); leftover private test files would be part of that build.
+	// Later suites build the staged library itself (e2e and interop programs do,
+	// with -vet); leftover private test files would be part of that build.
 	defer if target != source {
 		unstage_private(source, target)
 	}

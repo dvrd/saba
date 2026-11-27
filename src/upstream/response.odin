@@ -18,8 +18,10 @@ Dispatcher :: struct {
 	client:     ^surf.Client,
 	runtime:    ^async.Runtime,
 	allocator:  mem.Allocator,
-	interval:   time.Duration,
 	task:       async.Task,
+	// surf's Client_Config.notify: the client wakes the dispatcher task
+	// whenever a completion is ready.
+	notify:     signal.Signal,
 	mu:         sync.Mutex,
 	slots:      []Slot,
 	pending:    int,
@@ -56,11 +58,10 @@ address_policy_public_only :: surf.address_policy_public_only
 Address_Policy :: surf.Address_Policy
 
 // Initialize c from config and attach to it and the runtime that hosts it. The
-// dispatcher exclusively consumes that surf. Give it one runtime task slot and
+// dispatcher exclusively consumes that client. Give it one runtime task slot and
 // a thread-safe allocator. Keep all three at stable addresses through detach.
-// The dispatcher polls the client for completions. While requests are active,
-// interval sets the polling cadence; a completion may wait up to one interval
-// plus scheduler delay. The task parks without a timer when idle.
+// The dispatcher task sleeps until the client's notify signal says a completion
+// is ready, so config.notify is replaced by the dispatcher's own.
 //
 // Outbound URLs often carry request data, so the client refuses private,
 // loopback, link-local and metadata addresses by default: a nil
@@ -78,13 +79,11 @@ attach :: proc(
 	runtime: ^async.Runtime,
 	config: surf.Client_Config,
 	allocator: mem.Allocator,
-	interval: time.Duration = time.Millisecond,
 ) -> bool {
 	if d == nil ||
 	   d.client != nil ||
 	   c == nil ||
 	   runtime == nil ||
-	   interval <= 0 ||
 	   allocator.procedure == nil ||
 	   .Free not_in mem.query_features(allocator) {
 		return false
@@ -94,13 +93,24 @@ attach :: proc(
 		config.http.address_policy = address_policy_public_only
 		config.http.address_policy_data = nil
 	}
+	// The signal targets d.task, registered below. The client keeps its own
+	// reference, and nothing completes before the first submit.
+	notify, created := signal.create(runtime, &d.task)
+	if !created {
+		return false
+	}
+	config.notify = notify
 	if surf.client_init(c, runtime, config, allocator).kind != .None {
+		signal.detach(notify)
+		signal.release(&notify)
 		return false
 	}
 	attached := false
 	defer if !attached {
 		_ = surf.client_close(c)
 		_ = surf.client_destroy(c)
+		signal.detach(notify)
+		signal.release(&notify)
 	}
 	capacities := config.capacities.? or_else surf.DEFAULT_CAPACITIES
 	if capacities.requests < 1 {
@@ -114,7 +124,7 @@ attach :: proc(
 		client    = c,
 		runtime   = runtime,
 		allocator = allocator,
-		interval  = interval,
+		notify    = notify,
 		slots     = slots,
 	}
 	d.task = {
@@ -279,26 +289,13 @@ publish :: proc(d: ^Dispatcher, handle: surf.Request_Handle) {
 @(private)
 dispatch :: proc(data: rawptr) -> async.Resume_Result {
 	d := cast(^Dispatcher)data
-	// One timer for the client's queue. Limit each resume so a burst of
-	// completions shares the worker with network and protocol tasks.
+	// Limit each resume so a burst of completions shares the worker with
+	// network and protocol tasks. With the queue empty the task waits for the
+	// client's notify; a wake that arrives before it parks runs it again.
 	for _ in 0 ..< 32 {
 		next, ok := surf.client_poll(d.client)
 		if !ok {
-			sync.lock(&d.mu)
-			idle := d.pending == 0
-			sync.unlock(&d.mu)
-			if idle {
-				return .Waiting
-			}
-			deadline := async.deadline_after(d.runtime, d.interval)
-			#partial switch async.sleep_until(d.runtime, deadline).kind {
-			case .Pending:
-				return .Waiting
-			case .None:
-				return .Yield
-			case:
-				return stop_dispatch(data)
-			}
+			return .Waiting
 		}
 		publish(d, next.request)
 	}
@@ -417,6 +414,8 @@ detach :: proc(d: ^Dispatcher) -> bool {
 		}
 		d.registered = false
 	}
+	// The task is gone: the client must not wake it any more.
+	signal.detach(d.notify)
 	for {
 		next, ok := surf.client_poll(d.client)
 		if !ok {
@@ -428,6 +427,7 @@ detach :: proc(d: ^Dispatcher) -> bool {
 		return false
 	}
 	delete(d.slots, d.allocator)
+	signal.release(&d.notify)
 	d^ = {}
 	return true
 }

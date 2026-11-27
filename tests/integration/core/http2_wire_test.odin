@@ -148,7 +148,9 @@ h2w_run :: proc(t: ^testing.T, state: ^H2W_Server, exchange: proc(t: ^testing.T,
 		thread.destroy(worker)
 		testing.expect(t, state.ok)
 	}
-	until := time.tick_add(time.tick_now(), 5 * time.Second)
+	// A startup bound only: generous, since a loaded machine can take seconds
+	// to start serve, and nothing here measures it.
+	until := time.tick_add(time.tick_now(), 60 * time.Second)
 	for !server_ready(&state.control) && time.tick_diff(time.tick_now(), until) > 0 {
 		thread.yield()
 	}

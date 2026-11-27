@@ -140,7 +140,9 @@ progress_fixture :: proc(
 		thread.destroy(worker)
 		testing.expect(t, state.ok)
 	}
-	until := time.tick_add(time.tick_now(), PROGRESS_TIMEOUT)
+	// A startup bound only: generous, since a loaded machine can take seconds
+	// to start serve, and nothing here measures it.
+	until := time.tick_add(time.tick_now(), 60 * time.Second)
 	for !server.server_ready(&state.control) && time.tick_since(until) < 0 {
 		thread.yield()
 	}

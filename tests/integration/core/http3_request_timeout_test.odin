@@ -136,7 +136,9 @@ http3_request_timeout_native_pending_callback_closes_and_releases_once :: proc(t
 		thread.join(worker)
 	}
 
-	until := time.tick_add(time.tick_now(), 5 * time.Second)
+	// A startup bound only: generous, since a loaded machine can take seconds
+	// to start serve, and nothing here measures it.
+	until := time.tick_add(time.tick_now(), 60 * time.Second)
 
 	for !server_ready(&fixture.control) && time.tick_diff(time.tick_now(), until) > 0 {
 		thread.yield()
@@ -223,7 +225,9 @@ http3_request_timeout_zero_keeps_native_thirty_second_default :: proc(t: ^testin
 		thread.join(worker)
 	}
 
-	until := time.tick_add(time.tick_now(), 5 * time.Second)
+	// A startup bound only: generous, since a loaded machine can take seconds
+	// to start serve, and nothing here measures it.
+	until := time.tick_add(time.tick_now(), 60 * time.Second)
 
 	for !server_ready(&fixture.control) && time.tick_diff(time.tick_now(), until) > 0 {
 		thread.yield()

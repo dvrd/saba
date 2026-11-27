@@ -98,7 +98,9 @@ legacy_calls_delegate_to_aws :: proc(t: ^testing.T) {
 		thread.destroy(worker)
 		testing.expect(t, fake.result, "fake S3 did not serve")
 	}
-	deadline := time.tick_add(time.tick_now(), 10 * time.Second)
+	// A startup bound only: generous, since a loaded machine can take seconds
+	// to start serve, and nothing here measures it.
+	deadline := time.tick_add(time.tick_now(), 60 * time.Second)
 	for !core.server_ready(&fake.control) && time.tick_since(deadline) < 0 {
 		time.sleep(time.Millisecond)
 	}

@@ -98,7 +98,9 @@ development_module_route_serves_fresh_jsx_and_diagnostics :: proc(t: ^testing.T)
 		thread.destroy(worker)
 		testing.expect(t, fixture.ok)
 	}
-	deadline := time.tick_add(time.tick_now(), 5 * time.Second)
+	// A startup bound only: generous, since a loaded machine can take seconds
+	// to start serve, and nothing here measures it.
+	deadline := time.tick_add(time.tick_now(), 60 * time.Second)
 	for !core.server_ready(&fixture.control) && time.tick_diff(time.tick_now(), deadline) > 0 {
 		time.sleep(time.Millisecond)
 	}

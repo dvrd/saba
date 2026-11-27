@@ -122,7 +122,9 @@ facade_dedicated_poller_reaches_the_runtime :: proc(t: ^testing.T) {
 		},
 	}
 	worker := thread.create_and_start_with_poly_data(&fixture, proc(f: ^Facade_Poller_Fixture) {f.ok = serve(f.config)})
-	until := time.tick_add(time.tick_now(), 5 * time.Second)
+	// A startup bound only: generous, since a loaded machine can take seconds
+	// to start serve, and nothing here measures it.
+	until := time.tick_add(time.tick_now(), 60 * time.Second)
 	for !server_ready(&control) && !thread.is_done(worker) && time.tick_diff(time.tick_now(), until) > 0 {
 		time.sleep(time.Millisecond)
 	}

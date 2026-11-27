@@ -83,7 +83,9 @@ http3_connection_specific_and_unrepresentable_response_headers_stay_stream_local
 		thread.destroy(worker)
 		testing.expect(t, fixture.ok)
 	}
-	until := time.tick_add(time.tick_now(), 5 * time.Second)
+	// A startup bound only: generous, since a loaded machine can take seconds
+	// to start serve, and nothing here measures it.
+	until := time.tick_add(time.tick_now(), 60 * time.Second)
 	for !server_ready(&fixture.control) && time.tick_diff(time.tick_now(), until) > 0 {
 		thread.yield()
 	}

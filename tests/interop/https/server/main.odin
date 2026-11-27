@@ -9,6 +9,7 @@ import signal "shared:async/signal"
 import owned "shared:async/owned"
 import rt "base:runtime"
 import "core:fmt"
+import "core:strconv"
 import "core:log"
 import "core:os"
 import "core:sync"
@@ -254,7 +255,7 @@ main :: proc() {
 	defer store.destroy(&state.credentials)
 	state.tls_config = {
 		store             = state.credentials,
-		handshake_timeout = 400 * time.Millisecond,
+		handshake_timeout = handshake_timeout(),
 		close_timeout     = 200 * time.Millisecond,
 		on_event          = tls_event,
 		data              = &state,
@@ -351,4 +352,12 @@ main :: proc() {
 	}
 
 	thread.destroy(worker)
+}
+
+// HTTPS80_HANDSHAKE_MS, for the test about the handshake deadline; every
+// other test gets ten seconds, so a handshake slowed down by a loaded machine
+// is not closed under it.
+handshake_timeout :: proc() -> time.Duration {
+	milliseconds, ok := strconv.parse_int(os.get_env("HTTPS80_HANDSHAKE_MS", context.temp_allocator))
+	return time.Duration(milliseconds) * time.Millisecond if ok && milliseconds > 0 else 10 * time.Second
 }

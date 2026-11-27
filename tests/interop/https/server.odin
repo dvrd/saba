@@ -29,12 +29,18 @@ Joined :: struct {
 	handled, handshakes, successes, closed, live_bytes, write_waits, partial_writes, leases: int,
 }
 
-launch :: proc(t: ^testing.T, mode: string, web := "") -> (s: Server, ok: bool) {
+// handshake_ms sets the server's TLS handshake deadline; zero keeps its
+// generous default.
+launch :: proc(t: ^testing.T, mode: string, web := "", handshake_ms := 0) -> (s: Server, ok: bool) {
 	binary := harness.build_shared(t, SOURCE) or_return
-	env: []string
+	settings := make([dynamic]string, context.temp_allocator)
 	if web != "" {
-		env = {fmt.tprintf("HTTPS80_WEB=%s", web)}
+		append(&settings, fmt.tprintf("HTTPS80_WEB=%s", web))
 	}
+	if handshake_ms > 0 {
+		append(&settings, fmt.tprintf("HTTPS80_HANDSHAKE_MS=%d", handshake_ms))
+	}
+	env := settings[:] if len(settings) > 0 else nil
 	s.p, s.input, ok = harness.start_with_input(
 		t,
 		{binary, mode, harness.fixture("tls/rsa2048-valid.pem"), harness.fixture("tls/rsa2048.pem")},

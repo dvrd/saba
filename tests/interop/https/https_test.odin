@@ -306,7 +306,7 @@ chunked_helpers :: proc(t: ^testing.T) {
 // closes the connection.
 @(test)
 handshake_timeout :: proc(t: ^testing.T) {
-	s, launched := launch(t, "core")
+	s, launched := launch(t, "core", handshake_ms = 400)
 	if !launched {
 		return
 	}

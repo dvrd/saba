@@ -411,20 +411,29 @@ receive :: proc(cl: ^peer.Client, data: []u8) -> []u8 {
 	return out[:] if changed else data
 }
 
-// ngtcp2's loss timer fired: the held flight goes out, and ngtcp2 probes.
+// One of ngtcp2's timers fired. Once the probe timeout has passed since the
+// held flight was written, the flight goes out and ngtcp2 probes. ngtcp2
+// tells which timer is due only as their minimum, so an earlier one (and on a
+// loaded machine the timers are serviced late and the round-trip estimate
+// moves) must not release the flight before a full probe timeout.
 expiry :: proc(cl: ^peer.Client) {
 	st := cast(^Injector)cl.config.user
 	if len(st.held) == 0 || st.released {
 		return
 	}
-	st.released = true
-	st.released_after = time.Duration(peer.timestamp() - st.injected_at)
 	// The Handshake space probe timeout leaves out max_ack_delay (RFC 9002
 	// section 6.2.1); ngtcp2 reports the application one.
-	st.pto = time.Duration(ngtcp2.conn_get_pto2(cl.conn))
+	pto := time.Duration(ngtcp2.conn_get_pto2(cl.conn))
 	if remote := ngtcp2.conn_get_remote_transport_params2(cl.conn); remote != nil {
-		st.pto -= time.Duration(remote.max_ack_delay)
+		pto -= time.Duration(remote.max_ack_delay)
 	}
+	after := time.Duration(peer.timestamp() - st.injected_at)
+	if after < pto {
+		return
+	}
+	st.released = true
+	st.released_after = after
+	st.pto = pto
 	for datagram in st.held {
 		peer.transmit(cl, datagram)
 	}
@@ -519,10 +528,10 @@ exercise :: proc(t: ^testing.T, c: Case) {
 			st.released,
 			st.lone_acks,
 		)
-		// The release was ngtcp2's probe timeout, not an earlier timer.
+		// The window lasted a full probe timeout.
 		testing.expectf(
 			t,
-			st.released_after + time.Millisecond >= st.pto,
+			st.released_after >= st.pto,
 			"%v: released after %v, PTO %v",
 			c,
 			st.released_after,

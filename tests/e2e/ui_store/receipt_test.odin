@@ -41,7 +41,7 @@ wait_file :: proc(path: string, server: os.Process) -> bool {
 		if os.exists(path) {
 			return true
 		}
-		if state, error := os.process_wait(server, 0); error != nil || state.exited {
+		if state, error := os.process_wait(server, 0); error == nil && state.exited {
 			return os.exists(path)
 		}
 		time.sleep(3 * time.Millisecond)

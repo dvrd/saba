@@ -40,7 +40,9 @@ observe :: proc(data: rawptr, phase: fixture.Stage, operation: string) {
 		return
 	}
 	assert(os.write_entire_file(fmt.tprintf("%s/paused", host.directory), "1") == nil)
-	deadline := time.tick_add(time.tick_now(), 25 * time.Second)
+	// The test writes resume after three requests of its own; the bound
+	// only keeps a test that died from leaving the server paused for good.
+	deadline := time.tick_add(time.tick_now(), 90 * time.Second)
 	for !os.exists(fmt.tprintf("%s/resume", host.directory)) {
 		assert(time.tick_since(deadline) < 0, "receipt barrier timed out")
 		time.sleep(2 * time.Millisecond)

@@ -76,9 +76,9 @@ main :: proc() {
 	worker := thread.create_and_start_with_poly_data(&state, proc(s: ^State) {assert(core.serve(s.server))})
 	assert(worker != nil)
 	defer thread.destroy(worker)
-	until := time.tick_add(time.tick_now(), 5 * time.Second)
-
-	for !core.server_ready(&state.control) && time.tick_diff(time.tick_now(), until) > 0 {
+	// Polled until the listener is published or serve returns, with no bound of
+	// its own: the test's ready timeout reports a server that never starts.
+	for !core.server_ready(&state.control) && !thread.is_done(worker) {
 		time.sleep(time.Millisecond)
 	}
 

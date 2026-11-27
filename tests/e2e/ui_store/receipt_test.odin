@@ -31,11 +31,18 @@ request :: proc(port: string, path: string, payload: string = "", identity := "a
 	}
 	return {int(response.status), strings.clone(string(response.body), context.temp_allocator)}
 }
-wait_file :: proc(path: string) -> bool {
-	deadline := time.tick_add(time.tick_now(), 8 * time.Second)
+// Waits for the server to create path: its port once it listens, or the
+// barrier file once a writer reached it. A server that exited ends the wait at
+// once; the bound only guards against one that hangs, and is generous because
+// a loaded machine can take seconds to start the program and open its store.
+wait_file :: proc(path: string, server: os.Process) -> bool {
+	deadline := time.tick_add(time.tick_now(), 45 * time.Second)
 	for time.tick_since(deadline) < 0 {
 		if os.exists(path) {
 			return true
+		}
+		if state, error := os.process_wait(server, 0); error != nil || state.exited {
+			return os.exists(path)
 		}
 		time.sleep(3 * time.Millisecond)
 	}
@@ -54,7 +61,7 @@ start :: proc(binary, directory, stage: string) -> Instance {
 		{command = {binary, directory, stage}, stdout = os.stdout, stderr = os.stderr},
 	)
 	assert(err == nil)
-	if !wait_file(port_path) {
+	if !wait_file(port_path, process) {
 		_ = os.process_kill(process); _, _ = os.process_wait(process)
 		panic("receipt server did not publish a port")
 	}
@@ -85,7 +92,7 @@ finish :: proc(worker: ^thread.Thread) {
 
 @(test)
 durable_http_receipts :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 100 * time.Second)
+	testing.set_fail_timeout(t, 180 * time.Second)
 	work, err := os.make_directory_temp("", "saba-ui-receipts-*", context.temp_allocator)
 	assert(err == nil)
 	defer _ = os.remove_all(work)
@@ -131,7 +138,7 @@ durable_http_receipts :: proc(t: ^testing.T) {
 		}
 		original := launch(&first)
 		defer delete(first.reply.body, rt.heap_allocator())
-		paused := wait_file(fmt.tprintf("%s/paused", dir))
+		paused := wait_file(fmt.tprintf("%s/paused", dir), process.process)
 		if !testing.expect(t, paused, "writer reached durable reservation") {
 			finish(original)
 			return
@@ -227,7 +234,7 @@ durable_http_receipts :: proc(t: ^testing.T) {
 			payload = BARRIER,
 		}
 		client := launch(&send)
-		paused := wait_file(fmt.tprintf("%s/paused", dir))
+		paused := wait_file(fmt.tprintf("%s/paused", dir), writer.process)
 		terminate(writer); finish(client)
 		delete(send.reply.body, rt.heap_allocator())
 		if !testing.expectf(t, paused, "reached %s before terminating process", stage) {

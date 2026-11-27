@@ -160,7 +160,9 @@ main :: proc() {
 	worker := thread.create_and_start_with_poly_data(&state, serve)
 	assert(worker != nil)
 
-	for _ in 0 ..< 5000 {
+	// Polled until the listener is published or serve returns, with no bound of
+	// its own: the test's ready timeout reports a server that never starts.
+	for !thread.is_done(worker) {
 		endpoint, ready := server.server_endpoint(&state.control)
 
 		if ready {

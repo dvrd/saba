@@ -79,7 +79,7 @@ launch :: proc(t: ^testing.T, binary, web: string, development := false) -> (s: 
 		fmt.tprintf("SABA_TEST_DEVELOPMENT=%d", int(development)),
 	}
 	s.process, s.input = harness.start_with_input(t, {binary}, env) or_return
-	s.port, ok = harness.ready(t, s.process, timeout = TIMEOUT)
+	s.port, ok = harness.ready(t, s.process)
 	if !ok {
 		dispose(&s)
 	}

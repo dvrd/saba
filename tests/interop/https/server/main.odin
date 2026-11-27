@@ -280,10 +280,10 @@ main :: proc() {
 	worker := thread.create_and_start_with_poly_data(&state, serve)
 	assert(worker != nil)
 	// The first start of a fresh build in the application modes can take
-	// several seconds on macOS, before the server binds.
-	limit := time.tick_add(time.tick_now(), 30 * time.Second)
-
-	for !server.server_ready(&state.control) && time.tick_diff(time.tick_now(), limit) > 0 {
+	// several seconds on macOS, before the server binds. Polled until the
+	// listener is published or serve returns, with no bound of its own: the
+	// test's ready timeout reports a server that never starts.
+	for !server.server_ready(&state.control) && !thread.is_done(worker) {
 		time.sleep(time.Millisecond)
 	}
 

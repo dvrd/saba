@@ -8,7 +8,6 @@ import budget "shared:async/budget"
 import "core:time"
 import async "shared:async"
 import signal "shared:async/signal"
-import http "shared:async/http"
 import surf "shared:surf"
 
 // Build runs on the connection owner. Copy any borrowed headers/body needed by
@@ -139,7 +138,7 @@ attach :: proc(
 response :: proc(
 	d: ^Dispatcher,
 	request: ^server.Request,
-	outbound: http.Request,
+	outbound: surf.Request,
 	build: Build,
 	timeout: time.Duration = 0,
 ) -> server.Response {
@@ -165,7 +164,7 @@ response :: proc(
 		}
 		return {status = .Service_Unavailable}
 	}
-	deadline: async.Deadline
+	deadline: time.Tick
 	remaining := timeout
 	if cutoff := server.request_deadline(request.cancellation); cutoff != (time.Tick{}) {
 		inherited := time.tick_diff(time.tick_now(), cutoff)
@@ -177,7 +176,7 @@ response :: proc(
 		}
 	}
 	if remaining > 0 {
-		deadline = async.deadline_after(d.runtime, remaining)
+		deadline = time.tick_add(time.tick_now(), remaining)
 	}
 	lease: budget.Lease
 	if request.resources != (budget.Scope{}) {

@@ -89,6 +89,16 @@ prepared_representation_stores_smaller_variants_with_their_own_tags :: proc(t: ^
 	limited, limited_retained := prepare_encoded_representation(plain, "text/html", allocator, 8)
 	testing.expect(t, limited.brotli.body == nil && limited.gzip.body == nil)
 	testing.expect_value(t, limited_retained, 0)
+
+	// Brotli is kept first and its bytes count against what gzip may use.
+	brotli_only, brotli_retained := prepare_encoded_representation(
+		plain,
+		"text/html",
+		allocator,
+		len(prepared.brotli.body) + len(prepared.gzip.body) - 1,
+	)
+	testing.expect(t, brotli_only.brotli.body != nil && brotli_only.gzip.body == nil)
+	testing.expect_value(t, brotli_retained, len(prepared.brotli.body))
 }
 
 @(test)

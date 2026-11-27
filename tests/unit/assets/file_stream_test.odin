@@ -65,6 +65,12 @@ file_ranges_validators_and_head_policy :: proc(t: ^testing.T) {
 		testing.expect_value(t, response.status, .Not_Found)
 	}
 
+	// The limit is inclusive: a file of exactly max_file_bytes is served.
+	request.headers = nil
+	exact := serve_file_stream(&request, directory, "ok.txt", {max_file_bytes = 10})
+	testing.expect_value(t, exact.status, core.HTTP_Status.OK)
+	testing.expect_value(t, exact.stream.content_length, 10)
+	core.discard_response(&exact)
 	response := serve_file_stream(&request, directory, "ok.txt", {max_file_bytes = 9})
 	testing.expect_value(t, response.status, .Internal_Server_Error)
 	response = serve_file_stream(&request, directory, "ok.txt", {etag = `W/"weak"`})
@@ -184,4 +190,55 @@ file_producer_reuses_one_bounded_grant_and_cleans_failures :: proc(t: ^testing.T
 		core.discard_response(&response)
 		testing.expect_value(t, state.live, 0)
 	}
+}
+
+// A tagged file generation is revalidated; every answer names that generation.
+// Without a tag nothing may be stored. A partial answer names its exact bytes.
+@(test)
+file_stream_fields_name_the_validator_and_the_range :: proc(t: ^testing.T) {
+	directory := asset_test_directory()
+	defer delete(directory)
+	defer os.remove_all(directory)
+	asset_test_write(directory, "ok.txt", "0123456789")
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
+	defer mem.dynamic_arena_destroy(&arena)
+	request := Request {
+		method    = "GET",
+		allocator = mem.dynamic_arena_allocator(&arena),
+	}
+	tagged := File_Stream_Config {
+		etag = `"generation"`,
+	}
+
+	for item in ([]struct {
+			headers:                     []Header,
+			status:                      core.HTTP_Status,
+			etag, cache, content_range: string,
+		} {
+			{nil, .OK, `"generation"`, "no-cache", ""},
+			{{{"If-None-Match", `"generation"`}}, .Not_Modified, `"generation"`, "no-cache", ""},
+			{{{"If-None-Match", `W/"generation"`}}, .Not_Modified, `"generation"`, "no-cache", ""},
+			{{{"Range", "bytes=2-4"}}, .Partial_Content, `"generation"`, "no-cache", "bytes 2-4/10"},
+			{{{"Range", "bytes=0-0"}}, .Partial_Content, `"generation"`, "no-cache", "bytes 0-0/10"},
+			{{{"Range", "bytes=-3"}}, .Partial_Content, `"generation"`, "no-cache", "bytes 7-9/10"},
+			{{{"Range", "bytes=8-"}}, .Partial_Content, `"generation"`, "no-cache", "bytes 8-9/10"},
+			{{{"Range", "bytes=10-"}}, .Range_Not_Satisfiable, "", "no-cache", "bytes */10"},
+		}) {
+		request.headers = item.headers
+		response := serve_file_stream(&request, directory, "ok.txt", tagged)
+		testing.expect_value(t, response.status, item.status)
+		testing.expect_value(t, delivery_test_field(response, "ETag"), item.etag)
+		testing.expect_value(t, delivery_test_field(response, "Cache-Control"), item.cache)
+		testing.expect_value(t, delivery_test_field(response, "Content-Range"), item.content_range)
+		core.discard_response(&response)
+	}
+
+	request.headers = nil
+	untagged := serve_file_stream(&request, directory, "ok.txt")
+	testing.expect_value(t, untagged.status, core.HTTP_Status.OK)
+	testing.expect_value(t, delivery_test_field(untagged, "Cache-Control"), "no-store")
+	_, has_tag := encoding_field(untagged, "ETag")
+	testing.expect(t, !has_tag)
+	core.discard_response(&untagged)
 }

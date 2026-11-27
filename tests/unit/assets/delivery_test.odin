@@ -155,3 +155,23 @@ prepared_encoding_accepts_a_cheaper_level :: proc(t: ^testing.T) {
 	// Same bytes, same validator: the level changes cost, never identity.
 	testing.expect_value(t, string(quick.tag[:]), string(best.tag[:]))
 }
+
+// A mount names a file's type by its extension, however the extension is spelled.
+@(test)
+content_types_follow_the_extension_in_any_case :: proc(t: ^testing.T) {
+	for item in ([][2]string {
+			{"app.js", "text/javascript; charset=utf-8"},
+			{"APP.JS", "text/javascript; charset=utf-8"},
+			{"entry.Mjs", "text/javascript; charset=utf-8"},
+			{"theme.CSS", "text/css; charset=utf-8"},
+			{"Logo.PNG", "image/png"},
+			{"photo.JPeG", "image/jpeg"},
+			{"icon.SVG", "image/svg+xml"},
+			{"module.WASM", "application/wasm"},
+			{"site.webmanifest", "application/manifest+json"},
+			{"README", "application/octet-stream"},
+			{"archive.tar", "application/octet-stream"},
+		}) {
+		testing.expectf(t, asset_content_type(item[0]) == item[1], "%s is %s", item[0], asset_content_type(item[0]))
+	}
+}

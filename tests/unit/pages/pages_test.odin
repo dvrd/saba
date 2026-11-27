@@ -127,3 +127,61 @@ parameterized_page_routes :: proc(t: ^testing.T) {
 	_, ambiguous := pages.prepare_pages(mount, false, allocator)
 	testing.expect(t, !ambiguous)
 }
+
+// Which page answers never depends on the order a directory lists its files.
+@(test)
+page_route_precedence_is_independent_of_listing_order :: proc(t: ^testing.T) {
+	dir, err := os.make_directory_temp("", "saba-precedence-*", context.allocator)
+	assert(err == nil)
+	defer delete(dir)
+	defer os.remove_all(dir)
+	mount := page_fixture(dir)
+	page :: "export default () => null;"
+	names := []string{"docs", "guide", "zeta", "alpha"}
+	// A file and its directory index claim one route; the index wins.
+	for name in names {
+		assert(os.make_directory(fmt.tprintf("%s/%s", dir, name)) == nil)
+		assert(os.write_entire_file(fmt.tprintf("%s/%s.jsx", dir, name), page) == nil)
+		assert(os.write_entire_file(fmt.tprintf("%s/%s/index.jsx", dir, name), page) == nil)
+	}
+	// /shop/[item] and /[section]/cart both match /shop/cart: the earlier literal wins.
+	assert(os.make_directory(fmt.tprintf("%s/shop", dir)) == nil)
+	assert(os.make_directory(fmt.tprintf("%s/[section]", dir)) == nil)
+	assert(os.write_entire_file(fmt.tprintf("%s/shop/[item].jsx", dir), page) == nil)
+	assert(os.write_entire_file(fmt.tprintf("%s/[section]/cart.jsx", dir), page) == nil)
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
+	defer mem.dynamic_arena_destroy(&arena)
+	allocator := mem.dynamic_arena_allocator(&arena)
+	context.logger = log.nil_logger() // Each duplicate route is reported.
+
+	for development in ([]bool{false, true}) {
+		cache, ok := pages.prepare_pages(mount, development, allocator)
+		if !testing.expect(t, ok) {
+			return
+		}
+		request := core.Request {
+			method    = "GET",
+			allocator = allocator,
+		}
+		for name in names {
+			request.path = fmt.tprintf("/%s", name)
+			reply, found := pages.serve_prepared_pages(&request, cache, development)
+			testing.expectf(
+				t,
+				found && strings.contains(string(reply.body), fmt.tprintf(`data-page="/m/%s/index.js"`, name)),
+				"/%s is not its directory index (development %v)",
+				name,
+				development,
+			)
+		}
+		request.path = "/shop/cart"
+		reply, found := pages.serve_prepared_pages(&request, cache, development)
+		testing.expect(t, found && strings.contains(string(reply.body), `data-route="/shop/:item"`))
+		testing.expect_value(t, core.path_value(&request, "item"), "cart")
+		request.path = "/home/cart"
+		other, matched := pages.serve_prepared_pages(&request, cache, development)
+		testing.expect(t, matched && strings.contains(string(other.body), `data-route="/:section/cart"`))
+		testing.expect_value(t, core.path_value(&request, "section"), "home")
+	}
+}

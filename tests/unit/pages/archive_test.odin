@@ -394,6 +394,38 @@ archives_expire_by_age_and_count :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(listing), pages.DEFAULT_ARCHIVE_MAX_COUNT + 1)
 }
 
+// A retirement stamped ahead of this clock restarts its period here, so a
+// writer with a skewed clock cannot keep a generation forever.
+@(test)
+future_retirement_restarts_at_this_build :: proc(t: ^testing.T) {
+	fixture := delivery_fixture()
+	defer delivery_destroy(&fixture)
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
+	defer mem.dynamic_arena_destroy(&arena)
+	allocator := mem.dynamic_arena_allocator(&arena)
+	assert(os.make_directory(fixture.archive) == nil)
+	now := time.to_unix_seconds(time.now())
+	delivery_archive(fixture, "ahead", now + 365 * 24 * 3600, "export default 'ahead'")
+	fixture.mount.templates.archive_retention = {
+		max_age   = time.Hour,
+		max_count = -1,
+	}
+	cache, ok := delivery_prepare(fixture, allocator)
+	if !testing.expect(t, ok) {
+		return
+	}
+	testing.expect_value(t, delivery_get(cache, "/__saba/build/ahead/ui/old.js", allocator).status, core.HTTP_Status.OK)
+	stamped, stored := delivery_archived(fixture, "ahead")
+	testing.expectf(
+		t,
+		stored && stamped.retired_at >= now && stamped.retired_at <= now + 60,
+		"retired_at %d, now %d",
+		stamped.retired_at,
+		now,
+	)
+}
+
 // Findings 4, 5 and 12: what a build asset response says about itself.
 @(test)
 build_responses_declare_type_and_cache_policy :: proc(t: ^testing.T) {
@@ -411,6 +443,17 @@ build_responses_declare_type_and_cache_policy :: proc(t: ^testing.T) {
 	testing.expect_value(t, hit.status, core.HTTP_Status.OK)
 	testing.expect_value(t, field(hit, "X-Content-Type-Options"), "nosniff")
 	testing.expect_value(t, field(hit, "Content-Type"), "text/javascript; charset=utf-8")
+	// HEAD describes the same representation without a body to send.
+	head_request := core.Request {
+		method    = "HEAD",
+		path      = fmt.tprintf("/__saba/build/%s/ui/data.js", cache.build.id),
+		allocator = allocator,
+	}
+	head, head_matched := pages.serve_build_asset(&head_request, cache)
+	testing.expect(t, head_matched)
+	testing.expect_value(t, head.status, core.HTTP_Status.OK)
+	testing.expect_value(t, field(head, "ETag"), field(hit, "ETag"))
+	testing.expect_value(t, field(head, "Cache-Control"), "public, max-age=31536000, immutable")
 	for path in ([]string {
 			"/__saba/build/0123456789abcdef0123456789abcdef/ui/data.js",
 			fmt.tprintf("/__saba/build/%s/ui/missing.js", cache.build.id),

@@ -150,3 +150,32 @@ prepared_metadata_is_inline_and_response_validator_is_owned :: proc(t: ^testing.
 		`"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"`,
 	)
 }
+// A 304 carries the validator, policy and selectors of the 200 it stands for,
+// but none of the content metadata of a body it does not send.
+@(test)
+not_modified_omits_content_metadata :: proc(t: ^testing.T) {
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
+	defer mem.dynamic_arena_destroy(&arena)
+	request := Request {
+		allocator = mem.dynamic_arena_allocator(&arena),
+		method    = "GET",
+	}
+	prepared := prepare_representation(transmute([]u8)string("abc"), "text/plain")
+	tag := string(prepared.tag[:])
+
+	for method in ([]string{"GET", "HEAD"}) {
+		request.method = method
+		request.headers = {{"If-None-Match", tag}}
+		unchanged := prepared_representation_response(&request, &prepared)
+		testing.expect_value(t, unchanged.status, core.HTTP_Status.Not_Modified)
+		validator, _ := encoding_field(unchanged, "ETag")
+		testing.expect_value(t, validator, tag)
+		policy, _ := encoding_field(unchanged, "Cache-Control")
+		testing.expect_value(t, policy, "no-cache")
+		for name in ([]string{"Content-Type", "Content-Encoding", "X-Content-Type-Options"}) {
+			_, present := encoding_field(unchanged, name)
+			testing.expectf(t, !present, "%s 304 carries %s", method, name)
+		}
+	}
+}

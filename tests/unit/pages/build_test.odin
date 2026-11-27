@@ -276,3 +276,112 @@ compiled_documents_keep_their_generation_and_language :: proc(t: ^testing.T) {
 		core.HTTP_Status.Unauthorized,
 	)
 }
+
+// A negotiated document falls back to its first variant, and its caching
+// follows its declaration: no-store with Vary: * until selectors are declared,
+// public revalidation without authorize, and never a validator in development.
+@(test)
+compiled_documents_fall_back_to_their_default_and_follow_their_policy :: proc(t: ^testing.T) {
+	fixture := delivery_fixture()
+	defer delivery_destroy(&fixture)
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
+	defer mem.dynamic_arena_destroy(&arena)
+	allocator := mem.dynamic_arena_allocator(&arena)
+	delivery_write(fmt.tprintf("%s/hola.jsx", fixture.work), delivery_page("Hola"))
+	variants := []pages.Template_Variant {
+		fixture.mount.templates.pages[0].variants[0], // "en", the default
+		{
+			language = "es",
+			module_url = "/ui/hola.js",
+			source_file = fmt.tprintf("%s/hola.jsx", fixture.work),
+			recovery_label = `Recargar "ya" <ahora>`,
+		},
+	}
+	compiled := []pages.Compiled_Page {
+		{
+			path = "/",
+			variants = variants,
+			language = proc(request: ^core.Request) -> string {
+				return core.header_value(request, "Accept-Language")
+			},
+		},
+	}
+	negotiated := fixture
+	negotiated.mount.templates.pages = compiled
+	cache, ok := delivery_prepare(negotiated, allocator)
+	if !testing.expect(t, ok) {
+		return
+	}
+	doc := cache.build.documents["/"]
+	request := core.Request {
+		method    = "GET",
+		path      = "/",
+		allocator = allocator,
+	}
+
+	for item in ([]struct {
+			accept, title: string,
+		}{{"es", "Hola"}, {"en", "Alpha"}, {"fr", "Alpha"}, {"", "Alpha"}}) {
+		request.headers = {{"Accept-Language", item.accept}}
+		reply := pages.serve_document(&request, doc)
+		testing.expect_value(t, reply.status, core.HTTP_Status.OK)
+		testing.expectf(
+			t,
+			strings.contains(string(reply.body), fmt.tprintf("<title>%s</title>", item.title)),
+			"%q did not select %s",
+			item.accept,
+			item.title,
+		)
+		// Undeclared negotiation may read any header: nothing is shared or stored.
+		testing.expect_value(t, field(reply, "Vary"), "*")
+		testing.expect_value(t, field(reply, "Cache-Control"), "no-store")
+		testing.expect_value(t, field(reply, "ETag"), "")
+	}
+	// Text from the configuration is escaped where it lands in the document.
+	request.headers = {{"Accept-Language", "es"}}
+	escaped := string(pages.serve_document(&request, doc).body)
+	testing.expectf(t, strings.contains(escaped, "Recargar &quot;ya&quot; &lt;ahora&gt;"), "label not escaped in %s", escaped)
+
+	doc.config.revalidate = true
+	doc.config.vary = "Accept-Language"
+	spanish_tag := doc.variants["es"].tag
+	spanish := string(spanish_tag[:])
+	public := pages.serve_document(&request, doc)
+	testing.expect_value(t, field(public, "Cache-Control"), "no-cache")
+	testing.expect_value(t, field(public, "ETag"), spanish)
+	testing.expect(t, strings.has_prefix(field(public, "Vary"), "Accept-Language"))
+	request.headers = {{"Accept-Language", "es"}, {"If-None-Match", spanish}}
+	testing.expect_value(t, pages.serve_document(&request, doc).status, core.HTTP_Status.Not_Modified)
+
+	// Development always sends fresh bytes, whatever the page declares.
+	development := pages.serve_document(&request, doc, true)
+	testing.expect_value(t, development.status, core.HTTP_Status.OK)
+	testing.expect_value(t, field(development, "Cache-Control"), "no-store")
+	testing.expect_value(t, field(development, "ETag"), "")
+	testing.expect(t, strings.contains(string(development.body), "<title>Hola</title>"))
+}
+
+// Only a listed https:// URL stays external; anything else must resolve in the build.
+@(test)
+immutable_externals_must_be_https :: proc(t: ^testing.T) {
+	arena: mem.Dynamic_Arena
+	mem.dynamic_arena_init(&arena)
+	defer mem.dynamic_arena_destroy(&arena)
+	allocator := mem.dynamic_arena_allocator(&arena)
+	linker := pages.Module_Linker {
+		prefix    = "/__saba/build/g1",
+		input     = make(map[string]string, allocator),
+		output    = make(map[string]string, allocator),
+		startup   = make(map[string][]string, allocator),
+		allocator = allocator,
+		externals = {"https://cdn.example.com/lib.js", "http://cdn.example.com/plain.js"},
+	}
+	linker.input["/ui/secure.js"] = `import lib from 'https://cdn.example.com/lib.js'; export default lib`
+	linker.input["/ui/plain.js"] = `import lib from 'http://cdn.example.com/plain.js'; export default lib`
+	if testing.expect(t, pages.link_module(&linker, "/ui/secure.js"), "a listed https:// import did not link") {
+		testing.expect(t, strings.contains(linker.output["/ui/secure.js"], `"https://cdn.example.com/lib.js"`))
+	}
+	context.logger = log.nil_logger() // The refusal is reported.
+	testing.expect(t, !pages.link_module(&linker, "/ui/plain.js"), "a plain http:// import was linked as external")
+}

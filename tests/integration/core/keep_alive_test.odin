@@ -75,6 +75,32 @@ keep_alive_close_tokens_caps_and_wire_policy :: proc(t: ^testing.T) {
 	testing.expect(t, valid && strings.contains(string(head), "Connection: close\r\n"))
 }
 
+// HTTP/1.0 has no persistence unless keep-alive is negotiated, which Saba
+// does not offer, so even "Connection: keep-alive" closes after one exchange.
+@(test)
+keep_alive_http1_0_always_closes :: proc(t: ^testing.T) {
+	plain := Request {
+		version = HTTP_VERSION,
+	}
+	testing.expect(t, !request_wants_close(&plain))
+	legacy := Request {
+		version = HTTP_VERSION_1_0,
+	}
+	testing.expect(t, request_wants_close(&legacy))
+	legacy.headers = []Header{{"Connection", "keep-alive"}}
+	testing.expect(t, request_wants_close(&legacy))
+
+	runtime := Server_Runtime {
+		config = {keep_alive = {enabled = true}},
+	}
+	task := Connection_Task {
+		runtime = &runtime,
+		phase   = .Dispatch,
+		request = legacy,
+	}
+	testing.expect(t, !response_can_reuse(&task, .OK))
+}
+
 @(test)
 keep_alive_idle_list_is_bounded_and_removal_is_idempotent :: proc(t: ^testing.T) {
 	runtime: Server_Runtime

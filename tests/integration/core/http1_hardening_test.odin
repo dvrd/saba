@@ -35,6 +35,9 @@ h1_handler :: proc(data: rawptr, _: ^Connection, request: ^Request) -> Response 
 		}
 		text := fmt.aprintf("%d %d", len(request.body), sum, allocator = request.allocator)
 		return make_response(request, .OK, {{"Content-Type", "application/octet-stream"}}, transmute([]u8)text)
+	case "/length":
+		text := fmt.aprintf("%d %d", request.content_length, len(request.body), allocator = request.allocator)
+		return make_response(request, .OK, {{"Content-Type", "text/plain"}}, transmute([]u8)text)
 	case "/big":
 		return make_response(request, .OK, {{"Content-Type", "application/octet-stream"}}, fixture.big)
 	case "/bad-value":
@@ -910,4 +913,45 @@ blocking_helpers_finish_before_they_consult_an_expired_deadline :: proc(t: ^test
 	testing.expect_value(t, write_error, nil)
 	_, write_error = write_connection(&conn, buffer[:])
 	testing.expect_value(t, write_error, net.TCP_Send_Error.Timeout)
+}
+
+// A handler sees a chunked body's decoded length as its Content-Length, as
+// though the peer had sent one.
+@(test)
+loopback_chunked_body_reports_its_decoded_length :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	fixture: H1_Fixture
+	endpoint, ready := h1_start(t, &fixture, {})
+	defer h1_stop(&fixture)
+
+	if !testing.expect(t, ready) {
+		return
+	}
+
+	wire := h1_exchange(
+		endpoint,
+		"POST /length HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n3\r\nabc\r\n0\r\n\r\n",
+	)
+	defer delete(wire)
+	testing.expect(t, strings.has_prefix(string(wire[:]), "HTTP/1.1 200"))
+	testing.expectf(t, strings.has_suffix(string(wire[:]), "\r\n\r\n8 8"), "%q", string(wire[:]))
+}
+
+// "100 Continue" invites a body the peer is holding back. With nothing to
+// send there is nothing to invite: the final response comes first.
+@(test)
+loopback_expect_continue_without_a_body_gets_only_the_final_response :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 30 * time.Second)
+	fixture: H1_Fixture
+	endpoint, ready := h1_start(t, &fixture, {})
+	defer h1_stop(&fixture)
+
+	if !testing.expect(t, ready) {
+		return
+	}
+
+	wire := h1_exchange(endpoint, "POST /sum HTTP/1.1\r\nHost: a\r\nExpect: 100-continue\r\nContent-Length: 0\r\n\r\n")
+	defer delete(wire)
+	testing.expectf(t, strings.has_prefix(string(wire[:]), "HTTP/1.1 200"), "%q", string(wire[:]))
+	testing.expect(t, strings.has_suffix(string(wire[:]), "0 0"))
 }

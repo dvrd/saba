@@ -119,6 +119,9 @@ timeouts_preserve_defaults_and_validate_overrides :: proc(t: ^testing.T) {
 	testing.expect_value(t, defaults.large_body, 30 * time.Second)
 	testing.expect_value(t, defaults.response, 5 * time.Second)
 	testing.expect_value(t, defaults.idle, 5 * time.Second)
+	// A body past the small-body limit gets the longer default budget.
+	testing.expect_value(t, body_timeout(defaults, REQUEST_BODY_LIMIT), 5 * time.Second)
+	testing.expect_value(t, body_timeout(defaults, REQUEST_BODY_LIMIT + 1), 30 * time.Second)
 	testing.expect(t, timeouts_valid({}))
 	testing.expect(t, !timeouts_valid({header = -1}))
 	testing.expect(t, !timeouts_valid({response = MAX_SERVER_TIMEOUT + 1}))

@@ -95,6 +95,29 @@ h2w_handler :: proc(data: rawptr, conn: ^Connection, request: ^Request) -> Respo
 		return {status = .OK, body = transmute([]u8)string("body"), trailers = trailers}
 	case "/echo":
 		return {status = .OK, body = request.body}
+	case "/empty":
+		return {status = .No_Content}
+	case "/close":
+		return {status = .OK, body = transmute([]u8)string("bye"), close_connection = true}
+	case "/switch":
+		return {status = .Switching_Protocols}
+	case "/hop":
+		headers := make([]Header, 5, request.allocator)
+		headers[0] = {"Connection", "close"}
+		headers[1] = {"Keep-Alive", "timeout=5"}
+		headers[2] = {"Transfer-Encoding", "chunked"}
+		headers[3] = {"Upgrade", "h2c"}
+		headers[4] = {"X-Kept", "yes"}
+		return {status = .OK, headers = headers, body = transmute([]u8)string("hop")}
+	case "/redirect-tunnel":
+		return {status = .Found, upgrade = {data = state, resume = h2w_tunnel, drop = proc(_: rawptr) {}}}
+	case "/trailer-echo":
+		for trailer in request.trailers {
+			if trailer.name == "x-checksum" {
+				return {status = .OK, body = transmute([]u8)trailer.value}
+			}
+		}
+		return {status = .OK, body = transmute([]u8)string("no trailer")}
 	}
 
 	return {status = .OK, body = transmute([]u8)string("ok")}

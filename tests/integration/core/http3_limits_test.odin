@@ -237,6 +237,9 @@ http3_limits_resolve_to_production_defaults :: proc(t: ^testing.T) {
 	testing.expect_value(t, limits.max_request_field_bytes, http3.REQUEST_FIELD_BYTES)
 	testing.expect_value(t, limits.max_connections_per_address, HTTP3_CONNECTIONS_PER_ADDRESS)
 	testing.expect_value(t, limits.retry_above, 0)
+	// A per-address limit of the whole table or more is lifted; one below it binds.
+	testing.expect_value(t, http3_limits({max_connections = 16, max_connections_per_address = 16}).max_connections_per_address, 0)
+	testing.expect_value(t, http3_limits({max_connections = 16, max_connections_per_address = 15}).max_connections_per_address, 15)
 
 	tokens: quic.Retry_Tokens
 	config.retry = &tokens

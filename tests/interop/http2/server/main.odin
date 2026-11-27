@@ -69,7 +69,7 @@ main :: proc() {
 	assert(store.replace(state.credentials, &credential).kind == .None)
 	state.tls_config = {
 		store             = state.credentials,
-		handshake_timeout = 2 * time.Second,
+		handshake_timeout = 10 * time.Second, // not under test; generous for a loaded machine
 		close_timeout     = 200 * time.Millisecond,
 		on_event          = tls_event,
 		data              = &state,

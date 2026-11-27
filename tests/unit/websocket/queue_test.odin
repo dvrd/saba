@@ -163,3 +163,26 @@ freed_output_credit_notifies_once_and_allows_callback_to_enqueue :: proc(t: ^tes
 	testing.expect_value(t, probe.calls, 1)
 	testing.expect_value(t, session.output_count, 0)
 }
+
+// A Close payload holds 125 bytes: the two-byte code and a 123-byte reason.
+@(test)
+application_close_accepts_the_longest_reason_a_control_frame_holds :: proc(t: ^testing.T) {
+	session, scope := ws79_queue_fixture({})
+	defer budget.release_scope(&scope)
+	defer drop_session(session)
+	io := IO {
+		_session = session,
+		_active  = true,
+	}
+	reason: [124]u8
+	for &b in reason {
+		b = 'r'
+	}
+
+	testing.expect_value(t, close(&io, 1000, string(reason[:])).kind, Error_Kind.Invalid_Close)
+	testing.expect(t, !session.close_requested)
+	testing.expect_value(t, close(&io, 1000, string(reason[:123])).kind, Error_Kind.None)
+	testing.expect(t, session.close_requested)
+	testing.expect_value(t, session.close_size, 125)
+	testing.expect_value(t, session.event.code, u16(1000))
+}

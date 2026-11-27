@@ -20,8 +20,8 @@ CERTIFICATE :: "tests/fixtures/tls/localhost.pem"
 KEY :: "tests/fixtures/tls/rsa2048.pem"
 
 Seen :: struct {
-	method, path, body: string,
-	signed:             bool,
+	method, path, body, content_type: string,
+	signed:                           bool,
 }
 
 Fake_S3 :: struct {
@@ -44,6 +44,7 @@ record :: proc(data: rawptr, _: ^core.Connection, request: ^core.Request) -> cor
 			method = strings.clone(request.method, fake.seen.allocator),
 			path = strings.clone(request.path, fake.seen.allocator),
 			body = strings.clone(string(request.body), fake.seen.allocator),
+			content_type = strings.clone(core.header_value(request, "Content-Type"), fake.seen.allocator),
 			signed = strings.has_prefix(authorization, "AWS4-HMAC-SHA256 Credential=fixture-key/"),
 		},
 	)
@@ -77,6 +78,7 @@ legacy_calls_delegate_to_aws :: proc(t: ^testing.T) {
 			delete(seen.method)
 			delete(seen.path)
 			delete(seen.body)
+			delete(seen.content_type)
 		}
 		delete(fake.seen)
 	}
@@ -140,7 +142,12 @@ legacy_calls_delegate_to_aws :: proc(t: ^testing.T) {
 
 	sync.lock(&fake.mutex)
 	defer sync.unlock(&fake.mutex)
-	expected := []Seen{{"PUT", "/object", "payload", true}, {"PUT", "/object", "payload", true}, {"DELETE", "/object", "", true}}
+	// The content type is part of what was signed and sent, for a body and a file.
+	expected := []Seen {
+		{"PUT", "/object", "payload", "text/plain", true},
+		{"PUT", "/object", "payload", "text/plain", true},
+		{"DELETE", "/object", "", "", true},
+	}
 	if !testing.expectf(t, len(fake.seen) == len(expected), "S3 saw %v", fake.seen[:]) {
 		return
 	}

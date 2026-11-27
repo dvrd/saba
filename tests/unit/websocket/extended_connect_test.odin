@@ -98,3 +98,22 @@ http3_extended_connect_uses_shared_websocket_validation :: proc(t: ^testing.T) {
 	_, error = request_fields(&request)
 	testing.expect_value(t, error.kind, .Invalid_Request)
 }
+
+// Extended CONNECT has no key, so the version field is the one RFC 8441 check
+// left: a missing or other version is refused like an HTTP/1.1 upgrade's.
+@(test)
+extended_connect_requires_websocket_version_13 :: proc(t: ^testing.T) {
+	for version in ([]string{"", "12", "8"}) {
+		headers := [2]core.Header{{"host", "example.test"}, {"sec-websocket-version", version}}
+		count := 2 if version != "" else 1
+		request := core.Request {
+			method   = "CONNECT",
+			version  = "HTTP/2",
+			protocol = "websocket",
+			headers  = headers[:count],
+		}
+		_, error := request_fields(&request)
+		testing.expectf(t, error.kind == .Invalid_Request, "version %q: %v", version, error.kind)
+		testing.expect_value(t, error.status, core.HTTP_Status.Bad_Request)
+	}
+}

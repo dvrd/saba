@@ -483,3 +483,160 @@ refused_detach_leaves_the_dispatcher_serving :: proc(t: ^testing.T) {
 	assert(surf.client_destroy(&f.client).kind == .None)
 	assert(async.destroy(&f.runtime).kind == .None)
 }
+
+// A request cancelled for any reason other than its deadline (here the peer
+// left) was not the upstream's fault: 503, not 504.
+@(test)
+cancelled_request_answers_service_unavailable :: proc(t: ^testing.T) {
+	f: Fixture
+	attach(&f)
+	cancellation, created := server.new_request_context(nil, {}, rt.heap_allocator())
+	assert(created)
+	server.cancel_request_context(cancellation, .Peer_Closed)
+	request := server.Request {
+		cancellation = cancellation,
+	}
+	outbound := upstream.response(
+		&f.dispatcher,
+		&request,
+		{method = .GET, url = "http://127.0.0.1:1/unused"},
+		copy_body,
+	)
+	testing.expect_value(t, outbound.status, server.HTTP_Status.Service_Unavailable)
+	testing.expect(t, outbound.deferred.poll == nil)
+	server.release_request_context(&request.cancellation)
+	retire(&f)
+	testing.expect(t, upstream.detach(&f.dispatcher))
+	testing.expect_value(t, surf.client_destroy(&f.client).kind, .None)
+	testing.expect_value(t, async.destroy(&f.runtime).kind, .None)
+}
+
+// A request the client refuses to submit returns its job lease at once.
+@(test)
+refused_submission_returns_its_budget_lease :: proc(t: ^testing.T) {
+	f: Fixture
+	attach(&f)
+	root, created := budget.create_root({jobs = 1, bytes = 4096})
+	assert(created == .None)
+	defer budget.release_scope(&root)
+	assert(surf.client_close(&f.client).kind == .None)
+	request := server.Request {
+		resources = root,
+	}
+	outbound := upstream.response(
+		&f.dispatcher,
+		&request,
+		{method = .GET, url = "http://127.0.0.1:1/unused"},
+		copy_body,
+	)
+	testing.expect_value(t, outbound.status, server.HTTP_Status.Service_Unavailable)
+	testing.expect(t, outbound.deferred.poll == nil)
+	view, error := budget.snapshot(root)
+	testing.expect_value(t, error, .None)
+	testing.expect_value(t, view.used.jobs, 0)
+	testing.expect_value(t, view.used.bytes, 0)
+	retire(&f)
+	testing.expect(t, upstream.detach(&f.dispatcher))
+	testing.expect_value(t, surf.client_destroy(&f.client).kind, .None)
+	testing.expect_value(t, async.destroy(&f.runtime).kind, .None)
+}
+
+// Accepts connections and never answers them.
+silent_listener :: proc() -> (net.TCP_Socket, net.Endpoint) {
+	listener, error := net.listen_tcp({address = net.IP4_Loopback, port = 0})
+	assert(error == nil)
+	endpoint, bound := net.bound_endpoint(listener)
+	assert(bound == nil)
+	return listener, endpoint
+}
+
+// Waits until the dispatcher has published every submitted request.
+wait_for_completions :: proc(f: ^Fixture, within: time.Duration) -> bool {
+	until := time.tick_add(time.tick_now(), within)
+	for time.tick_diff(time.tick_now(), until) > 0 {
+		sync.lock(&f.dispatcher.mu)
+		settled := f.dispatcher.pending == 0
+		sync.unlock(&f.dispatcher.mu)
+		if settled {
+			return true
+		}
+		time.sleep(time.Millisecond)
+	}
+	return false
+}
+
+// The handler's own deadline bounds the upstream call even when the
+// application passed a longer timeout: the shorter of the two wins.
+@(test)
+inherited_deadline_shorter_than_the_timeout_bounds_the_upstream :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 12 * time.Second)
+	f: Fixture
+	attach(&f, 10 * time.Second)
+	assert(async.start(&f.runtime).kind == .None)
+	listener, endpoint := silent_listener()
+	defer net.close(listener)
+	cancellation, created := server.new_request_context(
+		nil,
+		time.tick_add(time.tick_now(), 200 * time.Millisecond),
+		rt.heap_allocator(),
+	)
+	assert(created)
+	request := server.Request {
+		cancellation = cancellation,
+	}
+	buffer: [80]u8
+	url := fmt.bprintf(buffer[:], "http://127.0.0.1:%d/silent", endpoint.port)
+	outbound := upstream.response(&f.dispatcher, &request, {method = .GET, url = url}, copy_body, 10 * time.Second)
+	if testing.expect(t, outbound.deferred.poll != nil) {
+		testing.expect(t, wait_for_completions(&f, 3 * time.Second), "the upstream outlived the request deadline")
+		io := server.Deferred_IO {
+			allocator = context.allocator,
+		}
+		answer, step := outbound.deferred.poll(outbound.deferred.data, &io)
+		testing.expect_value(t, step, server.Deferred_Step.Ready)
+		testing.expect_value(t, answer.status, server.HTTP_Status.Gateway_Timeout)
+		server.discard_response(&outbound)
+	}
+	server.release_request_context(&request.cancellation)
+	retire(&f, started = true)
+	testing.expect(t, upstream.detach(&f.dispatcher))
+	testing.expect_value(t, surf.client_destroy(&f.client).kind, .None)
+	testing.expect_value(t, async.destroy(&f.runtime).kind, .None)
+}
+
+// Once the dispatcher has stopped (runtime shutdown cancelled its task), a
+// request still waiting on it is answered 503: the gateway is going away, the
+// upstream did not fail.
+@(test)
+stopped_dispatcher_answers_a_waiting_request_service_unavailable :: proc(t: ^testing.T) {
+	testing.set_fail_timeout(t, 12 * time.Second)
+	f: Fixture
+	attach(&f, 10 * time.Second)
+	assert(async.start(&f.runtime).kind == .None)
+	listener, endpoint := silent_listener()
+	defer net.close(listener)
+	request: server.Request
+	buffer: [80]u8
+	url := fmt.bprintf(buffer[:], "http://127.0.0.1:%d/silent", endpoint.port)
+	outbound := upstream.response(&f.dispatcher, &request, {method = .GET, url = url}, copy_body)
+	if testing.expect(t, outbound.deferred.poll != nil) {
+		// What stop_dispatch records when the runtime cancels the task.
+		sync.lock(&f.dispatcher.mu)
+		f.dispatcher.stopped = true
+		sync.unlock(&f.dispatcher.mu)
+		io := server.Deferred_IO {
+			allocator = context.allocator,
+		}
+		answer, step := outbound.deferred.poll(outbound.deferred.data, &io)
+		testing.expect_value(t, step, server.Deferred_Step.Ready)
+		testing.expect_value(t, answer.status, server.HTTP_Status.Service_Unavailable)
+		sync.lock(&f.dispatcher.mu)
+		f.dispatcher.stopped = false
+		sync.unlock(&f.dispatcher.mu)
+		server.discard_response(&outbound)
+	}
+	retire(&f, started = true)
+	testing.expect(t, upstream.detach(&f.dispatcher))
+	testing.expect_value(t, surf.client_destroy(&f.client).kind, .None)
+	testing.expect_value(t, async.destroy(&f.runtime).kind, .None)
+}

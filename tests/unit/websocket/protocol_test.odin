@@ -1,6 +1,7 @@
 package saba_websocket
 
 import core "../core"
+import rt "base:runtime"
 import async "shared:async"
 import codec "shared:async/websocket"
 import budget "shared:async/budget"
@@ -448,4 +449,66 @@ data_frame_after_sent_close_is_dropped_and_the_peer_close_still_completes :: pro
 	testing.expect(t, session.peer_closed)
 	testing.expect_value(t, session.event.peer_code, u16(1000))
 	testing.expect_value(t, session.event.reason, .Application_Close)
+}
+
+ws_read_timeout :: proc(_: rawptr, _: []u8, _: async.Deadline) -> (int, async.Error) {
+	return 0, {kind = .Timeout}
+}
+
+// A peer that goes quiet past idle_timeout is closed with 1001 Going Away
+// (RFC 6455 7.4.1), and the event keeps the timeout as its reason.
+@(test)
+idle_read_timeout_closes_with_going_away :: proc(t: ^testing.T) {
+	runtime: async.Runtime
+	conn: core.Connection
+	transport: core.Upgrade_IO
+	session, scope, io := ws79_frame_fixture(t, {}, &runtime, &transport, &conn)
+	defer assert(async.destroy(&runtime).kind == .None)
+	defer budget.release_scope(&scope)
+	defer drop_session(session)
+	transport.stream_read = ws_read_timeout
+
+	testing.expect_value(t, read_step(session, &io), Step.Progress)
+	testing.expect(t, session.close_requested && session.abort_after_close)
+	testing.expect_value(t, session.event.code, u16(1001))
+	testing.expect_value(t, session.event.reason, Close_Reason.Timeout)
+	testing.expect_value(t, session.event.transport.kind, async.Error_Kind.Timeout)
+	testing.expect_value(t, session.close_payload[0], u8(0x03))
+	testing.expect_value(t, session.close_payload[1], u8(0xe9))
+}
+
+// A server that stops closes each open session with 1001 Going Away before it
+// leaves, instead of a normal 1000 the peer could take for an orderly end.
+@(test)
+server_shutdown_closes_open_session_with_going_away :: proc(t: ^testing.T) {
+	runtime: async.Runtime
+	conn: core.Connection
+	transport: core.Upgrade_IO
+	session, scope, _ := ws79_frame_fixture(t, {}, &runtime, &transport, &conn)
+	defer assert(async.destroy(&runtime).kind == .None)
+	defer budget.release_scope(&scope)
+	defer drop_session(session)
+	stopping, allocated := new(core.Server_Cancellation, rt.heap_allocator())
+	assert(allocated == nil)
+	stopping^ = {
+		references = 1,
+		stopping   = true,
+	}
+	defer core.release_server_cancellation(stopping)
+	retained, created := core.new_request_context(stopping, {}, rt.heap_allocator())
+	assert(created)
+	session.request_context = retained
+	sink: WS_Ping_Sink
+	transport.stream_data = &sink
+	transport.stream_write = ws_ping_capture
+
+	testing.expect_value(t, resume_session(session, &transport), async.Resume_Result.Done)
+	testing.expect(t, session.close_sent)
+	testing.expect_value(t, session.event.reason, Close_Reason.Shutdown)
+	testing.expect_value(t, session.event.code, u16(1001))
+	testing.expect_value(t, sink.size, 4)
+	testing.expect_value(t, sink.bytes[0], u8(0x88))
+	testing.expect_value(t, sink.bytes[1], u8(2))
+	testing.expect_value(t, sink.bytes[2], u8(0x03))
+	testing.expect_value(t, sink.bytes[3], u8(0xe9))
 }

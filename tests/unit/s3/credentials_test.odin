@@ -100,3 +100,33 @@ system_clock_reads_the_wall_clock :: proc(t: ^testing.T) {
 	now := s3.credential_clock_system(nil)
 	testing.expect(t, time.diff(before, now) >= 0 && time.diff(before, now) < time.Minute)
 }
+
+// Temporary credentials (a role or the instance metadata) are only valid with
+// their session token, so the view keeps it and the signed request sends it.
+@(test)
+lease_view_keeps_the_session_token_for_signing :: proc(t: ^testing.T) {
+	lease := s3.Credential_Lease {
+		source        = .Environment,
+		access_key    = "fixture-key",
+		secret_key    = "fixture-secret",
+		session_token = "fixture-token",
+	}
+	credentials := s3.lease_credentials(lease)
+	testing.expect_value(t, credentials.access_key, "fixture-key")
+	testing.expect_value(t, credentials.secret_key, "fixture-secret")
+	testing.expect_value(t, credentials.session_token, "fixture-token")
+
+	config := s3.S3_Config {
+		bucket = "examplebucket",
+		region = "us-east-1",
+	}
+	request, signed := s3.s3_delete_request(config, credentials, "object", fixed_clock(nil))
+	testing.expect(t, signed)
+	token := ""
+	for header in request.headers {
+		if strings.equal_fold(header.name, "x-amz-security-token") {
+			token = header.value
+		}
+	}
+	testing.expect_value(t, token, "fixture-token")
+}

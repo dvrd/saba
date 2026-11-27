@@ -13,7 +13,7 @@ import "core:sys/posix"
 import "core:time"
 import curl "../c/curl"
 import openssl "../c/openssl"
-import peer "../peer"
+import harness "../harness"
 
 Client :: struct {
 	handle: ^curl.CURL,
@@ -94,18 +94,15 @@ write_header :: proc "c" (buffer: [^]u8, size, count: c.size_t, user: rawptr) ->
 	return size * count
 }
 
-// curl's sockets are created under the peer's descriptor lock and marked
+// curl's sockets are created under the harness's descriptor lock and marked
 // close-on-exec, so no program a suite starts inherits one.
 @(private)
 open_socket :: proc "c" (user: rawptr, purpose: curl.curlsocktype, address: ^curl.curl_sockaddr) -> curl.curl_socket_t {
 	context = runtime.default_context()
-	sync.lock(&peer.descriptors)
-	defer sync.unlock(&peer.descriptors)
-	fd := posix.socket(posix.AF(address.family), posix.Sock(address.socktype), posix.Protocol(address.protocol))
+	fd := harness.socket(posix.AF(address.family), posix.Sock(address.socktype), posix.Protocol(address.protocol))
 	if fd == -1 {
 		return curl.CURL_SOCKET_BAD
 	}
-	_ = posix.fcntl(fd, .SETFD, i32(posix.FD_CLOEXEC))
 	return curl.curl_socket_t(fd)
 }
 

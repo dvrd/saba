@@ -7,7 +7,9 @@
 //   build.odin    build, build_shared, libraries, suite_libraries
 //   process.odin  start, start_with_input, send_input, expect_line, ready,
 //                 lines_with, await_lines, last_field, transcript, stderr_text,
-//                 running, wait, exited_cleanly, stop
+//                 running, wait, exited_cleanly, stop, execute
+//   descriptors.odin  descriptors, close_on_exec, socket, dial_loopback: no
+//                 program inherits a socket or pipe of a test running beside it
 //   http1.odin    request_wire, dial, connect, send_text, read_head,
 //                 read_response, read_chunked, read_to_close, await_close,
 //                 expect_closed, quiet, reset, and the head and field helpers

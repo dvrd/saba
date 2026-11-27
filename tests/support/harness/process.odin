@@ -72,21 +72,6 @@ launch :: proc(
 	input: ^os.File,
 	ok: bool,
 ) {
-	stdin_read, stdin_write: ^os.File
-	if piped {
-		e0: os.Error
-		stdin_read, stdin_write, e0 = os.pipe()
-		if e0 != nil {
-			testing.expectf(t, false, "could not create a pipe: %v", e0)
-			return nil, nil, false
-		}
-	}
-	stdout_read, stdout_write, e1 := os.pipe()
-	stderr_read, stderr_write, e2 := os.pipe()
-	if e1 != nil || e2 != nil {
-		testing.expectf(t, false, "could not create pipes: %v %v", e1, e2)
-		return nil, nil, false
-	}
 	environment: []string
 	if env != nil {
 		inherited, _ := os.environ(context.temp_allocator)
@@ -95,16 +80,58 @@ launch :: proc(
 		append(&joined, ..env)
 		environment = joined[:]
 	}
-	handle, error := os.process_start(
-		{
-			command = command,
-			env = environment,
-			working_dir = directory,
-			stdin = stdin_read,
-			stdout = stdout_write,
-			stderr = stderr_write,
-		},
-	)
+	error: os.Error
+	p, input, error = spawn(command, environment, directory, piped)
+	if error != nil {
+		testing.expectf(t, false, "could not start %s: %v", command[0], error)
+		return nil, nil, false
+	}
+	return p, input, true
+}
+
+// Starts command with env as its whole environment (nil: this one). The pipes
+// are made and the program forked under descriptors (see descriptors.odin).
+@(private)
+spawn :: proc(
+	command: []string,
+	env: []string,
+	directory: string,
+	piped: bool,
+) -> (
+	p: ^Process,
+	input: ^os.File,
+	error: os.Error,
+) {
+	stdin_read, stdin_write: ^os.File
+	stdout_read, stdout_write, stderr_read, stderr_write: ^os.File
+	handle: os.Process
+	{
+		sync.guard(&descriptors)
+		if piped {
+			stdin_read, stdin_write = os.pipe() or_return
+		}
+		e1, e2: os.Error
+		stdout_read, stdout_write, e1 = os.pipe()
+		stderr_read, stderr_write, e2 = os.pipe()
+		if e1 != nil || e2 != nil {
+			for f in ([]^os.File{stdin_read, stdin_write, stdout_read, stdout_write, stderr_read, stderr_write}) {
+				if f != nil {
+					os.close(f)
+				}
+			}
+			return nil, nil, e1 if e1 != nil else e2
+		}
+		handle, error = os.process_start(
+			{
+				command = command,
+				env = env,
+				working_dir = directory,
+				stdin = stdin_read,
+				stdout = stdout_write,
+				stderr = stderr_write,
+			},
+		)
+	}
 	if stdin_read != nil {
 		os.close(stdin_read)
 	}
@@ -116,8 +143,7 @@ launch :: proc(
 		}
 		os.close(stdout_read)
 		os.close(stderr_read)
-		testing.expectf(t, false, "could not start %s: %v", command[0], error)
-		return nil, nil, false
+		return nil, nil, error
 	}
 	p = new(Process)
 	p.allocator = context.allocator
@@ -128,7 +154,29 @@ launch :: proc(
 	p.output = {stdout_read, stderr_read}
 	p.readers[0] = thread.create_and_start_with_poly_data(p, read_stdout)
 	p.readers[1] = thread.create_and_start_with_poly_data(p, read_stderr)
-	return p, stdin_write, true
+	return p, stdin_write, nil
+}
+
+// Runs command to its end, like os.process_exec, with env as its whole
+// environment (nil: this one), forked like every program the harness starts.
+// The output is in the temporary allocator.
+execute :: proc(command: []string, env: []string = nil) -> (state: os.Process_State, output, errors: string, error: os.Error) {
+	p: ^Process
+	p, _, error = spawn(command, env, "", false)
+	if error != nil {
+		return
+	}
+	defer stop(p)
+	state, error = os.process_wait(p.handle)
+	p.reaped = error == nil
+	for reader in p.readers {
+		thread.join(reader)
+	}
+	b := strings.builder_make(context.temp_allocator)
+	for line in p.lines {
+		fmt.sbprintln(&b, line)
+	}
+	return state, strings.to_string(b), stderr_text(p), error
 }
 
 @(private)
@@ -229,11 +277,13 @@ expect_line :: proc(
 }
 
 // The port of a "<prefix><port>" line, taken with expect_line. prefix is
-// "READY " for suite programs; examples print their own.
+// "READY " for suite programs; examples print their own. A program that exits
+// ends the wait at once, so the bound only guards one that hangs: it is
+// generous because starting a program on a loaded machine can take seconds.
 ready :: proc(
 	t: ^testing.T,
 	p: ^Process,
-	timeout := 10 * time.Second,
+	timeout := 60 * time.Second,
 	prefix := "READY ",
 	loc := #caller_location,
 ) -> (

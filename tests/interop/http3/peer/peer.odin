@@ -8,6 +8,7 @@ package saba_test_h3_peer
 
 import nghttp3 "../../../support/c/nghttp3"
 import ngtcp2 "../../../support/c/ngtcp2"
+import harness "../../../support/harness"
 import "base:runtime"
 import "core:c"
 import "core:crypto"
@@ -213,7 +214,8 @@ connect :: proc(cl: ^Client, config: Config, allocator := context.allocator) -> 
 }
 
 open_socket :: proc(cl: ^Client) -> bool {
-	cl.fd = posix.socket(.INET, .DGRAM)
+	// Close-on-exec: a program another test starts must not hold the port.
+	cl.fd = harness.socket(.INET, .DGRAM)
 	if cl.fd < 0 {
 		return fail(cl, "socket failed")
 	}
@@ -927,7 +929,7 @@ exchange :: proc(
 	from: int,
 	ok: bool,
 ) {
-	fd := posix.socket(.INET, .DGRAM)
+	fd := harness.socket(.INET, .DGRAM)
 	if fd < 0 {
 		return
 	}

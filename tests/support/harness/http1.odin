@@ -31,15 +31,10 @@ request_wire :: proc(path := "/id", method := "GET", body := "", fields := "", a
 }
 
 // A blocking loopback connection whose reads and writes give up after
-// timeout, for a test that expects the connection may be refused.
+// timeout, for a test that expects the connection may be refused. It is
+// close-on-exec, so no program another test starts holds it open.
 dial :: proc(port: int, timeout := 5 * time.Second) -> (net.TCP_Socket, net.Network_Error) {
-	socket, error := net.dial_tcp(net.Endpoint{net.IP4_Loopback, port})
-	if error != nil {
-		return {}, error
-	}
-	_ = net.set_option(socket, .Receive_Timeout, timeout)
-	_ = net.set_option(socket, .Send_Timeout, timeout)
-	return socket, nil
+	return dial_loopback(port, timeout)
 }
 
 // Like dial, failing the test when the connection is refused.

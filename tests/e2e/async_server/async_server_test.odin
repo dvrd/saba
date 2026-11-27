@@ -129,7 +129,7 @@ launch :: proc(
 	}
 	s.open = make([dynamic]net.TCP_Socket, context.temp_allocator)
 	s.process, s.input = harness.start_with_input(t, {binary}, env) or_return
-	s.port, ok = harness.ready(t, s.process, timeout = TIMEOUT, loc = loc)
+	s.port, ok = harness.ready(t, s.process, loc = loc)
 	if !ok {
 		dispose(&s)
 	}
@@ -240,13 +240,11 @@ expect_eof :: proc(t: ^testing.T, conn: net.TCP_Socket, loc := #caller_location)
 exchange :: proc(port: int, path := "/ok", body := "", fragments := false, extra := "") -> (r: harness.Response, failure: string) {
 	method := "POST" if body != "" else "GET"
 	wire := fmt.tprintf("%s %s HTTP/1.1\r\nHost: localhost\r\nContent-Length: %d\r\n%s\r\n%s", method, path, len(body), extra, body)
-	conn, error := net.dial_tcp(net.Endpoint{net.IP4_Loopback, port})
+	conn, error := harness.dial(port, TIMEOUT)
 	if error != nil {
 		return r, fmt.tprintf("connect: %v", error)
 	}
 	defer net.close(conn)
-	_ = net.set_option(conn, .Receive_Timeout, TIMEOUT)
-	_ = net.set_option(conn, .Send_Timeout, TIMEOUT)
 	if fragments {
 		for at := 0; at < len(wire); at += 31 {
 			harness.send_text(conn, wire[at:min(at + 31, len(wire))])

@@ -4,11 +4,9 @@ import "core:fmt"
 import "core:os"
 import "core:strconv"
 import "core:strings"
-import "core:sync"
 import "core:testing"
 import "core:time"
 import harness "../../support/harness"
-import peer "../../support/peer"
 
 SOURCE :: "tests/interop/https/server"
 
@@ -37,15 +35,11 @@ launch :: proc(t: ^testing.T, mode: string, web := "") -> (s: Server, ok: bool) 
 	if web != "" {
 		env = {fmt.tprintf("HTTPS80_WEB=%s", web)}
 	}
-	// A program forked while a peer socket is open would hold it open.
-	{
-		sync.guard(&peer.descriptors)
-		s.p, s.input, ok = harness.start_with_input(
-			t,
-			{binary, mode, harness.fixture("tls/rsa2048-valid.pem"), harness.fixture("tls/rsa2048.pem")},
-			env,
-		)
-	}
+	s.p, s.input, ok = harness.start_with_input(
+		t,
+		{binary, mode, harness.fixture("tls/rsa2048-valid.pem"), harness.fixture("tls/rsa2048.pem")},
+		env,
+	)
 	if !ok {
 		return
 	}

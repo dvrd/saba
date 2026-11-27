@@ -10,10 +10,9 @@ import "core:c/libc"
 import "core:fmt"
 import "core:net"
 import "core:strings"
-import "core:sync"
-import "core:sys/posix"
 import "core:time"
 import openssl "../c/openssl"
+import harness "../harness"
 
 DEFAULT_TIMEOUT :: 10 * time.Second
 DEFAULT_CHUNK :: 16384
@@ -37,11 +36,6 @@ Dial :: struct {
 	// The receive and send timeout of the socket.
 	timeout:      time.Duration,
 }
-
-// Held while a peer socket is created and marked close-on-exec, and while a
-// suite starts a program: a program forked in between would inherit the
-// socket, and the connection would outlive the peer's close.
-descriptors: sync.Mutex
 
 Status :: enum {
 	Ok,
@@ -74,12 +68,10 @@ Dial_Result :: struct {
 }
 
 dial :: proc(port: int, options: Dial) -> (^Conn, Dial_Result) {
-	sync.lock(&descriptors)
-	socket, error := net.dial_tcp(fmt.tprintf("127.0.0.1:%d", port))
-	if error == nil {
-		_ = posix.fcntl(posix.FD(socket), .SETFD, i32(posix.FD_CLOEXEC))
-	}
-	sync.unlock(&descriptors)
+	// Close-on-exec, made under the harness's descriptor lock: no program a
+	// suite starts holds the connection open after the peer closes it.
+	timeout := options.timeout if options.timeout > 0 else DEFAULT_TIMEOUT
+	socket, error := harness.dial_loopback(port, timeout)
 	if error != nil {
 		return nil, {message = fmt.tprintf("dial: %v", error)}
 	}
@@ -87,10 +79,6 @@ dial :: proc(port: int, options: Dial) -> (^Conn, Dial_Result) {
 	conn.socket = socket
 	conn.fragment = options.fragment
 	conn.chunk = options.fragment if options.fragment > 0 else DEFAULT_CHUNK
-	timeout := options.timeout if options.timeout > 0 else DEFAULT_TIMEOUT
-	_ = net.set_option(socket, .TCP_Nodelay, true)
-	_ = net.set_option(socket, .Receive_Timeout, timeout)
-	_ = net.set_option(socket, .Send_Timeout, timeout)
 	if !options.tls {
 		return conn, {ok = true}
 	}

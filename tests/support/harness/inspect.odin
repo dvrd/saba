@@ -14,15 +14,12 @@ tcp_sockets :: proc(p: ^Process) -> (count: int, ok: bool) {
 	if lsof == "" {
 		return 0, false
 	}
-	state, output, _, error := os.process_exec(
-		{command = {lsof, "-nP", "-a", "-p", fmt.tprintf("%d", p.handle.pid), "-iTCP", "-Fn"}},
-		context.temp_allocator,
-	)
+	state, output, _, error := execute({lsof, "-nP", "-a", "-p", fmt.tprintf("%d", p.handle.pid), "-iTCP", "-Fn"})
 	// lsof exits 1 when nothing matches.
 	if error != nil || (state.exit_code != 0 && state.exit_code != 1) {
 		return 0, false
 	}
-	text := string(output)
+	text := output
 	for line in strings.split_lines_iterator(&text) {
 		if strings.has_prefix(line, "n") {
 			count += 1
@@ -40,16 +37,13 @@ threads :: proc(p: ^Process) -> (count: int, ok: bool) {
 		return len(entries), error == nil
 	}
 	// One line per thread after a header; only differences are compared.
-	// Under sh, which must not exec it in its place: process_exec cannot wait
-	// for macOS's setuid ps itself (Permission_Denied).
-	state, output, _, error := os.process_exec(
-		{command = {"/bin/sh", "-c", fmt.tprintf("ps -M -p %d; true", p.handle.pid)}},
-		context.temp_allocator,
-	)
+	// Under sh, which must not exec it in its place: os.process_wait cannot
+	// wait for macOS's setuid ps itself (Permission_Denied).
+	state, output, _, error := execute({"/bin/sh", "-c", fmt.tprintf("ps -M -p %d; true", p.handle.pid)})
 	if error != nil || !state.success {
 		return 0, false
 	}
-	text := string(output)
+	text := output
 	for line in strings.split_lines_iterator(&text) {
 		if strings.trim_space(line) != "" {
 			count += 1

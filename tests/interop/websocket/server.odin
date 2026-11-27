@@ -3,11 +3,9 @@ package saba_interop_websocket_test
 import "core:os"
 import "core:strconv"
 import "core:strings"
-import "core:sync"
 import "core:testing"
 import "core:time"
 import harness "../../support/harness"
-import peer "../../support/peer"
 
 SOURCE :: "tests/fixtures/apps/websocket_policy"
 
@@ -34,14 +32,10 @@ Joined :: struct {
 
 launch :: proc(t: ^testing.T, transport: string) -> (s: Server, ok: bool) {
 	binary := harness.build_shared(t, SOURCE) or_return
-	// A program forked while a peer socket is open would hold it open.
-	{
-		sync.guard(&peer.descriptors)
-		s.p, s.input, ok = harness.start_with_input(
-			t,
-			{binary, transport, harness.fixture("tls/rsa2048-valid.pem"), harness.fixture("tls/rsa2048.pem")},
-		)
-	}
+	s.p, s.input, ok = harness.start_with_input(
+		t,
+		{binary, transport, harness.fixture("tls/rsa2048-valid.pem"), harness.fixture("tls/rsa2048.pem")},
+	)
 	if !ok {
 		return
 	}

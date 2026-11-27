@@ -25,9 +25,9 @@ build :: proc(t: ^testing.T, source, directory: string, flags: ..string) -> (str
 		append(&command, fmt.tprintf("-sanitize:%s", sanitizer))
 	}
 	append(&command, ..flags)
-	result, output, errors, error := os.process_exec({command = command[:]}, context.temp_allocator)
+	result, output, errors, error := execute(command[:])
 	if error != nil || !result.success {
-		testing.expectf(t, false, "could not build %s: %v\n%s%s", source, error, string(output), string(errors))
+		testing.expectf(t, false, "could not build %s: %v\n%s%s", source, error, output, errors)
 		return "", false
 	}
 	return binary, true
@@ -103,7 +103,7 @@ libraries :: proc(modules: []string) -> (flags: []string, missing: string) {
 	}
 	append(&env, fmt.tprintf("PKG_CONFIG_PATH=%s", search))
 	for module in modules {
-		state, _, _, error := os.process_exec({command = {pkg_config, "--exists", module}, env = env[:]}, context.temp_allocator)
+		state, _, _, error := execute({pkg_config, "--exists", module}, env[:])
 		if error != nil || !state.success {
 			return nil, module
 		}
@@ -111,11 +111,11 @@ libraries :: proc(modules: []string) -> (flags: []string, missing: string) {
 	command := make([dynamic]string, context.temp_allocator)
 	append(&command, pkg_config, "--libs")
 	append(&command, ..modules)
-	state, output, _, error := os.process_exec({command = command[:], env = env[:]}, context.temp_allocator)
+	state, output, _, error := execute(command[:], env[:])
 	if error != nil || !state.success {
 		return nil, modules[0]
 	}
-	linker := strings.trim_space(string(output))
+	linker := strings.trim_space(output)
 	result := make([]string, 1, context.temp_allocator)
 	result[0] = fmt.tprintf("-extra-linker-flags:%s", linker)
 	return result, ""

@@ -2,10 +2,8 @@ package saba_interop_http2_test
 
 import "core:os"
 import "core:strings"
-import "core:sync"
 import "core:testing"
 import harness "../../support/harness"
-import peer "../../support/peer"
 
 // A suite program that serves until its stdin closes.
 Server :: struct {
@@ -19,11 +17,7 @@ launch :: proc(t: ^testing.T, source: string, args: ..string) -> (s: Server, ok:
 	command := make([dynamic]string, context.temp_allocator)
 	append(&command, binary)
 	append(&command, ..args)
-	// A program forked while a peer socket is open would hold it open.
-	{
-		sync.guard(&peer.descriptors)
-		s.p, s.input, ok = harness.start_with_input(t, command[:])
-	}
+	s.p, s.input, ok = harness.start_with_input(t, command[:])
 	if !ok {
 		return
 	}

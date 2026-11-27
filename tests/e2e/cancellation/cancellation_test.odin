@@ -62,7 +62,7 @@ exchange :: proc(t: ^testing.T, s: ^Server, path: string) -> (r: harness.Respons
 
 @(test)
 cancellation :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 2 * time.Minute)
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	work := harness.workdir(t, "cancellation")
 	defer os.remove_all(work)
 	binary, built := harness.build(t, SERVER, work)

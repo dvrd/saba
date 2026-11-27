@@ -92,7 +92,7 @@ finish :: proc(worker: ^thread.Thread) {
 
 @(test)
 durable_http_receipts :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 180 * time.Second)
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	work, err := os.make_directory_temp("", "saba-ui-receipts-*", context.temp_allocator)
 	assert(err == nil)
 	defer _ = os.remove_all(work)

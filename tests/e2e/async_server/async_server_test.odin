@@ -22,7 +22,7 @@ ACCEPT :: "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
 
 @(test)
 async_server :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 5 * time.Minute)
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	work := harness.workdir(t, "async-server")
 	defer os.remove_all(work)
 	built, ok := harness.build(t, SOURCE, work)
@@ -729,6 +729,9 @@ growth_failure :: proc(t: ^testing.T, binary, web: string) -> bool {
 	s := launch(t, binary, web, workers = 1, initial = 4, capacity = 16, fail_growth = true) or_return
 	defer dispose(&s)
 	held := make([dynamic]net.TCP_Socket, context.temp_allocator)
+	// Taken before the growth fails, so the time since the failure is at
+	// most what this measures.
+	opened := time.tick_now()
 	for _ in 0 ..< 3 {
 		conn := open_conn(t, &s) or_return
 		harness.send_text(conn, "G")
@@ -741,7 +744,17 @@ growth_failure :: proc(t: ^testing.T, binary, web: string) -> bool {
 		testing.expect_value(t, again.current, 4) or_return
 	}
 	throttled := stats(t, &s) or_return
-	testing.expectf(t, throttled.failures == 1, "failed growth attempts must be throttled: %v", throttled) or_return
+	// Saba retries a failed growth after one second. Within that second
+	// every attempt above must have been throttled; a loaded machine may
+	// take longer than that for these requests, and then one retry is due.
+	within := time.tick_since(opened) < time.Second
+	testing.expectf(
+		t,
+		throttled.failures == 1 || !within && throttled.failures == 2,
+		"failed growth attempts must be throttled (%v since the connections opened): %v",
+		time.tick_since(opened),
+		throttled,
+	) or_return
 	full := open_conn(t, &s) or_return
 	harness.send_text(full, "G")
 	r := request(t, &s) or_return
@@ -751,12 +764,12 @@ growth_failure :: proc(t: ^testing.T, binary, web: string) -> bool {
 	recovered(t, &s, 2 * time.Second) or_return
 	time.sleep(1050 * time.Millisecond)
 	retried := stats(t, &s) or_return
-	testing.expectf(t, retried.current == 4 && retried.growths == 0 && retried.rejected >= 1 && retried.failures == 2, "retried: %v", retried) or_return
+	testing.expectf(t, retried.current == 4 && retried.growths == 0 && retried.rejected >= 1 && retried.failures == throttled.failures + 1, "retried: %v", retried) or_return
 	allowed := request(t, &s, "/allow-growth") or_return
 	testing.expect_value(t, allowed.status, 200) or_return
 	time.sleep(1050 * time.Millisecond)
 	expanded := stats(t, &s) or_return
-	testing.expectf(t, expanded.current == 8 && expanded.growths == 1 && expanded.failures == 2, "expansion must recover after allocation recovers: %v", expanded) or_return
+	testing.expectf(t, expanded.current == 8 && expanded.growths == 1 && expanded.failures == retried.failures, "expansion must recover after allocation recovers: %v", expanded) or_return
 	for conn in held {
 		harness.send_text(conn, "ET /ok HTTP/1.1\r\nHost: localhost\r\n\r\n")
 		r = reply(t, conn) or_return
@@ -905,5 +918,5 @@ stop_before_startup :: proc(t: ^testing.T, binary, web: string) -> bool {
 	p, input := harness.start_with_input(t, {binary}, env) or_return
 	defer harness.stop(p)
 	defer os.close(input)
-	return harness.exited_cleanly(t, p, TIMEOUT)
+	return harness.exited_cleanly(t, p)
 }

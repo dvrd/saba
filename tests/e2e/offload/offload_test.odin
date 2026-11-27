@@ -19,7 +19,7 @@ PROGRAM :: "tests/fixtures/apps/offload"
 // One build, then each check on servers of its own, one at a time.
 @(test)
 offloaded_jobs :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 3 * time.Minute)
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	work := harness.workdir(t, "offload")
 	defer os.remove_all(work)
 	binary, built := harness.build(t, PROGRAM, work)

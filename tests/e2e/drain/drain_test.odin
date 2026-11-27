@@ -79,7 +79,7 @@ finish :: proc(t: ^testing.T, s: ^Server, loc := #caller_location) {
 			join(t, s, loc)
 		}
 		command(t, s, "q")
-		harness.exited_cleanly(t, s.p, 5 * time.Second, loc)
+		harness.exited_cleanly(t, s.p, loc = loc)
 	}
 	harness.stop(s.p)
 	os.close(s.input)
@@ -240,7 +240,7 @@ immediate_override :: proc(t: ^testing.T, binary: string, workers: int) -> bool 
 
 @(test)
 drain_server :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 4 * time.Minute)
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	work := harness.workdir(t, "drain")
 	defer os.remove_all(work)
 	binary, built := harness.build(t, "tests/e2e/drain/server", work)
@@ -276,15 +276,17 @@ drain_server :: proc(t: ^testing.T) {
 		return
 	}
 	defer harness.stop(p)
-	harness.expect_line(t, p, "prestart drained", 5 * time.Second)
-	testing.expect_value(t, harness.wait(p, 5 * time.Second), 0)
+	// Starting the program and two serve calls are not what this measures:
+	// the bounds only guard a hang (a program that exits ends them at once).
+	harness.expect_line(t, p, "prestart drained", 60 * time.Second)
+	testing.expect_value(t, harness.wait(p, 30 * time.Second), 0)
 }
 
 // The observer of a finishing request snapshots the metrics and drains the
 // server from inside the callback.
 @(test)
 drain_from_observer :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 2 * time.Minute)
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	work := harness.workdir(t, "drain-observer")
 	defer os.remove_all(work)
 	binary, built := harness.build(t, "tests/e2e/drain/observer", work)
@@ -320,5 +322,5 @@ observe_once :: proc(t: ^testing.T, binary: string, workers: int) -> bool {
 	testing.expect(t, harness.running(p), "process exit must not hide socket cleanup")
 	net.close(conn)
 	harness.send_input(t, input, "q")
-	return harness.exited_cleanly(t, p, 5 * time.Second)
+	return harness.exited_cleanly(t, p)
 }

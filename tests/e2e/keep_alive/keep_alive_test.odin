@@ -29,7 +29,9 @@ keep_alive_core :: proc(t: ^testing.T) {
 }
 
 corpus :: proc(t: ^testing.T, source: string) {
-	testing.set_fail_timeout(t, 4 * time.Minute)
+	// A hang guard for some twenty programs started one after another, each
+	// of which may take seconds to start on a loaded machine.
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	work := harness.workdir(t, "keep-alive")
 	defer os.remove_all(work)
 	built, ok := harness.build(t, source, work)
@@ -397,7 +399,7 @@ idle_inherits_budget :: proc(t: ^testing.T, binary: string) -> bool {
 // The next header deadline starts on its first byte, independently of the
 // preceding idle interval.
 next_header_deadline :: proc(t: ^testing.T, binary: string) -> bool {
-	s := launch(t, binary, "IDLE_MS=500") or_return
+	s := launch(t, binary, "IDLE_MS=500", "HEADER_MS=200") or_return
 	defer dispose(&s)
 	{
 		conn := harness.connect(t, s.port) or_return
@@ -416,7 +418,7 @@ next_header_deadline :: proc(t: ^testing.T, binary: string) -> bool {
 // A partial subsequent request uses its own total header deadline and closes
 // on timeout.
 partial_next_request :: proc(t: ^testing.T, binary: string) -> bool {
-	s := launch(t, binary, "IDLE_MS=500") or_return
+	s := launch(t, binary, "IDLE_MS=500", "HEADER_MS=200") or_return
 	defer dispose(&s)
 	{
 		conn := harness.connect(t, s.port) or_return

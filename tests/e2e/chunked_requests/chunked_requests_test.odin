@@ -70,7 +70,7 @@ head :: proc(path := "/echo", extra := "") -> string {
 
 @(test)
 chunked_requests :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 3 * time.Minute)
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	work := harness.workdir(t, "chunked")
 	defer os.remove_all(work)
 	binary, built := harness.build(t, SERVER, work)
@@ -79,7 +79,9 @@ chunked_requests :: proc(t: ^testing.T) {
 	}
 	s: Server
 	started: bool
-	s.process, s.input, started = harness.start_with_input(t, {binary})
+	// The body deadline is the subject of one scenario; the header and
+	// response deadlines keep the fixture's generous default.
+	s.process, s.input, started = harness.start_with_input(t, {binary}, {"SABA_KEEP_BODY_MS=300"})
 	if !started {
 		return
 	}

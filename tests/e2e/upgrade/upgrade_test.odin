@@ -43,7 +43,7 @@ resumes :: proc(t: ^testing.T, p: ^harness.Process) -> int {
 
 @(test)
 raw_upgrade_sessions :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 2 * time.Minute)
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	work := harness.workdir(t, "upgrade")
 	defer os.remove_all(work)
 	binary, built := harness.build(t, "tests/e2e/upgrade/server", work)
@@ -121,7 +121,7 @@ raw_upgrade_sessions :: proc(t: ^testing.T) {
 	harness.expect_line(t, p, "created ")
 	switched(t, conn)
 	harness.send_input(t, input, "s")
-	exited := harness.exited_cleanly(t, p, 8 * time.Second)
+	exited := harness.exited_cleanly(t, p)
 	net.close(conn)
 	if !exited {
 		return

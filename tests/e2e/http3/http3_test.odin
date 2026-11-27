@@ -23,7 +23,7 @@ exercise :: proc(
 	server_source, client_source: string,
 	arguments: ..string,
 ) -> string {
-	testing.set_fail_timeout(t, 3 * time.Minute)
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	directory := harness.workdir(t, "e2e-http3")
 	defer os.remove_all(directory)
 	server_binary, server_built := harness.build(t, server_source, directory)

@@ -79,7 +79,7 @@ stop :: proc(t: ^testing.T, s: ^Server, prefix := "RESULT ", loc := #caller_loca
 	_, _ = os.write_string(s.input, "s")
 	os.close(s.input)
 	line := ""
-	if harness.exited_cleanly(t, s.process, 10 * time.Second, loc) && prefix != "" {
+	if harness.exited_cleanly(t, s.process, loc = loc) && prefix != "" {
 		found := harness.lines_with(s.process, prefix)
 		if len(found) > 0 {
 			line = found[len(found) - 1]

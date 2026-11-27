@@ -61,7 +61,7 @@ within :: proc(elapsed: time.Duration, low, high: time.Duration) -> bool {
 
 @(test)
 events_timeouts_and_metrics :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 2 * time.Minute)
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	work := harness.workdir(t, "observability")
 	defer os.remove_all(work)
 	binary, built := harness.build(t, "tests/e2e/observability/server", work)
@@ -214,7 +214,7 @@ events_timeouts_and_metrics :: proc(t: ^testing.T) {
 	harness.send_text(parked, "G")
 	time.sleep(20 * time.Millisecond)
 	harness.send_input(t, input, "\n")
-	exited := harness.exited_cleanly(t, p, 8 * time.Second)
+	exited := harness.exited_cleanly(t, p)
 	net.close(parked)
 	if !exited {
 		return

@@ -19,7 +19,7 @@ TIMEOUT :: 8 * time.Second
 
 @(test)
 conditional_assets :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 3 * time.Minute)
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	work := harness.workdir(t, "conditional-assets")
 	defer os.remove_all(work)
 	built, ok := harness.build(t, SOURCE, work)

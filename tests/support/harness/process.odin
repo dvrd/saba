@@ -387,8 +387,10 @@ running :: proc(p: ^Process) -> bool {
 }
 
 // Waits for the program to exit and returns its exit code, or -1 when it did
-// not exit in time (it is killed then).
-wait :: proc(p: ^Process, timeout := 10 * time.Second) -> int {
+// not exit in time (it is killed then). The default only guards a hang: a
+// program that frees and joins everything on its way out can take seconds on
+// a loaded machine.
+wait :: proc(p: ^Process, timeout := 30 * time.Second) -> int {
 	state, error := os.process_wait(p.handle, timeout)
 	if error != nil || !state.exited {
 		_ = os.process_kill(p.handle)
@@ -402,7 +404,7 @@ wait :: proc(p: ^Process, timeout := 10 * time.Second) -> int {
 
 // Waits for the program to exit and checks that it exited 0 without a
 // sanitizer report. The readers have drained its output when this returns.
-exited_cleanly :: proc(t: ^testing.T, p: ^Process, timeout := 10 * time.Second, loc := #caller_location) -> bool {
+exited_cleanly :: proc(t: ^testing.T, p: ^Process, timeout := 30 * time.Second, loc := #caller_location) -> bool {
 	code := wait(p, timeout)
 	for reader in p.readers {
 		thread.join(reader)

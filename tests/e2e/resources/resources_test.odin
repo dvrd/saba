@@ -39,7 +39,7 @@ rejected :: proc(t: ^testing.T, s: ^Server, path: string, loc := #caller_locatio
 
 @(test)
 mixed_resource_admission :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 3 * time.Minute)
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	work := harness.workdir(t, "resources")
 	defer os.remove_all(work)
 	binary, built := harness.build(t, PROGRAM, work)

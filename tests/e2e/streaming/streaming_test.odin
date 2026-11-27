@@ -19,7 +19,7 @@ EXAMPLE :: "examples/sse"
 
 @(test)
 streaming :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 4 * time.Minute)
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	work := harness.workdir(t, "streaming")
 	defer os.remove_all(work)
 	built, ok := harness.build(t, SERVER, work)

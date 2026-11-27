@@ -110,7 +110,7 @@ finish :: proc(t: ^testing.T, s: ^Server) {
 	}
 	harness.send_input(t, s.input, "r")
 	harness.expect_line(t, s.p, "stopped ", 8 * time.Second)
-	if harness.exited_cleanly(t, s.p, 5 * time.Second) {
+	if harness.exited_cleanly(t, s.p) {
 		errors := harness.stderr_text(s.p)
 		testing.expectf(t, !strings.contains(errors, "Assertion"), "%s", errors)
 	}

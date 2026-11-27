@@ -165,7 +165,7 @@ close :: proc(t: ^testing.T, s: ^Server, loc := #caller_location) {
 	if s.joined {
 		_ = harness.send_input(t, s.input, "q")
 	}
-	code := harness.wait(s.p, 8 * time.Second)
+	code := harness.wait(s.p)
 	testing.expectf(t, code == 0, "the server exited with %d\n%s", code, harness.transcript(s.p), loc = loc)
 	output := harness.transcript(s.p)
 	for report in ([]string{"ERROR: AddressSanitizer", "WARNING: ThreadSanitizer"}) {

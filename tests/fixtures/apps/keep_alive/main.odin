@@ -59,9 +59,14 @@ main :: proc() {
 	capacity, _ := strconv.parse_int(os.get_env("SABA_KEEP_CAPACITY", context.temp_allocator))
 	enabled := os.get_env("SABA_KEEP_DISABLED", context.temp_allocator) != "1"
 	state.observer_drain = os.get_env("SABA_KEEP_OBSERVER_DRAIN", context.temp_allocator) == "1"
-	worker := thread.create_and_start_with_poly_data({maximum, idle, capacity, enabled}, proc(config: struct {
+	// The header, body and response deadlines in milliseconds. A scenario
+	// about one of them sets it; the others keep a default generous enough
+	// that a loaded machine never trips them by accident.
+	header, body, response := deadline("SABA_KEEP_HEADER_MS"), deadline("SABA_KEEP_BODY_MS"), deadline("SABA_KEEP_RESPONSE_MS")
+	worker := thread.create_and_start_with_poly_data({maximum, idle, capacity, enabled, header, body, response}, proc(config: struct {
 			maximum, idle, capacity: int,
 			enabled:                 bool,
+			header, body, response:  time.Duration,
 		}) {
 		state.result = server.serve({
 			port = 0,
@@ -69,7 +74,7 @@ main :: proc() {
 			workers = 2,
 			control = &state.control,
 			max_connections = config.capacity,
-			timeouts = {header = 200 * time.Millisecond, body = 300 * time.Millisecond, response = 300 * time.Millisecond, idle = 100 * time.Millisecond},
+			timeouts = {header = config.header, body = config.body, response = config.response, idle = 100 * time.Millisecond},
 			keep_alive = {enabled = config.enabled, max_requests = config.maximum, idle_timeout = time.Duration(config.idle) * time.Millisecond},
 			request_body_limit = proc(request: ^server.Request) -> int {return 4 if request.path == "/limited" else 4096},
 			observability = {enabled = true, data = &state, on_complete = proc(data: rawptr, event: ^server.Request_Event) {
@@ -124,4 +129,10 @@ main :: proc() {
 	assert(!alive)
 	fmt.printf("stopped %d\n", state.count)
 	os.flush(os.stdout)
+}
+
+// The deadline a SABA_KEEP_<NAME>_MS variable sets, or ten seconds.
+deadline :: proc(variable: string) -> time.Duration {
+	milliseconds, ok := strconv.parse_int(os.get_env(variable, context.temp_allocator))
+	return time.Duration(milliseconds) * time.Millisecond if ok && milliseconds > 0 else 10 * time.Second
 }

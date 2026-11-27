@@ -22,7 +22,7 @@ LARGE :: 256 * 65536
 
 @(test)
 file_ranges :: proc(t: ^testing.T) {
-	testing.set_fail_timeout(t, 4 * time.Minute)
+	testing.set_fail_timeout(t, 10 * time.Minute)
 	work := harness.workdir(t, "file-ranges")
 	defer os.remove_all(work)
 	root := fmt.tprintf("%s/files", work)

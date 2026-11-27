@@ -35,7 +35,7 @@ drive :: proc(t: ^testing.T, server_args: []string, client_args: []string) {
 	}
 	defer harness.stop(p)
 	_, passed := harness.expect_line(t, p, "OK native-http2-websocket", 30 * time.Second)
-	code := harness.wait(p, 10 * time.Second)
+	code := harness.wait(p)
 	if !testing.expectf(t, passed && code == 0, "the client exited with %d\n%s", code, harness.transcript(p)) {
 		return
 	}

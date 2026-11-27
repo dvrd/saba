@@ -178,6 +178,20 @@ reserved_namespace_treats_methods_alike :: proc(t: ^testing.T) {
 	}
 }
 
+// A reservation of "/" is the root alone, not every path below it.
+@(test)
+a_root_reservation_leaves_other_paths_to_saba :: proc(t: ^testing.T) {
+	request := core.Request {
+		method    = "GET",
+		path      = "/",
+		allocator = context.temp_allocator,
+	}
+	testing.expect(t, handler_route_reserved([]string{"/"}, &request))
+	request.path = "/js/app.js"
+	testing.expect(t, !handler_route_reserved([]string{"/"}, &request))
+	testing.expect(t, handler_route_reserved([]string{"/js/"}, &request))
+}
+
 // A compile diagnostic names the module, not where the project lives on disk.
 @(test)
 development_diagnostics_keep_filesystem_paths_private :: proc(t: ^testing.T) {

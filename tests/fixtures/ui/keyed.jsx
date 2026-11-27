@@ -61,6 +61,23 @@ export async function observeKeyed(host) {
         a.selectionEnd === 5 && a.selectionDirection === "backward",
       "reorder lost focus, draft or selection",
     );
+    // Without moveBefore, moving the focused row detaches it. The runtime then
+    // puts focus and selection back.
+    const section = host.querySelector("section");
+    Object.defineProperty(section, "moveBefore", { value: undefined, configurable: true });
+    try {
+      for (const order of [["a", "b", "empty"], ["b", "empty", "a"]]) {
+        rows.set(order.map((id) => ({ id, label: id === "empty" ? undefined : id.toUpperCase() + "2" })));
+        check(
+          host.querySelectorAll("input")[order.filter((id) => id !== "empty").indexOf("a")] === a &&
+            document.activeElement === a &&
+            a.selectionStart === 2 && a.selectionEnd === 5 && a.selectionDirection === "backward",
+          "a reorder without moveBefore lost focus or selection",
+        );
+      }
+    } finally {
+      delete section.moveBefore;
+    }
     check(setups.join(",") === "a,b,empty", "retained key ran setup again");
 
     let duplicate = false;

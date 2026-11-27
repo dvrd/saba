@@ -74,6 +74,35 @@ application_builtin_priority_and_development_injection :: proc(t: ^testing.T) {
 	testing.expect(t, len(runtime_response.body) > 0)
 }
 
+// A streamed page produces its bytes later. Its body is not the document, so
+// the reload client is not spliced into it.
+@(test)
+application_leaves_streamed_html_alone_in_development :: proc(t: ^testing.T) {
+	state := State {
+		config = {
+			development = true,
+			server = {handler = proc(_: rawptr, _: ^core.Connection, r: ^core.Request) -> core.Response {
+					response := core.make_response(
+						r,
+						.OK,
+						{{"Content-Type", "text/html"}},
+						transmute([]u8)string("<head></head>"),
+					)
+					response.stream.content_length = -1
+					return response
+				}},
+		},
+	}
+	request := core.Request {
+		method    = "GET",
+		path      = "/streamed",
+		allocator = context.temp_allocator,
+	}
+	connection: core.Connection
+	response := handle_request(&state, &connection, &request)
+	testing.expect_value(t, string(response.body), "<head></head>")
+}
+
 @(test)
 application_serves_window_modules_as_conditional_representations :: proc(t: ^testing.T) {
 	arena: mem.Dynamic_Arena

@@ -323,6 +323,33 @@ reload_socket_rejects_foreign_origins :: proc(t: ^testing.T) {
 	}
 }
 
+@(test)
+reload_client_is_injected_once_into_successful_html :: proc(t: ^testing.T) {
+	html := []Header{{"content-type", "Text/HTML; charset=utf-8"}}
+	testing.expect(t, reload_html_response({headers = html}), "a handler that leaves the status unset answers 200")
+	testing.expect(t, reload_html_response({status = .OK, headers = html}))
+	testing.expect(t, !reload_html_response({status = .Not_Found, headers = html}))
+	testing.expect(t, !reload_html_response({status = .OK, headers = []Header{{"Content-Type", "text/plain"}}}))
+
+	PAGE :: "<html><head><title>x</title></head><body></body></html>"
+	injected, ok := inject_reload_client(transmute([]u8)string(PAGE), context.temp_allocator)
+	testing.expect(t, ok)
+	testing.expect_value(t, string(injected), "<html><head><title>x</title>" + RELOAD_CLIENT_TAG + "</head><body></body></html>")
+	again, again_ok := inject_reload_client(injected, context.temp_allocator)
+	testing.expect(t, again_ok && again == nil, "a page that already loads the client is left alone")
+}
+
+@(test)
+reload_socket_accepts_only_close_codes_a_peer_may_send :: proc(t: ^testing.T) {
+	for code in ([]u16{1000, 1001, 1002, 1003, 1007, 1011, 1014, 3000, 4999}) {
+		testing.expectf(t, valid_close_code(code), "%d was refused", code)
+	}
+	// 1004 is reserved, 1005 and 1006 are never sent on the wire.
+	for code in ([]u16{0, 999, 1004, 1005, 1006, 1015, 1016, 2999, 5000}) {
+		testing.expectf(t, !valid_close_code(code), "%d was accepted", code)
+	}
+}
+
 Watch_Step_Fixture :: struct {
 	rebuilds: int,
 	publish:  bool,

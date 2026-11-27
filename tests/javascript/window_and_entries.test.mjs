@@ -141,3 +141,33 @@ test('the template entry clears every pending marker and reveals recovery on fai
   assert.equal(failed.recovery.hidden, false);
   assert.equal(failed.app.attributes.has('aria-busy'), false, 'a failed page is not announced as busy forever');
 });
+
+test('the append-style entry checks the static segments of its route before loading the page', async () => {
+  documentOf({ route: '/items/:id', page: 'data:text/javascript,throw new Error("page loaded")' });
+  globalThis.location = { pathname: '/other/42' };
+  await assert.rejects(loadFresh('page-entry.js'), /Unexpected page path/);
+});
+
+test('the template entry keeps a page that the browser only puts in its back-forward cache', async () => {
+  const events = pageEvents();
+  const { startPage } = await load('template-entry.js');
+  documentOf({ recover: true });
+  let disposed = 0;
+  startPage('g1', '/items/:id', 'en', () => () => disposed++);
+  events.dispatch('pagehide', { persisted: true });
+  assert.equal(disposed, 0);
+  events.dispatch('pagehide', { persisted: false });
+  assert.equal(disposed, 1);
+});
+
+test('the template entry starts only on a path its route matches', async () => {
+  const { startPage } = await load('template-entry.js');
+  for (const pathname of ['/other/42', '/items/', '/items/a%2Fb', '/items/a%5Cb']) {
+    documentOf({ recover: true });
+    globalThis.location = { pathname };
+    let attached = false;
+    assert.throws(() => startPage('g1', '/items/:id', 'en', () => { attached = true; return () => {}; }),
+      /Unexpected page/, pathname);
+    assert.equal(attached, false, `${pathname} reached the page`);
+  }
+});

@@ -46,6 +46,17 @@ test('password validation counts characters and limits encoded bytes', () => {
   assert.match(runtime.validatePassword('😀'.repeat(257)), /too long/);
 });
 
+test('a javascript: URL is refused in every spelling the URL parser still reads as one', () => {
+  for (const url of ['javascript:alert(1)', 'JavaScript:alert(1)', ' \u0000javascript:alert(1)',
+    'java\tscript:alert(1)', 'java\nscript:alert(1)', 'javascript\r:alert(1)']) {
+    assert.throws(() => runtime.checkedAttribute('href', url), /javascript: URL/, JSON.stringify(url));
+  }
+  assert.throws(() => runtime.checkedAttribute('formAction', 'java\tscript:x'), /javascript: URL/);
+  assert.equal(runtime.checkedAttribute('href', '/javascript:docs'), '/javascript:docs');
+  assert.equal(runtime.checkedAttribute('title', 'javascript:x'), 'javascript:x');
+  assert.equal(runtime.checkedAttribute('href', runtime.trusted('javascript:void 0')), 'javascript:void 0');
+});
+
 test('JSON transport sends bodies and accepts empty or non-JSON replies', async () => {
   const original = globalThis.fetch;
   try {

@@ -1019,6 +1019,7 @@ jsx_swaps_a_proved_hole_with_a_tracked_synchronous_write :: proc(t: ^testing.T) 
 			`function Field(on) { return <div>{on() ? <button ONCLICK="go()">y</button> : null}</div>; }`,
 			`function Field(on) { return <div>{on() ? <button formaction="javascript:go()">y</button> : null}</div>; }`,
 			`function Field(on) { return <div>{on() ? <a href="&#106;avascript:go()">y</a> : null}</div>; }`,
+			`function Field(on) { return <div>{on() ? <button formaction="https://example.test/?a=1&b=2">y</button> : null}</div>; }`,
 			`function Field(on) { return <div>{on() ? <iframe srcdoc="x"></iframe> : null}</div>; }`,
 			// A component decides whether its children are built at all.
 			`function Field(on) { return <Guard when={on}><p>{on().admin ? <b>x</b> : null}</p></Guard>; }`,
@@ -1666,4 +1667,34 @@ jsx_nesting_estimate_ignores_text_templates_and_comments :: proc(t: ^testing.T) 
 		_, deep_err := transform_jsx(source, "deep.jsx", context.temp_allocator)
 		testing.expectf(t, deep_err.message == "Nesting exceeds 256 levels of brackets", "%s: %s", source[:24], deep_err.message)
 	}
+}
+
+@(test)
+template_static_attributes_are_escaped_renamed_and_never_saba_markers :: proc(t: ^testing.T) {
+	source :: `export const title = "Attributes";
+export default function Page() {
+  return <main><label htmlFor="name" title='say "hi"' data-saba-node="forged" data-Saba-instance="forged" data-note="kept">Name</label></main>
+}`
+	page, err := jsx.compile_page_template(source, "attributes.jsx", context.temp_allocator)
+	testing.expect_value(t, err.message, "")
+	testing.expect(t, page.supported)
+	testing.expectf(t, strings.contains(page.html, `title="say &quot;hi&quot;"`), "%s", page.html)
+	testing.expectf(t, strings.contains(page.html, `for="name"`), "%s", page.html)
+	testing.expectf(t, strings.contains(page.html, `data-note="kept"`), "%s", page.html)
+	testing.expectf(t, !strings.contains(page.html, "forged"), "%s", page.html)
+}
+
+@(test)
+template_leaves_out_text_the_parser_would_foster_out_of_a_row :: proc(t: ^testing.T) {
+	source :: `export const title = "Rows";
+export default function Page() { return <table><tbody><tr>stray<td>cell</td></tr></tbody></table> }`
+	page, err := jsx.compile_page_template(source, "rows.jsx", context.temp_allocator)
+	testing.expect_value(t, err.message, "")
+	testing.expectf(t, !strings.contains(page.html, "stray"), "%s", page.html)
+}
+
+@(test)
+jsx_text_turns_a_tab_into_a_space :: proc(t: ^testing.T) {
+	output := jsx_compiled(t, "const a = <p>one\ttwo</p>;", "tab.jsx")
+	testing.expectf(t, strings.contains(output, `"one two"`), "%s", output)
 }

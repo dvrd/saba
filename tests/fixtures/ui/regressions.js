@@ -80,6 +80,21 @@ function foreignNodes() {
       "a " + name + " Saba marker attached or changed the document");
     broken.remove();
   }
+
+  // A write that fails after others have landed takes all of them back,
+  // including an attribute the served document did not have.
+  const partial = served(), before = partial.innerHTML;
+  const rejected = caught(() => template.attach(partial, manifest, () => {
+    template.element(0, {});
+    template.element(1, {title: "added"});
+    template.element(2, {});
+    template.range(3, binding(() => 1));
+    template.element(4, {formAction: "javascript:void 0"});
+  }));
+  check(rejected && /javascript: URL/.test(rejected.message), "expected the javascript: URL to be refused");
+  check(partial.innerHTML === before && !partial.querySelector("h1").hasAttribute("title"),
+    "a rolled-back activation left an attribute behind");
+  partial.remove();
 }
 
 function stagedWrites() {

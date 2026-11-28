@@ -37,6 +37,9 @@ Stream :: struct {
 	// stream frames that arrived.
 	received:      u64,
 	chunks:        [dynamic]int,
+	// How many stream frames arrived, and the size of the largest.
+	deliveries:    int,
+	largest:       int,
 	// The client never extends this stream's credit; withheld counts the
 	// bytes it consumed without returning credit for them.
 	withhold:      bool,

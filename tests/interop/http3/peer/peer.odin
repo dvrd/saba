@@ -761,6 +761,8 @@ recv_stream_data :: proc "c" (
 	s := cl.streams[id]
 	if s != nil {
 		s.received = max(s.received, offset + u64(datalen))
+		s.deliveries += 1
+		s.largest = max(s.largest, int(datalen))
 		if len(s.chunks) < 16 {
 			append(&s.chunks, int(datalen))
 		}

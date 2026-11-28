@@ -13,6 +13,9 @@ SERVER :: "tests/interop/http3/phases/server"
 CERTIFICATE :: "tests/fixtures/tls/rsa2048-valid.pem"
 KEY :: "tests/fixtures/tls/rsa2048.pem"
 LARGE :: 65536
+// The stream credit of the progress profile, and its server's response budget.
+CREDIT :: 64
+PROGRESS_BUDGET :: time.Minute
 
 start :: proc(
 	t: ^testing.T,
@@ -23,7 +26,7 @@ start :: proc(
 	server: peer.Server,
 	ok: bool,
 ) {
-	testing.set_fail_timeout(t, 60 * time.Second)
+	testing.set_fail_timeout(t, 60 * time.Second + 2 * PROGRESS_BUDGET)
 	args := make([dynamic]string, context.temp_allocator)
 	append(&args, CERTIFICATE, KEY)
 	append(&args, ..arguments)
@@ -103,9 +106,10 @@ await_ended :: proc(
 	t: ^testing.T,
 	s: ^peer.Stream,
 	label: string,
+	timeout := 5 * time.Second,
 	loc := #caller_location,
 ) -> bool {
-	peer.await(s, 5 * time.Second)
+	peer.await(s, timeout)
 	return testing.expectf(
 		t,
 		s.ended && s.reset < 0 && !s.client.closed,
@@ -213,18 +217,23 @@ isolation :: proc(t: ^testing.T) {
 }
 
 // 64 bytes of stream credit, granted again as the client reads: the 64KiB
-// response arrives whole, in small stream frames, within its 3s budget.
+// response arrives whole, and no stream frame of it is larger than the credit,
+// so it took the server at least 1024 grants to send. That many round trips
+// against a fixed response budget is a race with the scheduler, which is not
+// what this test is about: the profile's budget is a minute, and the wait
+// ends with the response or with the server's reset, whichever the server
+// decides.
 @(test)
 progress :: proc(t: ^testing.T) {
 	cl: peer.Client
 	defer peer.destroy(&cl)
-	server, ok := start(t, &cl, 64, "progress")
+	server, ok := start(t, &cl, CREDIT, "progress")
 	if !ok {
 		return
 	}
 	defer peer.stop(t, &server, "COUNTS ")
 	stream := post(&cl, "/large")
-	if !await_ended(t, stream, "/large") {
+	if !await_ended(t, stream, "/large", PROGRESS_BUDGET + 30 * time.Second) {
 		return
 	}
 	zeros := make([]u8, LARGE, context.temp_allocator)
@@ -239,6 +248,14 @@ progress :: proc(t: ^testing.T) {
 		small ||= 5 < n && n < 64
 	}
 	testing.expectf(t, small, "no small stream frame among the first: %v", stream.chunks[:])
+	testing.expectf(
+		t,
+		stream.largest <= CREDIT && stream.deliveries >= LARGE / CREDIT,
+		"%d stream frames, the largest of %d bytes, with %d bytes of credit",
+		stream.deliveries,
+		stream.largest,
+		CREDIT,
+	)
 	peer.close(&cl)
 }
 

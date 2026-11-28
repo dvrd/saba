@@ -1,7 +1,9 @@
 // A Saba server whose HTTP/3 listener enforces request phase budgets: header
-// 250ms, body 300ms, response 400ms (3s with progress), extended CONNECT
-// accept 700ms and close 600ms. Each path fails or stalls in one phase. It
-// prints READY <port>, serves until stdin has a byte or closes, and prints
+// 250ms, body 300ms, response 400ms, extended CONNECT accept 700ms and close
+// 600ms. Each path fails or stalls in one phase. With progress the response
+// budget is a minute: that profile is about a reader that keeps granting
+// credit, and how long its many round trips take is the machine's business.
+// It prints READY <port>, serves until stdin has a byte or closes, and prints
 // COUNTS <handled> <dropped>.
 //
 //	server <certificate.pem> <key.pem> [progress]
@@ -178,7 +180,7 @@ main :: proc() {
 
 	if len(os.args) == 4 {
 		assert(os.args[3] == "progress")
-		state.config.timeouts.response = 3 * time.Second
+		state.config.timeouts.response = time.Minute
 	}
 
 	worker := thread.create_and_start_with_poly_data(

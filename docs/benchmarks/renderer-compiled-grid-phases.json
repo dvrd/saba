@@ -1,0 +1,164 @@
+{
+  "metadata": {
+    "generatedAt": "2026-11-20T18:17:37.943Z",
+    "cpu": "Apple M1 Max",
+    "os": "Darwin 27.2.0",
+    "totalMemoryMiB": 32768,
+    "viewport": [
+      1200,
+      900
+    ],
+    "trials": 3,
+    "fullCapacityTrials": 1,
+    "sourceSha256": {
+      "benchmarks/frameworks/rich/scale.html": "c1e8abdfcfde2a064e60d8652ef26f232dfc619053fbc8848e15c27eb6cb2341",
+      "benchmarks/frameworks/rich/scale.js": "3c7da7d88336af86e38d4a8f33685d7e776b84e7f9e1636d1a272b4fb9ea9a28",
+      "benchmarks/frameworks/rich/reactivity.js": "cfa46dbb650c3c66f79a60d998127d8df7981ed64f21dc404b083ae50b091469",
+      "src/modules/dom.js": "9d390d65b19c919d2dd7ff62c2a9253172066c203442ec4b2f8e04b6a9e298e7",
+      "src/modules/sliding-window.js": "94b867a8cb6c2fabb55d6bbe7be8d1b8705ae2d5fc8504ea86a040e950883f3f",
+      "benchmarks/frameworks/rich/scale-run.cjs": "b5840f5d13a11bbf0d3cd836b5c8ef01f0b65960aba281b45a53d971f8a87086"
+    },
+    "measurements": "Desktop Chromium, fresh browser per run, clocks begin at local data creation or trusted button handler. Mount/seek/update clocks end at visible Element Timing status marker. Complete visits also verify a visible tile by hit test.",
+    "guard": {
+      "rendererRssMiB": 900,
+      "wallSeconds": 45,
+      "jsOldSpaceMiB": 768,
+      "pollMs": 200
+    },
+    "model": "One object per record (id, group, score). Full mode mounts one component and visible element per record in 4096-cell bands; native React, Solid and Svelte use a framework root per band. Planned Saba adds two binding comments. Every implementation receives the same immutable per-band record snapshots. Windowed grids have 8 columns and 16 visible rows. Virtual moves on each scroll with two extra rows per side. Buffered replenishes to eight extra rows when three remain.",
+    "checkpoints": "DOM count and last-cell layout confirmed for full chunks. Marker presentation sampled every >=32768 cells and at successful completion. Peak is sampled RSS of the isolated browser’s renderer processes, including baseline.",
+    "sabaBaseline": {
+      "url": "/scale-saba-baseline.js",
+      "bytes": 13165,
+      "sha256": "0d61c3d9e265ab0c9d0eeacad421ab7cf8ee106971f2d641aa1aedaa81f39e60"
+    }
+  },
+  "visits": [
+    {
+      "mode": "saba-baseline",
+      "scenario": "buffered",
+      "trial": 1,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 236.21875,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 140.59999990463257
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 135.890625,
+      "dataMs": 62.299999952316284,
+      "mountPaintMs": 140.59999990463257,
+      "updatePaintMs": 81.79999995231628,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 52.09999990463257,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "rowPhases": {
+        "sourceRowsRemoved": 192,
+        "destinationRowsPrepared": 192,
+        "destinationRowsPlaced": 192,
+        "readKeysValidateMs": 0.10000002384185791,
+        "prepareDetachedRowsAndMapMs": 5.199999928474426,
+        "removeOldRowsMs": 9.800000071525574,
+        "setSignalAndPlaceNewRowsMs": 2,
+        "keyedObserverMs": 17.100000023841858
+      },
+      "seekBeforeWindowMs": 6.799999952316284,
+      "seekRendererMs": 17.200000047683716,
+      "seekWindowMs": 17.299999952316284,
+      "elapsedMs": 696.6617080000001
+    },
+    {
+      "mode": "saba-baseline",
+      "scenario": "buffered",
+      "trial": 2,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 236.078125,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 123.59999990463257
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 136.046875,
+      "dataMs": 57.299999952316284,
+      "mountPaintMs": 123.59999990463257,
+      "updatePaintMs": 79.29999995231628,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 49.89999997615814,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "rowPhases": {
+        "sourceRowsRemoved": 192,
+        "destinationRowsPrepared": 192,
+        "destinationRowsPlaced": 192,
+        "readKeysValidateMs": 0.10000002384185791,
+        "prepareDetachedRowsAndMapMs": 4.599999904632568,
+        "removeOldRowsMs": 9.800000071525574,
+        "setSignalAndPlaceNewRowsMs": 1.6999999284744263,
+        "keyedObserverMs": 16.199999928474426
+      },
+      "seekBeforeWindowMs": 5.100000023841858,
+      "seekRendererMs": 16.199999928474426,
+      "seekWindowMs": 16.5,
+      "elapsedMs": 495.39450000000033
+    },
+    {
+      "mode": "saba-baseline",
+      "scenario": "buffered",
+      "trial": 3,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 192,
+      "lastMountPaintConfirmed": 192,
+      "sampledPeakRendererRssMiB": 236.4375,
+      "checkpoints": [
+        {
+          "mounted": 192,
+          "markerPaintMs": 149.39999997615814
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 135.984375,
+      "dataMs": 67.20000004768372,
+      "mountPaintMs": 149.39999997615814,
+      "updatePaintMs": 86.39999997615814,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 51.699999928474426,
+      "mounted": 192,
+      "created": 384,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "rowPhases": {
+        "sourceRowsRemoved": 192,
+        "destinationRowsPrepared": 192,
+        "destinationRowsPlaced": 192,
+        "readKeysValidateMs": 0.10000002384185791,
+        "prepareDetachedRowsAndMapMs": 5.300000071525574,
+        "removeOldRowsMs": 13.099999904632568,
+        "setSignalAndPlaceNewRowsMs": 1.7000000476837158,
+        "keyedObserverMs": 20.200000047683716
+      },
+      "seekBeforeWindowMs": 8.5,
+      "seekRendererMs": 20.299999952316284,
+      "seekWindowMs": 20.5,
+      "elapsedMs": 575.1331249999985
+    }
+  ]
+}

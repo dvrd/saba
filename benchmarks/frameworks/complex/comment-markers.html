@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why the row comments exist</title>
+<style>
+  :root {
+    --paper: #f3efe6;
+    --ink: #1e1a16;
+    --muted: #6f675e;
+    --line: #ddd4c6;
+    --comment: #b4532a;
+    --comment-bg: #f8ebe3;
+    --element: #1d4a38;
+    --element-bg: #e5f0ea;
+    --sibling: #3c4a66;
+    --sibling-bg: #e7eaf1;
+    --text: #6a4d12;
+    --text-bg: #f8f0dc;
+    --gold: #e7c56a;
+    --danger: #8d2d2d;
+    color: var(--ink);
+    background: var(--paper);
+    font-family: "Iowan Old Style", Palatino, "Palatino Linotype", Georgia, serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; }
+  main { max-width: 1080px; margin: 0 auto; padding: 28px 22px 48px; }
+  header h1 { font-size: 34px; font-weight: 500; letter-spacing: -0.03em; margin: 0 0 8px; }
+  header p { margin: 0; max-width: 640px; color: var(--muted); font-size: 18px; line-height: 1.45; }
+  .stage { display: grid; grid-template-columns: 1.15fr 0.85fr; gap: 22px; margin-top: 28px; }
+  .panel { background: #fffdf8; border: 1px solid var(--line); border-radius: 16px; padding: 16px 16px 18px; min-height: 460px; }
+  .panel h2 { margin: 0 0 12px; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); font-family: ui-sans-serif, system-ui, sans-serif; font-weight: 650; }
+  .nodes, .page { display: flex; flex-direction: column; gap: 6px; }
+  .node, .card {
+    display: flex; align-items: center; gap: 10px;
+    border-radius: 10px; padding: 8px 10px; min-height: 38px;
+    border: 1px solid transparent;
+    font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    font-size: 13.5px;
+  }
+  .node.comment { color: var(--comment); background: var(--comment-bg); border-style: dashed; border-color: #e2b49f; }
+  .node.element { color: var(--element); background: var(--element-bg); border-color: #b7d4c6; }
+  .node.sibling { color: var(--sibling); background: var(--sibling-bg); border-color: #c5cde0; }
+  .node.text { color: var(--text); background: var(--text-bg); border-color: #ead7a4; }
+  .node.walk { outline: 2px solid var(--gold); outline-offset: 1px; }
+  .node.range { box-shadow: inset 3px 0 0 var(--comment); }
+  .swatch { width: 14px; height: 14px; border-radius: 4px; flex: none; }
+  .kind { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.7; width: 62px; flex: none; }
+  .page-frame { background: #f7f4ee; border-radius: 12px; padding: 14px; }
+  .page-frame h3 { margin: 0 0 10px; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 15px; }
+  .row { display: flex; align-items: center; gap: 10px; background: white; border-radius: 10px; padding: 8px 10px; border: 1px solid var(--line); }
+  .row strong { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 15px; font-weight: 620; }
+  .row em { font-style: normal; color: var(--muted); font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; }
+  .footer { margin-top: 8px; color: var(--muted); font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; }
+  .caption { margin-top: 22px; min-height: 92px; }
+  .caption h2 { font-size: 26px; font-weight: 500; margin: 0 0 6px; letter-spacing: -0.02em; }
+  .caption p { margin: 0; font-size: 18px; line-height: 1.45; max-width: 720px; }
+  .controls { display: flex; align-items: center; gap: 10px; margin-top: 18px; }
+  button {
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    background: var(--ink); color: var(--paper); border: 0; border-radius: 999px;
+    padding: 8px 14px; font-size: 14px; cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  .dots { display: flex; gap: 6px; margin-left: 8px; }
+  .dots i { width: 7px; height: 7px; border-radius: 99px; background: #d9d0c3; display: block; }
+  .dots i.on { background: var(--ink); }
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .fail { border: 1px solid #efcfcf; background: #fff7f7; border-radius: 12px; padding: 12px; }
+  .fail h3 { margin: 0 0 8px; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 14px; color: var(--danger); }
+  .merged { font-family: ui-monospace, Menlo, monospace; background: white; border-radius: 8px; padding: 10px; }
+  .wrapped .row { margin-left: 14px; }
+  .wrap-label { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--danger); }
+  .map { margin-top: 12px; font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--element); }
+  @media (max-width: 800px) { .stage, .compare { grid-template-columns: 1fr; } header h1 { font-size: 28px; } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Why the row comments exist</h1>
+    <p>A keyed list has to move and replace a row without knowing what that row contains. The comments are the handles.</p>
+  </header>
+  <div class="stage">
+    <section class="panel">
+      <h2>DOM, in order</h2>
+      <div class="nodes" id="dom"></div>
+    </section>
+    <section class="panel">
+      <h2>What is painted</h2>
+      <div id="paint"></div>
+    </section>
+  </div>
+  <div class="caption" id="caption"></div>
+  <div class="controls">
+    <button type="button" id="prev" class="ghost">Back</button>
+    <button type="button" id="next">Next</button>
+    <button type="button" id="play" class="ghost">Play</button>
+    <div class="dots" id="dots"></div>
+  </div>
+</main>
+<script>
+const fruits = {
+  apple: { name: "Apple", color: "#c4554a", note: "" },
+  berry: { name: "Berry", color: "#6d3a86", note: "" },
+  cherry: { name: "Cherry", color: "#b4234a", note: "" },
+};
+
+const steps = [
+  {
+    title: "What the component returned",
+    text: "A heading, three rows, and a footer. Each row is one image. Nothing else is in the tree yet.",
+    order: ["head", "apple", "berry", "cherry", "foot"],
+    comments: false,
+  },
+  {
+    title: "The runtime marks a range",
+    text: "It inserts comment nodes. <!--keyed--> … <!--/keyed--> bound the list, so the heading and the footer stay outside it. <!--row--> … <!--/row--> bound each row.",
+    order: ["head", "k0", "r-apple", "apple", "r-apple-end", "r-berry", "berry", "r-berry-end", "r-cherry", "cherry", "r-cherry-end", "k1", "foot"],
+    comments: true,
+  },
+  {
+    title: "The handles stay while the picture changes",
+    text: "Berry becomes Blueberry. The image node is updated. The two comments on either side do not move, so the list still knows which nodes belong to Berry.",
+    order: ["head", "k0", "r-apple", "apple", "r-apple-end", "r-berry", "berry", "r-berry-end", "r-cherry", "cherry", "r-cherry-end", "k1", "foot"],
+    comments: true,
+    rename: { berry: "Blueberry" },
+    range: "berry",
+  },
+  {
+    title: "A move takes the whole span",
+    text: "Berry moves to the front. The list starts at <!--row--> and moves every following node until <!--/row-->, using that end comment as the stop. The footer never enters the walk, because it sits past <!--/keyed-->.",
+    order: ["head", "k0", "r-berry", "berry", "r-berry-end", "r-apple", "apple", "r-apple-end", "r-cherry", "cherry", "r-cherry-end", "k1", "foot"],
+    comments: true,
+    rename: { berry: "Blueberry" },
+    range: "berry",
+    walk: ["r-berry", "berry", "r-berry-end"],
+  },
+  {
+    title: "The row can grow, and the handles still fit",
+    text: "Cherry gains a caption. That new text node is inserted between the same two comments. The next move will carry the image and the caption together.",
+    order: ["head", "k0", "r-berry", "berry", "r-berry-end", "r-apple", "apple", "r-apple-end", "r-cherry", "cherry", "cherry-note", "r-cherry-end", "k1", "foot"],
+    comments: true,
+    rename: { berry: "Blueberry" },
+    note: { cherry: "in season" },
+    range: "cherry",
+  },
+  {
+    title: "A comment is the boundary that layout ignores",
+    text: "Two things a comment avoids. Adjacent text rows would merge into one string, so the list could not find the split. A wrapper div would keep the split, and it would also become a real box: the images would no longer be the section’s own children.",
+    compare: true,
+  },
+  {
+    title: "One known element needs no comments",
+    text: "When the compiler can see that the row is a single element, that element is the handle. The map points straight at it. The same move is just moveBefore on that one node.",
+    order: ["head", "berry", "apple", "cherry", "foot"],
+    comments: false,
+    rename: { berry: "Blueberry" },
+    range: "berry",
+    compiled: true,
+  },
+];
+
+const dom = document.querySelector("#dom");
+const paint = document.querySelector("#paint");
+const caption = document.querySelector("#caption");
+const dots = document.querySelector("#dots");
+let index = 0;
+let timer = 0;
+let positions = new Map();
+
+function label(id, step) {
+  if (id === "head") return { kind: "sibling", kindName: "element", code: "<h2>Today</h2>", name: "Today" };
+  if (id === "foot") return { kind: "sibling", kindName: "element", code: "<p>Three kinds</p>", name: "Three kinds" };
+  if (id === "k0") return { kind: "comment", kindName: "comment", code: "<!--keyed-->" };
+  if (id === "k1") return { kind: "comment", kindName: "comment", code: "<!--/keyed-->" };
+  if (id.startsWith("r-") && id.endsWith("-end")) return { kind: "comment", kindName: "comment", code: "<!--/row-->", row: id.slice(2, -4) };
+  if (id.startsWith("r-")) return { kind: "comment", kindName: "comment", code: "<!--row-->", row: id.slice(2) };
+  if (id.endsWith("-note")) {
+    const row = id.slice(0, -5);
+    return { kind: "text", kindName: "text", code: `"${step.note[row]}"`, row, name: step.note[row] };
+  }
+  const fruit = fruits[id];
+  const name = step.rename?.[id] || fruit.name;
+  return { kind: "element", kindName: "element", code: `<img> ${name}`, row: id, name, color: fruit.color, note: step.note?.[id] || "" };
+}
+
+function remember() {
+  positions = new Map();
+  for (const node of dom.querySelectorAll("[data-id]")) positions.set(node.dataset.id, node.getBoundingClientRect());
+}
+
+function playFlip() {
+  for (const node of dom.querySelectorAll("[data-id]")) {
+    const previous = positions.get(node.dataset.id);
+    const next = node.getBoundingClientRect();
+    if (!previous) {
+      node.animate([{ opacity: 0, transform: "translateY(-6px)" }, { opacity: 1, transform: "none" }], { duration: 280, easing: "ease-out" });
+      continue;
+    }
+    const dy = previous.top - next.top;
+    if (Math.abs(dy) > 1) {
+      node.animate([{ transform: `translateY(${dy}px)` }, { transform: "none" }], { duration: 460, easing: "cubic-bezier(.2,.7,.2,1)" });
+    }
+  }
+}
+
+function render(animated) {
+  const step = steps[index];
+  caption.innerHTML = `<h2>${step.title}</h2><p>${step.text}</p>`;
+  for (const dot of dots.children) dot.classList.toggle("on", Number(dot.dataset.i) === index);
+  if (animated) remember();
+  if (step.compare) {
+    dom.innerHTML = `<div class="fail">
+      <h3>No boundary</h3>
+      <div class="node text"><span class="kind">text</span><span>"Hi"</span></div>
+      <div class="node text"><span class="kind">text</span><span>"there"</span></div>
+      <div class="merged">The browser joins them into <strong>Hithere</strong>. The list can no longer see where one row ends.</div>
+    </div>`;
+    paint.innerHTML = `<div class="fail">
+      <h3>An element boundary</h3>
+      <div class="wrap-label">&lt;div&gt;</div>
+      <div class="wrapped"><div class="row"><i class="swatch" style="background:#c4554a"></i><strong>Apple</strong></div></div>
+      <p class="footer">The split survives, and the div becomes a real box. The image is no longer the section’s own child, so layout and CSS see the wrapper.</p>
+    </div>`;
+    return;
+  }
+  dom.innerHTML = step.order.map((id) => {
+    const item = label(id, step);
+    const inRange = step.range && item.row === step.range;
+    const walking = step.walk?.includes(id);
+    return `<div class="node ${item.kind}${inRange ? " range" : ""}${walking ? " walk" : ""}" data-id="${id}"><span class="kind">${item.kindName}</span><span>${item.code}</span></div>`;
+  }).join("");
+  const visible = step.order.filter((id) => !label(id, step).code.startsWith("<!--"));
+  paint.innerHTML = `<div class="page-frame"><h3>Today</h3><div class="page">${visible.filter((id) => id !== "head" && id !== "foot").map((id) => {
+    const item = label(id, step);
+    if (item.kind === "text") return "";
+    const note = item.note ? `<em>${item.note}</em>` : "";
+    const marked = step.range === id ? " walk" : "";
+    return `<div class="row${marked}" data-id="p-${id}"><i class="swatch" style="background:${item.color}"></i><strong>${item.name}</strong>${note}</div>`;
+  }).join("")}</div><div class="footer">Three kinds</div>${step.compiled ? `<div class="map">berry → the &lt;img&gt; itself</div>` : ""}</div>`;
+  if (animated && !matchMedia("(prefers-reduced-motion: reduce)").matches) playFlip();
+}
+
+function go(next) {
+  index = (next + steps.length) % steps.length;
+  render(true);
+}
+
+function play() {
+  if (timer) {
+    clearInterval(timer);
+    timer = 0;
+    document.querySelector("#play").textContent = "Play";
+    return;
+  }
+  document.querySelector("#play").textContent = "Pause";
+  timer = setInterval(() => go(index + 1), 3200);
+}
+
+dots.innerHTML = steps.map((_, i) => `<i data-i="${i}"></i>`).join("");
+document.querySelector("#next").addEventListener("click", () => { if (timer) play(); go(index + 1); });
+document.querySelector("#prev").addEventListener("click", () => { if (timer) play(); go(index - 1); });
+document.querySelector("#play").addEventListener("click", play);
+addEventListener("keydown", (event) => {
+  if (event.key === "ArrowRight") go(index + 1);
+  if (event.key === "ArrowLeft") go(index - 1);
+  if (event.key === " ") { event.preventDefault(); play(); }
+});
+render(false);
+</script>
+</body>
+</html>

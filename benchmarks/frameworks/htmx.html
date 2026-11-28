@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mesa item editor</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body hx-ext="morph">
+  <main id="app">
+    <section class="screen">
+      <h1>Items</h1>
+      <form id="editor" hx-patch="/fragments/items/42" hx-swap="none">
+        <div id="record-fields" hx-get="/fragments/items/42" hx-trigger="load, mesaRefresh from:body" hx-swap="morph:innerHTML settle:0ms" hx-params="none">
+          <label for="title">Item 42</label>
+          <div class="fields">
+            <input id="title" name="title" disabled autocomplete="off" spellcheck="false">
+            <button id="save" type="submit" disabled>Save</button>
+          </div>
+          <output id="preview" for="title"></output>
+        </div>
+        <p id="status" role="status">Loading item…</p>
+      </form>
+      <div class="lists">
+        <section><h2>All items</h2><ol id="list-all" hx-get="/fragments/lists/all" hx-trigger="load, mesaRefresh from:body" hx-swap="morph:innerHTML settle:0ms"></ol></section>
+        <section><h2>Open</h2><ol id="list-open" hx-get="/fragments/lists/open" hx-trigger="load, mesaRefresh from:body" hx-swap="morph:innerHTML settle:0ms"></ol></section>
+        <section><h2>Marked</h2><ol id="list-marked" hx-get="/fragments/lists/marked" hx-trigger="load, mesaRefresh from:body" hx-swap="morph:innerHTML settle:0ms"></ol></section>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="/frameworks/htmx.js"></script>
+</body>
+</html>

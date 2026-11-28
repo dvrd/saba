@@ -1,18 +1,35 @@
 package saba_core
 
-import http "shared:http"
-import http1 "shared:http/v1"
+import http "shared:async/http"
+import http1 "shared:async/http/v1"
 import "core:log"
 import "core:time"
-import exchange "shared:http/exchange"
+import exchange "shared:async/http/exchange"
 import rt "base:runtime"
 import "core:mem"
-import budget "core:sync/budget"
-import owned "core:mem/owned"
+import budget "shared:async/budget"
+import owned "shared:async/owned"
 import "core:strconv"
 import async "shared:async"
 
 RESPONSE_HEADER_LIMIT :: 8192
+
+// A response trailer field a handler may not send, by its lowercase name: a
+// pseudo-header, a connection-specific field, or one RFC 9110 section 6.5.1
+// keeps out of trailers because a recipient must act on it before the body
+// (framing, routing, authentication, content and cache metadata, cookies).
+// HTTP/2 and HTTP/3 drop these and send the rest, so a handler sees the same
+// result on both.
+trailer_field_forbidden :: proc(lower: string) -> bool {
+	switch lower {
+	case "connection", "proxy-connection", "keep-alive", "upgrade", "te", "transfer-encoding",
+	     "content-length", "content-type", "content-encoding", "content-range", "trailer", "host",
+	     "authorization", "proxy-authorization", "www-authenticate", "proxy-authenticate",
+	     "cache-control", "max-forwards", "set-cookie":
+		return true
+	}
+	return len(lower) > 0 && lower[0] == ':'
+}
 
 // Header values and body must survive until the server finishes sending.
 // Use request.allocator for dynamic response data.
@@ -93,21 +110,66 @@ response_headers :: proc(response: Response, buffer: []u8, keep_alive: bool = fa
 		profile = .Keep_Alive
 	}
 
+	// The server writes the framing fields itself. The encoder accepts a
+	// handler's own Content-Length only when it states the body's real length.
+	fields := response.headers
+
 	written, error := http1.response_head_encode_profile(
 		buffer,
-		{status = int(status), headers = response.headers, content_length = i64(len(response.body))},
+		{status = int(status), headers = fields, content_length = i64(len(response.body))},
 		profile,
 		max_bytes = RESPONSE_HEADER_LIMIT,
 	)
 
 	if error.kind != .None {
-		log.error("Invalid HTTP response headers:", error.kind)
+		if name, reason := response_header_fault(fields, profile, i64(len(response.body))); name != "" {
+			log.errorf("Invalid HTTP response header %q: %s", name, reason)
+		} else {
+			log.error("Invalid HTTP response headers:", error.kind)
+		}
 		return
 	}
 
 	return buffer[:written], true
 }
 
+// Names the first field the head encoder refuses, for the log line a handler
+// author needs. Empty when the fault is not one field (for example total size).
+response_header_fault :: proc(
+	fields: []Header,
+	profile: http1.Response_Profile,
+	content_length: i64,
+) -> (
+	name, reason: string,
+) {
+	index, fault := http1.response_fields_fault(fields, profile, content_length)
+	if index < 0 {
+		return "", ""
+	}
+	name = fields[index].name
+
+	switch fault {
+	case .None:
+		return "", ""
+	case .Invalid_Name:
+		reason = "the name is not a valid token"
+	case .Invalid_Value:
+		reason = "the value contains a control character"
+	case .Reserved:
+		reason = "the server sets this field; handlers must not"
+	case .Content_Length_Mismatch:
+		reason = "a Content-Length must equal the body length, and a streamed body of unknown length has none"
+	case .Upgrade_Outside_101:
+		reason = "only a 101 response may carry it"
+	case .Upgrade_Empty:
+		reason = "the value is empty"
+	}
+
+	return
+}
+
+// Deprecated blocking send; see write_connection. A handler should return its
+// Response instead, which is written without holding a worker.
 send_response :: proc(conn: ^Connection, response: Response, request_method: string = "") -> bool {
 	prepared := response
 
@@ -180,7 +242,9 @@ Response_Stream :: struct {
 	// Zero selects 64 KiB retained backing and 8 MiB total produced bytes.
 	max_chunk_bytes: int,
 	max_body_bytes:  i64,
-	// Total stream lifetime; zero inherits the ordinary response timeout.
+	// Total stream lifetime. Zero inherits the response timeout as a stall
+	// budget on HTTP/1: bytes the peer accepts re-arms it while the stream keeps
+	// the minimum average rate (see Timeout_Config).
 	timeout:         time.Duration,
 }
 
@@ -221,7 +285,9 @@ stream_wait :: proc(io: ^Stream_IO, deadline: async.Deadline) -> async.Error {
 	}
 	bounded := deadline
 	bounded.at = min(bounded.at, io._deadline.at)
-	error := async.sleep_until(io.runtime, bounded)
+	// One task serves every stream of an HTTP/2 or HTTP/3 connection, so a
+	// producer must not replace the earlier timer another one armed this turn.
+	error := async.sleep_until_earlier(io.runtime, bounded)
 	if error.kind == .Pending {
 		io._waiting = true
 	}
@@ -247,6 +313,12 @@ Response_Stream_State :: struct {
 	exchange:                   exchange.Exchange,
 	expires:                    time.Tick,
 	deadline:                   async.Deadline,
+	// Set when the stream inherited the response timeout: write progress moves
+	// `expires` forward by `stall`, never past what `sent` bytes earn since
+	// `started`, nor past the request deadline in `limit`.
+	stall:                      time.Duration,
+	started, limit:             time.Tick,
+	sent:                       i64,
 	prefix:                     [32]u8,
 	chunked, pending, terminal: bool,
 	max_chunk_bytes:            int,
@@ -262,6 +334,7 @@ drop_response_stream :: proc(task: ^Connection_Task) {
 	producer := old.producer
 	old.producer = {}
 	if producer.drop != nil {
+		context.allocator = request_default_allocator(task)
 		producer.drop(producer.data)
 	}
 	free(old, old.allocator)
@@ -323,7 +396,8 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 		limit = 64 * mem.Kilobyte
 	}
 	duration := producer.timeout
-	if duration == 0 {
+	inherits := duration == 0
+	if inherits {
 		duration = task.runtime.timeouts.response
 	}
 
@@ -335,6 +409,13 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 	state.max_chunk_bytes = limit
 	state.expires = time.tick_add(time.tick_now(), duration)
 	inherited := request_deadline(task.request.cancellation)
+
+	if inherits {
+		state.stall = duration
+		state.started = time.tick_now()
+		state.limit = inherited
+	}
+
 	if inherited != (time.Tick{}) && time.tick_diff(inherited, state.expires) > 0 {
 		state.expires = inherited
 	}
@@ -386,7 +467,7 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 			return resource_reject(task)
 		}
 
-		observe_failure(task, .Protocol_Error)
+		stream_head_fault(task, response.headers, content_length = producer.content_length)
 		return false
 	}
 
@@ -408,14 +489,24 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 	if task.reuse_after_write {
 		profile = .Keep_Alive
 	}
-	n, e := http1.response_stream_head_encode(buffer, stored, profile, method, max_bytes = RESPONSE_HEADER_LIMIT)
+	// An HTTP/1.0 peer cannot read chunked framing: a body of unknown length is
+	// delimited by closing the connection, which request_wants_close ensures.
+	legacy := task.request.version == HTTP_VERSION_1_0 && producer.content_length < 0
+	n: int
+	e: http.Error
+
+	if legacy {
+		n, e = http1.response_head_encode_profile(buffer, stored, .Close, method, max_bytes = RESPONSE_HEADER_LIMIT)
+	} else {
+		n, e = http1.response_stream_head_encode(buffer, stored, profile, method, max_bytes = RESPONSE_HEADER_LIMIT)
+	}
 
 	if e.kind != .None {
-		observe_failure(task, .Protocol_Error)
+		stream_head_fault(task, stored.headers, profile, stored.content_length)
 		return false
 	}
 
-	state.chunked = producer.content_length < 0
+	state.chunked = producer.content_length < 0 && !legacy
 
 	if !http.response_body_allowed(int(status), task.request.method) {
 		if exchange.finish(&state.exchange).kind != .None {
@@ -431,6 +522,52 @@ queue_stream_response :: proc(task: ^Connection_Task, response: Response) -> boo
 	}
 
 	return stream_write_budget(task)
+}
+
+stream_head_fault :: proc(
+	task: ^Connection_Task,
+	fields: []Header,
+	profile: http1.Response_Profile = .Close,
+	content_length: i64 = -1,
+) {
+	observe_failure(task, .Protocol_Error)
+	task.response_rejected = true
+
+	if name, reason := response_header_fault(fields, profile, content_length); name != "" {
+		log.errorf("Invalid HTTP response header %q: %s", name, reason)
+	} else {
+		log.error("Invalid HTTP stream response head")
+	}
+}
+
+// Called after the peer accepted `count` stream bytes. A stream that inherited
+// the response timeout earns a fresh stall window while it keeps the minimum
+// average rate; a stream with its own timeout keeps that fixed lifetime.
+stream_progress :: proc(task: ^Connection_Task, count: int) {
+	state := task.streaming
+	if state == nil || state.stall <= 0 {
+		return
+	}
+	state.sent += i64(count)
+	now := time.tick_now()
+	next := time.tick_add(now, state.stall)
+	allowed := time.tick_add(state.started, transfer_budget(state.stall, state.sent))
+
+	if time.tick_diff(allowed, next) > 0 {
+		next = allowed
+	}
+
+	if state.limit != (time.Tick{}) && time.tick_diff(state.limit, next) > 0 {
+		next = state.limit
+	}
+
+	if time.tick_diff(state.expires, next) > 0 {
+		state.expires = next
+		state.deadline = async.deadline_after(&task.runtime.executor, time.tick_diff(now, next))
+	}
+
+	remaining := time.tick_diff(now, state.expires)
+	arm_write_deadline(task, min(remaining, task.runtime.timeouts.response))
 }
 
 // Records the outcome when the stream budget or its request context has ended.
@@ -465,7 +602,11 @@ produce_stream :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		_deadline         = state.deadline,
 	}
 
-	step := state.producer.next(state.producer.data, &io)
+	step: Stream_Step
+	{
+		context.allocator = request_default_allocator(task)
+		step = state.producer.next(state.producer.data, &io)
+	}
 	if stream_interrupted(task) {
 		return .Done
 	}
@@ -621,8 +762,31 @@ drop_upgrade :: proc(task: ^Connection_Task) {
 	owned := task.upgrade
 	task.upgrade = {}
 	if owned.drop != nil {
+		context.allocator = request_default_allocator(task)
 		owned.drop(owned.data)
 	}
+}
+
+// One call of the upgrade handler, as the application code it is.
+resume_upgrade :: proc(task: ^Connection_Task, io: ^Upgrade_IO) -> async.Resume_Result {
+	context.allocator = request_default_allocator(task)
+	return task.upgrade.resume(task.upgrade.data, io)
+}
+
+// The allocator application code sees as context.allocator while it serves
+// this request: the request's heap, unless the server names another one.
+request_default_allocator :: proc(task: ^Connection_Task) -> mem.Allocator {
+	if task.runtime != nil && task.runtime.config.handler_allocator.procedure != nil {
+		return task.runtime.config.handler_allocator
+	}
+	return request_heap_allocator(task)
+}
+
+// Runs the drops of a response the server will not serve, as the application
+// code they are.
+discard_request_response :: proc(task: ^Connection_Task, response: ^Response) {
+	context.allocator = request_default_allocator(task)
+	discard_response(response)
 }
 
 // Callback borrows remain valid until resume returns, even after consumption.

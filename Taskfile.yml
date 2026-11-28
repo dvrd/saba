@@ -1,0 +1,174 @@
+version: '3'
+
+tasks:
+  default:
+    cmds:
+      - task: test
+
+  test:
+    aliases: [check]
+    desc: Run the Odin test suites
+    vars:
+      COMPILER: '{{default "odin" .ODIN}}'
+      RUNNER: '{{default "/tmp" .TMPDIR}}/saba-test-{{(now).UnixNano}}'
+    summary: |
+      Run the Odin suites against an isolated copy of the checkout.
+
+      task test
+      task test -- unit/assets
+      task test -- -define:ODIN_TEST_THREADS=1
+      task test -- --help
+
+      The default uses krs install --frozen in a private, temporary Odin root.
+      ODIN overrides the compiler. WEBTOOLS_SHARED or --shared selects an
+      existing development collection instead of installing the lock.
+    deps: [browser-driver]
+    cmds:
+      - defer: 'rm -f -- "{{.RUNNER}}"'
+      - '"{{.COMPILER}}" run tests/run.odin -file -out:"{{.RUNNER}}" -- {{.CLI_ARGS}}'
+
+  browser-driver:
+    internal: true
+    desc: Install the locked Playwright package for the Firefox and WebKit UI tests
+    dir: tests/browser/driver
+    # Runs only when npm exists and the lock changed since the last install.
+    # Without the package the Firefox and WebKit tests log a skip notice.
+    status:
+      - '! command -v npm >/dev/null || cmp -s package-lock.json node_modules/.saba-installed-lock'
+    cmds:
+      - |
+        if npm ci --ignore-scripts --no-bin-links --no-audit --no-fund; then
+          cp package-lock.json node_modules/.saba-installed-lock
+        else
+          echo "Could not install tests/browser/driver; the Firefox and WebKit UI tests will be skipped." >&2
+        fi
+
+  bench:mesa:
+    desc: Measure the synthetic item editor in Chromium against the Odin fixture
+    vars:
+      COMPILER: '{{default "odin" .ODIN}}'
+      RUNNER: '{{default "/tmp" .TMPDIR}}/saba-mesa-bench-{{(now).UnixNano}}'
+    env:
+      SABA_BENCH_SHARED: '{{.WEBTOOLS_SHARED}}'
+    cmds:
+      - defer: 'rm -f -- "{{.RUNNER}}"'
+      - |
+        set -eu
+        bench_shared="$SABA_BENCH_SHARED"
+        if [ -z "$bench_shared" ]; then
+          bench_root=$(mktemp -d "${TMPDIR:-/tmp}/saba-bench-root.XXXXXX")
+          trap 'rm -rf -- "$bench_root"' EXIT
+          krs install --frozen --root="$bench_root"
+          bench_shared="$bench_root/shared"
+        fi
+        "{{.COMPILER}}" run benchmarks/mesa -o:speed -out:"{{.RUNNER}}" -collection:shared="$bench_shared" -- bench {{.MESA_SUITE_ARGS}} {{.CLI_ARGS}}
+
+  bench:compiled-editor:
+    desc: Compare the compiled editor with the original synthetic editor prototype
+    cmds:
+      - task: bench:mesa
+        vars:
+          MESA_SUITE_ARGS: '--suite generated'
+
+  bench:windowed-editor:
+    desc: Measure the compiled editor with buffered rows and with all rows mounted
+    cmds:
+      - task: bench:mesa
+        vars:
+          MESA_SUITE_ARGS: '--suite windowed'
+
+  bench:frameworks:
+    desc: Build and measure production Saba, vanilla JS, Solid, React, Svelte and htmx editors
+    cmds:
+      - task: framework-bundles
+      - task: bench:mesa
+        vars:
+          MESA_SUITE_ARGS: '--suite frameworks'
+
+  bench:operations:
+    desc: Compare the read-only Mesa v2 Operations view in Desk, Solid and compiled Saba
+    vars:
+      BROWSER_DRIVER: '{{default "node" .SABA_BENCH_NODE}}'
+    cmds:
+      - '"{{.BROWSER_DRIVER}}" benchmarks/frameworks/operations/run.mjs {{.CLI_ARGS}}'
+
+  bench:compiled-preload:
+    desc: Measure generated module preloads during a cold compiled page visit
+    vars:
+      BROWSER_DRIVER: '{{default "node" .SABA_BENCH_NODE}}'
+    cmds:
+      - '"{{.BROWSER_DRIVER}}" benchmarks/frameworks/compiled-preload/run.mjs {{.CLI_ARGS}}'
+
+  framework-bundles:
+    internal: true
+    dir: benchmarks/frameworks
+    cmds:
+      - npm ci --ignore-scripts --prefer-offline --no-audit --no-fund
+      - npm run build
+
+  bench:dashboard:
+    desc: Measure a multi-component board, state transitions, drag and animation in seven implementations
+    vars:
+      BROWSER_DRIVER: '{{default "node" .SABA_BENCH_NODE}}'
+    cmds:
+      - task: dashboard-bundles
+      - '"{{.BROWSER_DRIVER}}" benchmarks/frameworks/rich/measure.mjs {{.CLI_ARGS}}'
+
+  dashboard-bundles:
+    internal: true
+    dir: benchmarks/frameworks
+    cmds:
+      - npm ci --ignore-scripts --prefer-offline --no-audit --no-fund
+      - node build.mjs --rich
+
+  bench:scale:
+    desc: Measure windowed and fully mounted grids across client renderers
+    vars:
+      BROWSER_DRIVER: '{{default "node" .SABA_BENCH_NODE}}'
+    cmds:
+      - task: scale-bundles
+        vars:
+          COMPILE_SABA: '{{contains "saba-compiled" (default "" .CLI_ARGS)}}'
+      - '"{{.BROWSER_DRIVER}}" benchmarks/frameworks/rich/scale-run.cjs {{.CLI_ARGS}}'
+
+  scale-bundles:
+    internal: true
+    dir: benchmarks/frameworks
+    cmds:
+      - npm ci --ignore-scripts --prefer-offline --no-audit --no-fund
+      - node build.mjs --scale {{if eq .COMPILE_SABA "true"}}--compiled-saba{{end}}
+
+  bench:fair:
+    desc: Compare keyed updates and slot recycling with vanilla, Preact, React, Solid, Svelte and Idiomorph
+    vars:
+      BROWSER_DRIVER: '{{default "node" .SABA_BENCH_NODE}}'
+    cmds:
+      - task: fair-bundles
+      - '"{{.BROWSER_DRIVER}}" benchmarks/frameworks/fair/run.mjs {{.CLI_ARGS}}'
+
+  fair-bundles:
+    internal: true
+    dir: benchmarks/frameworks
+    cmds:
+      - npm ci --ignore-scripts --prefer-offline --no-audit --no-fund
+      - node fair/build.mjs
+
+  bench:window:
+    desc: Check buffered row ranges and measure scrolling across one million local records
+    vars:
+      BROWSER_DRIVER: '{{default "node" .SABA_BENCH_NODE}}'
+    cmds:
+      - '"{{.BROWSER_DRIVER}}" --test benchmarks/frameworks/experiments/sliding-window-test.mjs'
+      - '"{{.BROWSER_DRIVER}}" benchmarks/frameworks/experiments/window-scroll.cjs {{if .CLI_ARGS}}{{.CLI_ARGS}}{{else}}/tmp/saba-window-scroll.json{{end}}'
+
+  bench:mesa-sheet:
+    desc: Measure the actual Mesa sheet module from MESA_CHECKOUT using synthetic records
+    vars:
+      BROWSER_DRIVER: '{{default "node" .SABA_BENCH_NODE}}'
+    cmds:
+      - '"{{.BROWSER_DRIVER}}" benchmarks/mesa/mesa-sheet.cjs {{.CLI_ARGS}}'
+
+  bench:mesa-preload:
+    desc: Compare constrained editor startup with and without preloading its shared modules
+    cmds:
+      - 'bash benchmarks/mesa/preload.sh {{.CLI_ARGS}}'

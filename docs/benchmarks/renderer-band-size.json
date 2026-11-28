@@ -1,0 +1,71 @@
+{
+  "scope": "One standalone renderer module exporting mount(host, records), with replace and dispose. Includes keyed structural fallback. Excludes page, data, styles, benchmark driver and HTTP headers. The shared workload uses immutable normalized records with contiguous numeric keys.",
+  "esbuildVersion": "0.28.2",
+  "options": {
+    "format": "esm",
+    "platform": "browser",
+    "target": "es2022",
+    "charset": "ascii",
+    "bundle": true,
+    "treeShaking": true,
+    "legalComments": "none"
+  },
+  "compression": {
+    "brotliQuality": 11,
+    "gzipLevel": 9
+  },
+  "zlibVersion": "1.3.1-e00f703",
+  "brotliVersion": "1.2.0",
+  "sourceSha256": {
+    "fixed-cell.js": "e4810ae8880fe83b8aa996029656abd97a9d90a667dc4219f2672ffb71543e93",
+    "rich/scale.js": "37e3b1b31157b6ba41b8876d67f2fdbff822c2adf0a026486141956994b3ea9e",
+    "text-band.js": "9102d242b35b51ec819cc9313f91b3b760b216461088c184196d2a4a6ca77177"
+  },
+  "entries": {
+    "saba-fixed-input-attr": {
+      "inputBytes": 2094,
+      "unminified": {
+        "bytes": 1981,
+        "brotliBytes": 616,
+        "gzipBytes": 721,
+        "sha256": "519e9b0d466ae2e56c20582c982f5f65c89737bce5182275b812be00200b0464"
+      },
+      "minified": {
+        "bytes": 1006,
+        "brotliBytes": 479,
+        "gzipBytes": 544,
+        "sha256": "e23ccc05a75dfd3f8b44e0f3e29878967d5966e57ccbc0326aebdbbb60b8abf5"
+      }
+    },
+    "saba-band-text": {
+      "inputBytes": 2575,
+      "unminified": {
+        "bytes": 2301,
+        "brotliBytes": 693,
+        "gzipBytes": 801,
+        "sha256": "bc2f44f63b5586ae3891d16e1d8e50f937dbb2deafb2ee45826c1229eee57d8e"
+      },
+      "minified": {
+        "bytes": 1038,
+        "brotliBytes": 500,
+        "gzipBytes": 585,
+        "sha256": "4db42ff3484e72bbd6a59007d281e6bdc7f7ad6beb972460fd392abfb359aa9b"
+      }
+    },
+    "saba-band-dom": {
+      "inputBytes": 2574,
+      "unminified": {
+        "bytes": 2301,
+        "brotliBytes": 699,
+        "gzipBytes": 802,
+        "sha256": "fb7f499f8048f3fec325d89f4fc21b536634a2f9524e26866d8e9997c31bcaff"
+      },
+      "minified": {
+        "bytes": 1040,
+        "brotliBytes": 506,
+        "gzipBytes": 585,
+        "sha256": "08c85993a14166d56b5d1ab7ad7675c23b70962418a0e8c1845a56b25c88fd64"
+      }
+    }
+  }
+}

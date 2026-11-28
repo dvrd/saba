@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>Telemetry cells</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { font: 15px system-ui,sans-serif; color: #e5edf3; background: #15202b; }
+  body { max-width: 1040px; margin: 20px auto; padding-inline: 20px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; }
+  h1 { font-size: 1.5rem; } h2 { margin: 0; font-size: 1rem; }
+  button { font: inherit; padding: .35rem .65rem; }
+  #status { height: 24px; margin: 8px 0; } #status > span { display: block; }
+  #viewport { height: 416px; overflow-y: auto; outline: 1px solid #64788a; }
+  #space { position: relative; }
+  .band { display: grid; grid-template-columns: repeat(8, minmax(0,1fr)); contain: layout paint; }
+  .cell { box-sizing: border-box; height: 26px; line-height: 25px; overflow: hidden;
+          white-space: nowrap; border-right: 1px solid #40505d; border-bottom: 1px solid #40505d;
+          padding-inline: 6px; font: 12px/25px ui-monospace,monospace; }
+  .cell:nth-child(2n) { background: #202f3f; }
+</style>
+<header><h1>Telemetry cells</h1><nav><button disabled id="mutate">Adjust sampled scores</button>
+<button disabled id="jump">Show final row</button></nav></header>
+<h2>Station and score</h2><p id="status" role="status">Preparing records</p>
+<div id="viewport"><div id="space"></div></div>
+<script type="module" src="/scale.js"></script>
+</html>

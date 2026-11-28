@@ -1,0 +1,12 @@
+{
+  "witness": {
+    "status": "Celda A2 guardada · evento 1 · 1000 de 1000 filas · doble clic para editar",
+    "display": "",
+    "input": "Item 1",
+    "focused": true
+  },
+  "serverTitle": "Saved quicktype",
+  "saveRequests": [
+    "POST /api/sandbox/sheets/edit"
+  ]
+}

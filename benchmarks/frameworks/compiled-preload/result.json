@@ -1,0 +1,568 @@
+{
+  "fixture": "testdata/ui/item.jsx",
+  "generatedAt": "2026-11-20T07:11:25.506Z",
+  "generation": "/__saba/build/23aa35af-adf3-4448-8693-6d7d124a634b",
+  "chromium": "145.0.7632.6",
+  "cpu": "Apple M1 Max",
+  "transport": "loopback HTTP/1.1",
+  "profile": {
+    "latencyMs": 60,
+    "downMbps": 10,
+    "upMbps": 2,
+    "cpuRate": 4
+  },
+  "pairs": 12,
+  "excludedWarmupPairs": 1,
+  "freshContext": true,
+  "browserCacheDisabled": true,
+  "controlDocumentSHA256": "d567106b3e75c5154ded3e337b0a42ae60d3dbb0b1d9700dc552addc71533fce",
+  "hintedDocumentSHA256": "f9207aa6792183f82b6f864d4813c8f36e0c3be0640ca5eb5eee395db2802896",
+  "startupHints": [
+    "/__saba/template-entry.js",
+    "/ui/.saba-view-0-0.js",
+    "/__saba/dom.js",
+    "/__saba/editor.js",
+    "/__saba/mutations.js",
+    "/ui/history-helper.js",
+    "/__saba/attach.js"
+  ],
+  "entry": "/__saba/entry-0-0.js",
+  "sharedDecodedBodySHA256": {
+    "/__saba/template-entry.js": "33f86e5ae2f8c32aa29350dcbc0173c7cac7e197e0c4c13a82359d6302e77103",
+    "/ui/.saba-view-0-0.js": "66e50bd791c03c633166029d2458e309c0e53ff90dd0cf1bae3f4aabb5d40f3c",
+    "/__saba/dom.js": "9a3f4be770052ec766e48a875081d545517a82406ff54000a0aa6d07abbdc14b",
+    "/__saba/editor.js": "9c3f10f11b89175ec90ee7f87ef63d35084d3dfdcc8e58b13276488ffa9e735f",
+    "/__saba/mutations.js": "9cb6bbe52bec00a16b7ef4256fed9e9c1cffa813c04d66c9ac37fc61f5d8e8c4",
+    "/ui/history-helper.js": "d9ca998fb952189621433721a42f90805bbe9124f45419045fc804d8e2834ba6",
+    "/__saba/attach.js": "458db286d04b18d17acdc7849895a55c95f74079c840d952da504381bb8caa92",
+    "/__saba/entry-0-0.js": "d915eaaa0a9c148486048bb9b9bfb28e1f6c4d586efcd131c8ba5573f48c7bcd",
+    "/api/test-session": "598a685a4f1422590c1c33fe729ea0ebf7dc8c7ab1baa5d033ebe9ef49692009",
+    "/api/items/42": "cc2f3fa5579cb3b57d4a1bc6b72d5a42704270db8ce16de1b8745b9c12a64c64"
+  },
+  "summary": {
+    "eligibleFrameMs": {
+      "offMedian": 461.2,
+      "onMedian": 368.4,
+      "pairedMedianOnMinusOff": -91.6,
+      "pairsLowerWithHints": 12
+    },
+    "followingFrameMs": {
+      "offMedian": 467.8,
+      "onMedian": 375.1,
+      "pairedMedianOnMinusOff": -91.8,
+      "pairsLowerWithHints": 12
+    },
+    "encodedHTMLBytes": {
+      "offMedian": 648,
+      "onMedian": 353,
+      "pairedMedianOnMinusOff": -295,
+      "pairsLowerWithHints": 12
+    }
+  },
+  "trials": [
+    {
+      "pair": 1,
+      "mode": "off",
+      "eligibleFrameMs": 457.1,
+      "followingFrameMs": 463.3,
+      "documentResponseEndMs": 65.3,
+      "encodedHTMLBytes": 648,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 1,
+      "mode": "on",
+      "eligibleFrameMs": 366.1,
+      "followingFrameMs": 372.1,
+      "documentResponseEndMs": 65.1,
+      "encodedHTMLBytes": 353,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 2,
+      "mode": "on",
+      "eligibleFrameMs": 365.6,
+      "followingFrameMs": 371.4,
+      "documentResponseEndMs": 67.5,
+      "encodedHTMLBytes": 353,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 2,
+      "mode": "off",
+      "eligibleFrameMs": 463.5,
+      "followingFrameMs": 472.3,
+      "documentResponseEndMs": 70.7,
+      "encodedHTMLBytes": 648,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 3,
+      "mode": "off",
+      "eligibleFrameMs": 466.7,
+      "followingFrameMs": 474.7,
+      "documentResponseEndMs": 66.8,
+      "encodedHTMLBytes": 648,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 3,
+      "mode": "on",
+      "eligibleFrameMs": 368.9,
+      "followingFrameMs": 375.8,
+      "documentResponseEndMs": 63.8,
+      "encodedHTMLBytes": 353,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 4,
+      "mode": "on",
+      "eligibleFrameMs": 373.2,
+      "followingFrameMs": 378.9,
+      "documentResponseEndMs": 70.8,
+      "encodedHTMLBytes": 353,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 4,
+      "mode": "off",
+      "eligibleFrameMs": 459.9,
+      "followingFrameMs": 467.2,
+      "documentResponseEndMs": 64,
+      "encodedHTMLBytes": 648,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 5,
+      "mode": "off",
+      "eligibleFrameMs": 463.1,
+      "followingFrameMs": 469.5,
+      "documentResponseEndMs": 71.1,
+      "encodedHTMLBytes": 648,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 5,
+      "mode": "on",
+      "eligibleFrameMs": 358.7,
+      "followingFrameMs": 364.5,
+      "documentResponseEndMs": 63.7,
+      "encodedHTMLBytes": 353,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 6,
+      "mode": "on",
+      "eligibleFrameMs": 364.9,
+      "followingFrameMs": 372.9,
+      "documentResponseEndMs": 66.1,
+      "encodedHTMLBytes": 353,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 6,
+      "mode": "off",
+      "eligibleFrameMs": 461.7,
+      "followingFrameMs": 467.9,
+      "documentResponseEndMs": 68.8,
+      "encodedHTMLBytes": 648,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 7,
+      "mode": "off",
+      "eligibleFrameMs": 457.6,
+      "followingFrameMs": 463.5,
+      "documentResponseEndMs": 65.7,
+      "encodedHTMLBytes": 648,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 7,
+      "mode": "on",
+      "eligibleFrameMs": 374.5,
+      "followingFrameMs": 380.9,
+      "documentResponseEndMs": 65.6,
+      "encodedHTMLBytes": 353,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 8,
+      "mode": "on",
+      "eligibleFrameMs": 365.2,
+      "followingFrameMs": 372.2,
+      "documentResponseEndMs": 66.6,
+      "encodedHTMLBytes": 353,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 8,
+      "mode": "off",
+      "eligibleFrameMs": 456.6,
+      "followingFrameMs": 462.6,
+      "documentResponseEndMs": 64.2,
+      "encodedHTMLBytes": 648,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 9,
+      "mode": "off",
+      "eligibleFrameMs": 457.2,
+      "followingFrameMs": 463,
+      "documentResponseEndMs": 65.8,
+      "encodedHTMLBytes": 648,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 9,
+      "mode": "on",
+      "eligibleFrameMs": 370.1,
+      "followingFrameMs": 376.9,
+      "documentResponseEndMs": 68.2,
+      "encodedHTMLBytes": 353,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 10,
+      "mode": "on",
+      "eligibleFrameMs": 367.9,
+      "followingFrameMs": 374.3,
+      "documentResponseEndMs": 67,
+      "encodedHTMLBytes": 353,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 10,
+      "mode": "off",
+      "eligibleFrameMs": 465,
+      "followingFrameMs": 470.7,
+      "documentResponseEndMs": 70.8,
+      "encodedHTMLBytes": 648,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 11,
+      "mode": "off",
+      "eligibleFrameMs": 463.4,
+      "followingFrameMs": 470.5,
+      "documentResponseEndMs": 72.9,
+      "encodedHTMLBytes": 648,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 11,
+      "mode": "on",
+      "eligibleFrameMs": 371.6,
+      "followingFrameMs": 378,
+      "documentResponseEndMs": 66.6,
+      "encodedHTMLBytes": 353,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 12,
+      "mode": "on",
+      "eligibleFrameMs": 372.1,
+      "followingFrameMs": 379.4,
+      "documentResponseEndMs": 70.6,
+      "encodedHTMLBytes": 353,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    },
+    {
+      "pair": 12,
+      "mode": "off",
+      "eligibleFrameMs": 460.7,
+      "followingFrameMs": 467.7,
+      "documentResponseEndMs": 67.8,
+      "encodedHTMLBytes": 648,
+      "originRequests": {
+        "/ui/.saba-view-0-0.js": 1,
+        "/ui/history-helper.js": 1,
+        "/api/test-session": 1,
+        "/__saba/attach.js": 1,
+        "/__saba/mutations.js": 1,
+        "/__saba/dom.js": 1,
+        "/api/items/42": 1,
+        "/__saba/template-entry.js": 1,
+        "/__saba/editor.js": 1,
+        "/items/42": 1,
+        "/__saba/entry-0-0.js": 1
+      }
+    }
+  ]
+}

@@ -1,0 +1,804 @@
+{
+  "method": "Fresh full headless Chromium per visit. Four alternating paired rounds, same planned Saba cell and one million local records. Continuous movement by one scrollTop assignment per animation frame, then native wheels through Playwright. A capture listener samples coverage before the fixture scroll handler. A requestAnimationFrame observer checks range against actual DOM and hit-tests first and last visible rows. Reconciliation time counts the fixture synchronous window work. rAF intervals include the observer and represent main-thread sampling, not compositor presentation or input-to-paint latency.",
+  "count": 1000000,
+  "cpu": "Apple M1 Max",
+  "motion": [
+    13,
+    13,
+    13,
+    13,
+    13,
+    13,
+    13,
+    13,
+    13,
+    13,
+    13,
+    13,
+    13,
+    13,
+    13,
+    13,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    26,
+    -26,
+    -26,
+    -26,
+    -26,
+    -26,
+    -26,
+    -26,
+    -26,
+    -26,
+    -26,
+    -26,
+    -26,
+    78,
+    78,
+    78,
+    78,
+    78,
+    78,
+    78,
+    78,
+    -52,
+    -52,
+    -52,
+    -52,
+    -52,
+    -52,
+    -52,
+    -52,
+    -52,
+    -52,
+    -52,
+    -52,
+    -52,
+    -52
+  ],
+  "wheels": [
+    26,
+    52,
+    78,
+    208,
+    416,
+    832,
+    -52,
+    -208,
+    -416,
+    52,
+    78,
+    -26
+  ],
+  "sourceSha256": {
+    "/": "c1e8abdfcfde2a064e60d8652ef26f232dfc619053fbc8848e15c27eb6cb2341",
+    "/scale.js": "cad709dc47a6032bd292e8b5eb555031a3dc4970219082d9bc77cce7788aa3a0",
+    "/reactivity.js": "cfa46dbb650c3c66f79a60d998127d8df7981ed64f21dc404b083ae50b091469",
+    "/sliding-window.js": "94b867a8cb6c2fabb55d6bbe7be8d1b8705ae2d5fc8504ea86a040e950883f3f",
+    "driver": "7abd22fe43678f01aa455c16668ae08196f48f5e7549d9e99ecc7342922d7886"
+  },
+  "visits": [
+    {
+      "round": 1,
+      "scenario": "virtual",
+      "chromium": "145.0.7632.6",
+      "moves": {
+        "reconciles": 82,
+        "reconcileMs": 8.200000762939453,
+        "events": 82,
+        "trustedWheels": 0,
+        "frames": 84,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 8,
+        "uncoveredFrames": 0,
+        "maxMounted": 168,
+        "p95RafIntervalMs": 9.299999999999955,
+        "maxRafIntervalMs": 9.399999999999977,
+        "uncoveredBeforeEvent": 8,
+        "misses": [
+          {
+            "delta": 78,
+            "top": 806,
+            "first": 208,
+            "end": 368
+          },
+          {
+            "delta": 78,
+            "top": 884,
+            "first": 232,
+            "end": 392
+          },
+          {
+            "delta": 78,
+            "top": 962,
+            "first": 256,
+            "end": 416
+          },
+          {
+            "delta": 78,
+            "top": 1040,
+            "first": 280,
+            "end": 440
+          },
+          {
+            "delta": 78,
+            "top": 1118,
+            "first": 304,
+            "end": 464
+          },
+          {
+            "delta": 78,
+            "top": 1196,
+            "first": 328,
+            "end": 488
+          },
+          {
+            "delta": 78,
+            "top": 1274,
+            "first": 352,
+            "end": 512
+          },
+          {
+            "delta": 78,
+            "top": 1352,
+            "first": 376,
+            "end": 536
+          }
+        ]
+      },
+      "wheel": {
+        "reconciles": 12,
+        "reconcileMs": 3.100000023841858,
+        "events": 12,
+        "trustedWheels": 12,
+        "frames": 26,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 7,
+        "uncoveredFrames": 0,
+        "maxMounted": 160,
+        "p95RafIntervalMs": 8.799999999999955,
+        "maxRafIntervalMs": 8.899999999999977
+      },
+      "resized": {
+        "before": false,
+        "after": false,
+        "mounted": 160
+      },
+      "retainedAfterScroll": 96,
+      "jump": {
+        "frames": {
+          "reconciles": 1,
+          "reconcileMs": 0.7000000476837158,
+          "events": 1,
+          "trustedWheels": 0,
+          "frames": 5,
+          "invalidRanges": 0,
+          "uncoveredBeforeScrollHandler": 1,
+          "uncoveredFrames": 0,
+          "maxMounted": 160,
+          "p95RafIntervalMs": 8.299999999999955,
+          "maxRafIntervalMs": 8.299999999999955
+        },
+        "mounted": 144,
+        "created": 1840,
+        "lastId": 999999,
+        "lastText": "999999 · 35"
+      },
+      "update": {
+        "changed": 10311,
+        "checksum": 499566514
+      }
+    },
+    {
+      "round": 1,
+      "scenario": "buffered",
+      "chromium": "145.0.7632.6",
+      "moves": {
+        "reconciles": 13,
+        "reconcileMs": 4.099999785423279,
+        "events": 82,
+        "trustedWheels": 0,
+        "frames": 84,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 0,
+        "uncoveredFrames": 0,
+        "maxMounted": 256,
+        "p95RafIntervalMs": 9.199999999999989,
+        "maxRafIntervalMs": 9.400000000000034,
+        "uncoveredBeforeEvent": 0,
+        "misses": []
+      },
+      "wheel": {
+        "reconciles": 7,
+        "reconcileMs": 3.0999999046325684,
+        "events": 12,
+        "trustedWheels": 12,
+        "frames": 26,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 4,
+        "uncoveredFrames": 0,
+        "maxMounted": 256,
+        "p95RafIntervalMs": 9.299999999999955,
+        "maxRafIntervalMs": 9.299999999999955
+      },
+      "resized": {
+        "before": false,
+        "after": true,
+        "mounted": 352
+      },
+      "retainedAfterScroll": 208,
+      "jump": {
+        "frames": {
+          "reconciles": 1,
+          "reconcileMs": 0.7000000476837158,
+          "events": 1,
+          "trustedWheels": 0,
+          "frames": 5,
+          "invalidRanges": 0,
+          "uncoveredBeforeScrollHandler": 1,
+          "uncoveredFrames": 0,
+          "maxMounted": 256,
+          "p95RafIntervalMs": 9.299999999999955,
+          "maxRafIntervalMs": 9.299999999999955
+        },
+        "mounted": 192,
+        "created": 1944,
+        "lastId": 999999,
+        "lastText": "999999 · 35"
+      },
+      "update": {
+        "changed": 10311,
+        "checksum": 499566514
+      }
+    },
+    {
+      "round": 2,
+      "scenario": "buffered",
+      "chromium": "145.0.7632.6",
+      "moves": {
+        "reconciles": 13,
+        "reconcileMs": 4.599999904632568,
+        "events": 82,
+        "trustedWheels": 0,
+        "frames": 84,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 0,
+        "uncoveredFrames": 0,
+        "maxMounted": 256,
+        "p95RafIntervalMs": 9.300000000000011,
+        "maxRafIntervalMs": 9.399999999999977,
+        "uncoveredBeforeEvent": 0,
+        "misses": []
+      },
+      "wheel": {
+        "reconciles": 7,
+        "reconcileMs": 3.3000000715255737,
+        "events": 12,
+        "trustedWheels": 12,
+        "frames": 26,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 4,
+        "uncoveredFrames": 0,
+        "maxMounted": 256,
+        "p95RafIntervalMs": 9.100000000000023,
+        "maxRafIntervalMs": 9.400000000000091
+      },
+      "resized": {
+        "before": false,
+        "after": true,
+        "mounted": 352
+      },
+      "retainedAfterScroll": 208,
+      "jump": {
+        "frames": {
+          "reconciles": 1,
+          "reconcileMs": 0.7999999523162842,
+          "events": 1,
+          "trustedWheels": 0,
+          "frames": 5,
+          "invalidRanges": 0,
+          "uncoveredBeforeScrollHandler": 1,
+          "uncoveredFrames": 0,
+          "maxMounted": 256,
+          "p95RafIntervalMs": 8.399999999999864,
+          "maxRafIntervalMs": 8.399999999999864
+        },
+        "mounted": 192,
+        "created": 1944,
+        "lastId": 999999,
+        "lastText": "999999 · 35"
+      },
+      "update": {
+        "changed": 10311,
+        "checksum": 499566514
+      }
+    },
+    {
+      "round": 2,
+      "scenario": "virtual",
+      "chromium": "145.0.7632.6",
+      "moves": {
+        "reconciles": 82,
+        "reconcileMs": 10.000000238418579,
+        "events": 82,
+        "trustedWheels": 0,
+        "frames": 84,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 8,
+        "uncoveredFrames": 0,
+        "maxMounted": 168,
+        "p95RafIntervalMs": 9.300000000000011,
+        "maxRafIntervalMs": 9.400000000000034,
+        "uncoveredBeforeEvent": 8,
+        "misses": [
+          {
+            "delta": 78,
+            "top": 806,
+            "first": 208,
+            "end": 368
+          },
+          {
+            "delta": 78,
+            "top": 884,
+            "first": 232,
+            "end": 392
+          },
+          {
+            "delta": 78,
+            "top": 962,
+            "first": 256,
+            "end": 416
+          },
+          {
+            "delta": 78,
+            "top": 1040,
+            "first": 280,
+            "end": 440
+          },
+          {
+            "delta": 78,
+            "top": 1118,
+            "first": 304,
+            "end": 464
+          },
+          {
+            "delta": 78,
+            "top": 1196,
+            "first": 328,
+            "end": 488
+          },
+          {
+            "delta": 78,
+            "top": 1274,
+            "first": 352,
+            "end": 512
+          },
+          {
+            "delta": 78,
+            "top": 1352,
+            "first": 376,
+            "end": 536
+          }
+        ]
+      },
+      "wheel": {
+        "reconciles": 12,
+        "reconcileMs": 3.3000000715255737,
+        "events": 12,
+        "trustedWheels": 12,
+        "frames": 26,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 7,
+        "uncoveredFrames": 0,
+        "maxMounted": 160,
+        "p95RafIntervalMs": 9,
+        "maxRafIntervalMs": 9.300000000000068
+      },
+      "resized": {
+        "before": false,
+        "after": false,
+        "mounted": 160
+      },
+      "retainedAfterScroll": 96,
+      "jump": {
+        "frames": {
+          "reconciles": 1,
+          "reconcileMs": 0.6000000238418579,
+          "events": 1,
+          "trustedWheels": 0,
+          "frames": 5,
+          "invalidRanges": 0,
+          "uncoveredBeforeScrollHandler": 1,
+          "uncoveredFrames": 0,
+          "maxMounted": 160,
+          "p95RafIntervalMs": 8.399999999999864,
+          "maxRafIntervalMs": 8.399999999999864
+        },
+        "mounted": 144,
+        "created": 1840,
+        "lastId": 999999,
+        "lastText": "999999 · 35"
+      },
+      "update": {
+        "changed": 10311,
+        "checksum": 499566514
+      }
+    },
+    {
+      "round": 3,
+      "scenario": "virtual",
+      "chromium": "145.0.7632.6",
+      "moves": {
+        "reconciles": 82,
+        "reconcileMs": 9.399999976158142,
+        "events": 82,
+        "trustedWheels": 0,
+        "frames": 84,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 8,
+        "uncoveredFrames": 0,
+        "maxMounted": 168,
+        "p95RafIntervalMs": 9,
+        "maxRafIntervalMs": 9.399999999999977,
+        "uncoveredBeforeEvent": 8,
+        "misses": [
+          {
+            "delta": 78,
+            "top": 806,
+            "first": 208,
+            "end": 368
+          },
+          {
+            "delta": 78,
+            "top": 884,
+            "first": 232,
+            "end": 392
+          },
+          {
+            "delta": 78,
+            "top": 962,
+            "first": 256,
+            "end": 416
+          },
+          {
+            "delta": 78,
+            "top": 1040,
+            "first": 280,
+            "end": 440
+          },
+          {
+            "delta": 78,
+            "top": 1118,
+            "first": 304,
+            "end": 464
+          },
+          {
+            "delta": 78,
+            "top": 1196,
+            "first": 328,
+            "end": 488
+          },
+          {
+            "delta": 78,
+            "top": 1274,
+            "first": 352,
+            "end": 512
+          },
+          {
+            "delta": 78,
+            "top": 1352,
+            "first": 376,
+            "end": 536
+          }
+        ]
+      },
+      "wheel": {
+        "reconciles": 12,
+        "reconcileMs": 3.299999952316284,
+        "events": 12,
+        "trustedWheels": 12,
+        "frames": 26,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 7,
+        "uncoveredFrames": 0,
+        "maxMounted": 160,
+        "p95RafIntervalMs": 9,
+        "maxRafIntervalMs": 9.200000000000045
+      },
+      "resized": {
+        "before": false,
+        "after": false,
+        "mounted": 160
+      },
+      "retainedAfterScroll": 96,
+      "jump": {
+        "frames": {
+          "reconciles": 1,
+          "reconcileMs": 0.5,
+          "events": 1,
+          "trustedWheels": 0,
+          "frames": 5,
+          "invalidRanges": 0,
+          "uncoveredBeforeScrollHandler": 1,
+          "uncoveredFrames": 0,
+          "maxMounted": 160,
+          "p95RafIntervalMs": 8.599999999999909,
+          "maxRafIntervalMs": 8.599999999999909
+        },
+        "mounted": 144,
+        "created": 1840,
+        "lastId": 999999,
+        "lastText": "999999 · 35"
+      },
+      "update": {
+        "changed": 10311,
+        "checksum": 499566514
+      }
+    },
+    {
+      "round": 3,
+      "scenario": "buffered",
+      "chromium": "145.0.7632.6",
+      "moves": {
+        "reconciles": 13,
+        "reconcileMs": 4.300000190734863,
+        "events": 82,
+        "trustedWheels": 0,
+        "frames": 84,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 0,
+        "uncoveredFrames": 0,
+        "maxMounted": 256,
+        "p95RafIntervalMs": 9.399999999999977,
+        "maxRafIntervalMs": 9.400000000000006,
+        "uncoveredBeforeEvent": 0,
+        "misses": []
+      },
+      "wheel": {
+        "reconciles": 7,
+        "reconcileMs": 3,
+        "events": 12,
+        "trustedWheels": 12,
+        "frames": 26,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 4,
+        "uncoveredFrames": 0,
+        "maxMounted": 256,
+        "p95RafIntervalMs": 8.700000000000045,
+        "maxRafIntervalMs": 8.800000000000182
+      },
+      "resized": {
+        "before": false,
+        "after": true,
+        "mounted": 352
+      },
+      "retainedAfterScroll": 208,
+      "jump": {
+        "frames": {
+          "reconciles": 1,
+          "reconcileMs": 0.7999999523162842,
+          "events": 1,
+          "trustedWheels": 0,
+          "frames": 5,
+          "invalidRanges": 0,
+          "uncoveredBeforeScrollHandler": 1,
+          "uncoveredFrames": 0,
+          "maxMounted": 256,
+          "p95RafIntervalMs": 8.700000000000045,
+          "maxRafIntervalMs": 8.700000000000045
+        },
+        "mounted": 192,
+        "created": 1944,
+        "lastId": 999999,
+        "lastText": "999999 · 35"
+      },
+      "update": {
+        "changed": 10311,
+        "checksum": 499566514
+      }
+    },
+    {
+      "round": 4,
+      "scenario": "buffered",
+      "chromium": "145.0.7632.6",
+      "moves": {
+        "reconciles": 13,
+        "reconcileMs": 4.200000047683716,
+        "events": 82,
+        "trustedWheels": 0,
+        "frames": 84,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 0,
+        "uncoveredFrames": 0,
+        "maxMounted": 256,
+        "p95RafIntervalMs": 9.099999999999994,
+        "maxRafIntervalMs": 9.300000000000011,
+        "uncoveredBeforeEvent": 0,
+        "misses": []
+      },
+      "wheel": {
+        "reconciles": 7,
+        "reconcileMs": 3.1000001430511475,
+        "events": 12,
+        "trustedWheels": 12,
+        "frames": 26,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 4,
+        "uncoveredFrames": 0,
+        "maxMounted": 256,
+        "p95RafIntervalMs": 9.299999999999955,
+        "maxRafIntervalMs": 9.300000000000068
+      },
+      "resized": {
+        "before": false,
+        "after": true,
+        "mounted": 352
+      },
+      "retainedAfterScroll": 208,
+      "jump": {
+        "frames": {
+          "reconciles": 1,
+          "reconcileMs": 0.8999999761581421,
+          "events": 1,
+          "trustedWheels": 0,
+          "frames": 5,
+          "invalidRanges": 0,
+          "uncoveredBeforeScrollHandler": 1,
+          "uncoveredFrames": 0,
+          "maxMounted": 256,
+          "p95RafIntervalMs": 8.799999999999955,
+          "maxRafIntervalMs": 8.799999999999955
+        },
+        "mounted": 192,
+        "created": 1944,
+        "lastId": 999999,
+        "lastText": "999999 · 35"
+      },
+      "update": {
+        "changed": 10311,
+        "checksum": 499566514
+      }
+    },
+    {
+      "round": 4,
+      "scenario": "virtual",
+      "chromium": "145.0.7632.6",
+      "moves": {
+        "reconciles": 82,
+        "reconcileMs": 9.300000548362732,
+        "events": 82,
+        "trustedWheels": 0,
+        "frames": 84,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 8,
+        "uncoveredFrames": 0,
+        "maxMounted": 168,
+        "p95RafIntervalMs": 9.300000000000011,
+        "maxRafIntervalMs": 9.400000000000091,
+        "uncoveredBeforeEvent": 8,
+        "misses": [
+          {
+            "delta": 78,
+            "top": 806,
+            "first": 208,
+            "end": 368
+          },
+          {
+            "delta": 78,
+            "top": 884,
+            "first": 232,
+            "end": 392
+          },
+          {
+            "delta": 78,
+            "top": 962,
+            "first": 256,
+            "end": 416
+          },
+          {
+            "delta": 78,
+            "top": 1040,
+            "first": 280,
+            "end": 440
+          },
+          {
+            "delta": 78,
+            "top": 1118,
+            "first": 304,
+            "end": 464
+          },
+          {
+            "delta": 78,
+            "top": 1196,
+            "first": 328,
+            "end": 488
+          },
+          {
+            "delta": 78,
+            "top": 1274,
+            "first": 352,
+            "end": 512
+          },
+          {
+            "delta": 78,
+            "top": 1352,
+            "first": 376,
+            "end": 536
+          }
+        ]
+      },
+      "wheel": {
+        "reconciles": 12,
+        "reconcileMs": 3.100000023841858,
+        "events": 12,
+        "trustedWheels": 12,
+        "frames": 26,
+        "invalidRanges": 0,
+        "uncoveredBeforeScrollHandler": 7,
+        "uncoveredFrames": 0,
+        "maxMounted": 160,
+        "p95RafIntervalMs": 8.799999999999955,
+        "maxRafIntervalMs": 9.299999999999955
+      },
+      "resized": {
+        "before": false,
+        "after": false,
+        "mounted": 160
+      },
+      "retainedAfterScroll": 96,
+      "jump": {
+        "frames": {
+          "reconciles": 1,
+          "reconcileMs": 0.5,
+          "events": 1,
+          "trustedWheels": 0,
+          "frames": 5,
+          "invalidRanges": 0,
+          "uncoveredBeforeScrollHandler": 1,
+          "uncoveredFrames": 0,
+          "maxMounted": 160,
+          "p95RafIntervalMs": 8.400000000000091,
+          "maxRafIntervalMs": 8.400000000000091
+        },
+        "mounted": 144,
+        "created": 1840,
+        "lastId": 999999,
+        "lastText": "999999 · 35"
+      },
+      "update": {
+        "changed": 10311,
+        "checksum": 499566514
+      }
+    }
+  ]
+}

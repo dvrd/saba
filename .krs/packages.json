@@ -1,0 +1,40 @@
+{
+  "format": 1,
+  "packages": [
+    {
+      "name": "async",
+      "source": "https://github.com/dvrd/async.git",
+      "tag": "v0.6.0",
+      "commit": "a6b7129bd211647bf54637accfea6d0516a7f9f6",
+      "hash": "05282ba53dcbd74baddd812504765f31ae6564082805595a73caec509f565995"
+    },
+    {
+      "name": "aws",
+      "source": "https://github.com/dvrd/aws.git",
+      "tag": "v0.4.0",
+      "commit": "6c5710cc509f1dfb4496f5d75f76db8f552d12ca",
+      "hash": "af93dd78604b4e59e0db654664311fb371938831d8e028ac2be481f95108fbaa"
+    },
+    {
+      "name": "kakunou",
+      "source": "https://github.com/dvrd/kakunou.git",
+      "tag": "v0.2.8",
+      "commit": "dc698e2b4dbd39fd861c445e674bc44105c46982",
+      "hash": "62a7a1fc3c01845f705dd6fc443b6e0b04f6ad058472b800d5ad63bb3a6652b0"
+    },
+    {
+      "name": "kessel",
+      "source": "https://github.com/dvrd/kessel.git",
+      "tag": "v0.22.0",
+      "commit": "eb1e8aa3f38dc285931394bf62900ca293920ee4",
+      "hash": "0a152bc771877ca4c400ce4f957bf8c87c3f602987f050d936c21f25c5183a62"
+    },
+    {
+      "name": "surf",
+      "source": "https://github.com/dvrd/surf.git",
+      "tag": "v0.5.0",
+      "commit": "e40eee471b083cbdca31cb6186576b973e329ae3",
+      "hash": "be94be831ab897081dbcc4cfbbb3150cbaa603fa98db42f486532470f92eb516"
+    }
+  ]
+}

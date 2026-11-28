@@ -1,0 +1,632 @@
+{
+  "chromium": "145.0.7632.6",
+  "cpu": "Apple M1 Max",
+  "settings": {
+    "cells": 4096,
+    "warmups": 12,
+    "blocks": 6,
+    "stepsPerBlock": 6
+  },
+  "sourceSha256": {
+    "fixture": "c1e8abdfcfde2a064e60d8652ef26f232dfc619053fbc8848e15c27eb6cb2341",
+    "renderer": "9102d242b35b51ec819cc9313f91b3b760b216461088c184196d2a4a6ca77177",
+    "fixedBand": "54961d697023a988b2b68c15ca44df05a82dec3c5a36aaa48f6d7a17dba1bd51",
+    "fixedCell": "1d443d0bdd30a18f984ace628957a3090135739451150e68a459826708557274",
+    "driver": "0c20af00c3fa1461277aa696c8959a67d1afbcd8f06fabe402bc355da7427b91"
+  },
+  "method": "One fresh page and context per variant and density visit, in the same serial browser. Six rounds cover all six variant orders per density. Each precomputed snapshot shares unchanged records and replaces affected records. Rotate the first edited ID modulo stride. Time blocks of synchronous replace calls after warm-up, each preceded by forced layout. Verify visible text and DOM identity outside timing. Values exclude presentation.",
+  "visits": [
+    {
+      "trial": 1,
+      "stride": 97,
+      "mode": "mountTextBand",
+      "blockMs": [
+        0.31499993801116943,
+        0.2849999666213989,
+        0.17499995231628418,
+        0.18000006675720215,
+        0.21500003337860107,
+        0.1799999475479126
+      ],
+      "msPerReplace": 0.037499997350904674,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 1,
+      "stride": 97,
+      "mode": "mountDomBand",
+      "blockMs": [
+        0.3700000047683716,
+        0.24500000476837158,
+        0.2549999952316284,
+        0.2549999952316284,
+        0.2200000286102295,
+        0.26499998569488525
+      ],
+      "msPerReplace": 0.04472222261958652,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 1,
+      "stride": 97,
+      "mode": "saba-fixed-input-attr",
+      "blockMs": [
+        0.4700000286102295,
+        0.5049999952316284,
+        0.2849999666213989,
+        0.39499998092651367,
+        0.2799999713897705,
+        0.2799999713897705
+      ],
+      "msPerReplace": 0.061527775393591985,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 1,
+      "stride": 1,
+      "mode": "saba-fixed-input-attr",
+      "blockMs": [
+        17.180000066757202,
+        15.31499993801117,
+        16.78500008583069,
+        20.360000014305115,
+        15.644999980926514,
+        15.769999980926514
+      ],
+      "msPerReplace": 2.8070833351877003,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 1,
+      "stride": 1,
+      "mode": "mountDomBand",
+      "blockMs": [
+        8.47000002861023,
+        7.7200000286102295,
+        7.924999952316284,
+        7.789999961853027,
+        7.834999918937683,
+        7.879999995231628
+      ],
+      "msPerReplace": 1.3227777745988634,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 1,
+      "stride": 1,
+      "mode": "mountTextBand",
+      "blockMs": [
+        6.129999995231628,
+        6.134999990463257,
+        6.170000076293945,
+        6.355000019073486,
+        6.519999980926514,
+        6.284999966621399
+      ],
+      "msPerReplace": 1.044305556350284,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 2,
+      "stride": 1,
+      "mode": "mountDomBand",
+      "blockMs": [
+        7.605000019073486,
+        7.710000038146973,
+        8.325000047683716,
+        7.829999923706055,
+        7.889999985694885,
+        7.760000109672546
+      ],
+      "msPerReplace": 1.3088888923327129,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 2,
+      "stride": 1,
+      "mode": "mountTextBand",
+      "blockMs": [
+        6.754999995231628,
+        5.980000019073486,
+        5.890000104904175,
+        6.034999966621399,
+        6.060000061988831,
+        6.820000052452087
+      ],
+      "msPerReplace": 1.042777783340878,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 2,
+      "stride": 1,
+      "mode": "saba-fixed-input-attr",
+      "blockMs": [
+        17.37000000476837,
+        15.284999966621399,
+        16.97000002861023,
+        19.819999933242798,
+        15.599999904632568,
+        16.875
+      ],
+      "msPerReplace": 2.831111106607649,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 2,
+      "stride": 97,
+      "mode": "mountDomBand",
+      "blockMs": [
+        0.4049999713897705,
+        0.29499995708465576,
+        0.2799999713897705,
+        0.2549999952316284,
+        0.24000000953674316,
+        0.24000000953674316
+      ],
+      "msPerReplace": 0.0476388865047031,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 2,
+      "stride": 97,
+      "mode": "saba-fixed-input-attr",
+      "blockMs": [
+        0.4700000286102295,
+        0.44499993324279785,
+        0.3349999189376831,
+        0.36500000953674316,
+        0.3349999189376831,
+        0.31000006198883057
+      ],
+      "msPerReplace": 0.06277777420149909,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 2,
+      "stride": 97,
+      "mode": "mountTextBand",
+      "blockMs": [
+        0.375,
+        0.23500001430511475,
+        0.18499994277954102,
+        0.31499993801116943,
+        0.21500003337860107,
+        0.18499994277954102
+      ],
+      "msPerReplace": 0.04194444086816576,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 3,
+      "stride": 97,
+      "mode": "saba-fixed-input-attr",
+      "blockMs": [
+        0.49000000953674316,
+        0.39499998092651367,
+        0.2749999761581421,
+        0.2950000762939453,
+        0.30000007152557373,
+        0.31499993801116943
+      ],
+      "msPerReplace": 0.05750000145700243,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 3,
+      "stride": 97,
+      "mode": "mountTextBand",
+      "blockMs": [
+        0.33500003814697266,
+        0.22999989986419678,
+        0.20000004768371582,
+        0.25,
+        0.19499993324279785,
+        0.21000003814697266
+      ],
+      "msPerReplace": 0.03944444325235155,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 3,
+      "stride": 97,
+      "mode": "mountDomBand",
+      "blockMs": [
+        0.3799999952316284,
+        0.31000006198883057,
+        0.2799999713897705,
+        0.26499998569488525,
+        0.26999998092651367,
+        0.2549999952316284
+      ],
+      "msPerReplace": 0.04888888862397936,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 3,
+      "stride": 1,
+      "mode": "mountTextBand",
+      "blockMs": [
+        6.225000023841858,
+        5.985000014305115,
+        6.054999947547913,
+        6.509999990463257,
+        6.129999995231628,
+        6.110000014305115
+      ],
+      "msPerReplace": 1.02819444404708,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 3,
+      "stride": 1,
+      "mode": "saba-fixed-input-attr",
+      "blockMs": [
+        16.605000019073486,
+        14.700000047683716,
+        15.575000047683716,
+        19.93499994277954,
+        15.274999976158142,
+        16.5
+      ],
+      "msPerReplace": 2.7386111120382943,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 3,
+      "stride": 1,
+      "mode": "mountDomBand",
+      "blockMs": [
+        8.580000042915344,
+        8.774999976158142,
+        8.56000006198883,
+        8.639999985694885,
+        8.739999890327454,
+        8.894999980926514
+      ],
+      "msPerReplace": 1.4497222205003102,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 4,
+      "stride": 1,
+      "mode": "mountTextBand",
+      "blockMs": [
+        6.199999928474426,
+        6.180000066757202,
+        6.2200000286102295,
+        6.394999980926514,
+        6.835000038146973,
+        6.300000071525574
+      ],
+      "msPerReplace": 1.059166669845581,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 4,
+      "stride": 1,
+      "mode": "mountDomBand",
+      "blockMs": [
+        7.580000042915344,
+        7.995000004768372,
+        8.669999957084656,
+        8.745000004768372,
+        8.725000023841858,
+        7.715000033378601
+      ],
+      "msPerReplace": 1.3730555574099224,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 4,
+      "stride": 1,
+      "mode": "saba-fixed-input-attr",
+      "blockMs": [
+        16.455000042915344,
+        15.375,
+        15.65500009059906,
+        20.08999991416931,
+        16.18499994277954,
+        16.03500008583069
+      ],
+      "msPerReplace": 2.7720833354526095,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 4,
+      "stride": 97,
+      "mode": "saba-fixed-input-attr",
+      "blockMs": [
+        0.46000003814697266,
+        0.4249999523162842,
+        0.33000004291534424,
+        0.3450000286102295,
+        0.31999993324279785,
+        0.3549998998641968
+      ],
+      "msPerReplace": 0.06208333041932848,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 4,
+      "stride": 97,
+      "mode": "mountDomBand",
+      "blockMs": [
+        0.41499996185302734,
+        0.2849999666213989,
+        0.25999999046325684,
+        0.25,
+        0.28000009059906006,
+        0.2549999952316284
+      ],
+      "msPerReplace": 0.04847222235467699,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 4,
+      "stride": 97,
+      "mode": "mountTextBand",
+      "blockMs": [
+        0.33500003814697266,
+        0.25,
+        0.19499993324279785,
+        0.24000000953674316,
+        0.20000004768371582,
+        0.20000004768371582
+      ],
+      "msPerReplace": 0.0394444465637207,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 5,
+      "stride": 97,
+      "mode": "mountDomBand",
+      "blockMs": [
+        0.36500000953674316,
+        0.2549999952316284,
+        0.2999999523162842,
+        0.26499998569488525,
+        0.26499998569488525,
+        0.3399999141693115
+      ],
+      "msPerReplace": 0.04972221785121494,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 5,
+      "stride": 97,
+      "mode": "mountTextBand",
+      "blockMs": [
+        0.2900000810623169,
+        0.2099999189376831,
+        0.16499996185302734,
+        0.16499996185302734,
+        0.17499995231628418,
+        0.1799999475479126
+      ],
+      "msPerReplace": 0.03291666176584032,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 5,
+      "stride": 97,
+      "mode": "saba-fixed-input-attr",
+      "blockMs": [
+        0.48500001430511475,
+        0.4450000524520874,
+        0.309999942779541,
+        0.33500003814697266,
+        0.33500003814697266,
+        0.34999990463256836
+      ],
+      "msPerReplace": 0.06277777751286824,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 5,
+      "stride": 1,
+      "mode": "mountDomBand",
+      "blockMs": [
+        7.649999976158142,
+        7.675000071525574,
+        7.685000061988831,
+        7.754999995231628,
+        7.710000038146973,
+        7.825000047683716
+      ],
+      "msPerReplace": 1.2861111164093018,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 5,
+      "stride": 1,
+      "mode": "saba-fixed-input-attr",
+      "blockMs": [
+        16.269999980926514,
+        15.120000004768372,
+        16.100000023841858,
+        20.62000000476837,
+        15.879999995231628,
+        15.690000057220459
+      ],
+      "msPerReplace": 2.7688888907432556,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 5,
+      "stride": 1,
+      "mode": "mountTextBand",
+      "blockMs": [
+        6.024999976158142,
+        6.069999933242798,
+        6.105000019073486,
+        6.434999942779541,
+        6.484999895095825,
+        6.435000061988831
+      ],
+      "msPerReplace": 1.0431944396760728,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 6,
+      "stride": 1,
+      "mode": "saba-fixed-input-attr",
+      "blockMs": [
+        16.014999985694885,
+        16.430000066757202,
+        16.62000000476837,
+        19.044999957084656,
+        15.650000095367432,
+        15.409999966621399
+      ],
+      "msPerReplace": 2.7547222243414984,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 6,
+      "stride": 1,
+      "mode": "mountTextBand",
+      "blockMs": [
+        6.759999990463257,
+        6.769999980926514,
+        6.784999966621399,
+        7.024999976158142,
+        6.884999990463257,
+        6.914999961853027
+      ],
+      "msPerReplace": 1.1427777740690443,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 6,
+      "stride": 1,
+      "mode": "mountDomBand",
+      "blockMs": [
+        8.669999957084656,
+        8.615000009536743,
+        8.670000076293945,
+        8.919999957084656,
+        8.605000019073486,
+        8.870000004768372
+      ],
+      "msPerReplace": 1.4541666673289404,
+      "timedWrites": 147456,
+      "verifiedCells": 4096,
+      "verificationWrites": 4096
+    },
+    {
+      "trial": 6,
+      "stride": 97,
+      "mode": "mountTextBand",
+      "blockMs": [
+        0.35500001907348633,
+        0.23000001907348633,
+        0.2200000286102295,
+        0.25999999046325684,
+        0.19999992847442627,
+        0.2250000238418579
+      ],
+      "msPerReplace": 0.041388889153798424,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 6,
+      "stride": 97,
+      "mode": "saba-fixed-input-attr",
+      "blockMs": [
+        0.5049999952316284,
+        0.46999990940093994,
+        0.38499999046325684,
+        0.3250000476837158,
+        0.2999999523162842,
+        0.35500001907348633
+      ],
+      "msPerReplace": 0.06499999761581421,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    },
+    {
+      "trial": 6,
+      "stride": 97,
+      "mode": "mountDomBand",
+      "blockMs": [
+        0.4950000047683716,
+        0.3049999475479126,
+        0.28000009059906006,
+        0.2549999952316284,
+        0.2700001001358032,
+        0.2849999666213989
+      ],
+      "msPerReplace": 0.052500002914004855,
+      "timedWrites": 1522,
+      "verifiedCells": 4096,
+      "verificationWrites": 42
+    }
+  ]
+}

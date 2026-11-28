@@ -1,0 +1,494 @@
+{
+  "created": "2026-11-23T04:18:56.053Z",
+  "machine": {
+    "cpu": "Apple M1 Max",
+    "cores": 10,
+    "memoryBytes": 34359738368
+  },
+  "options": {
+    "rounds": 1,
+    "reps": 2,
+    "smoke": false,
+    "heap": true,
+    "only": "",
+    "out": "/Users/kakurega/dev/projects/saba/benchmarks/frameworks/complex/heap.json",
+    "counts": {
+      "attrs": 100000,
+      "images": 50000,
+      "videos": 10000,
+      "nested": 20000,
+      "fields": 20000,
+      "sources": 50000
+    }
+  },
+  "baseline": {
+    "jsHeapUsed": 1270792,
+    "chromeNodes": 19
+  },
+  "scenarios": {
+    "attrs": {
+      "count": 100000,
+      "mode": "direct",
+      "callsKeyed": false,
+      "modules": 1,
+      "oneModule": "single module",
+      "byArm": {
+        "vanilla": {
+          "bytes": 1101,
+          "sha256": "c21e00cb6f283774345b2330455634f3ee8260249d5d48ad14c63c5da01d6b5b",
+          "failures": 0,
+          "jsHeapUsed": 4586156,
+          "chromeNodes": 200019,
+          "rows": 100000,
+          "domElements": 100000,
+          "comments": 0,
+          "texts": 100000,
+          "retainedBytes": 3315364,
+          "retainedPerRow": 33.15364
+        },
+        "saba": {
+          "bytes": 1164,
+          "sha256": "0e7540a7f1854ff3ffc5dc9a1222113c68a91e4498ea5b6aec42dd12166a8088",
+          "failures": 0,
+          "jsHeapUsed": 4588324,
+          "chromeNodes": 200019,
+          "rows": 100000,
+          "domElements": 100000,
+          "comments": 0,
+          "texts": 100000,
+          "retainedBytes": 3317532,
+          "retainedPerRow": 33.17532
+        }
+      },
+      "paired": {
+        "jsHeapUsed": 1.0004727270507152,
+        "chromeNodes": 1,
+        "rows": 1,
+        "domElements": 1,
+        "comments": null,
+        "texts": 1
+      },
+      "extraBytes": 2168,
+      "extraPerRow": 0.02168
+    },
+    "images": {
+      "count": 50000,
+      "mode": "runtime",
+      "callsKeyed": true,
+      "modules": 1,
+      "oneModule": "single module",
+      "byArm": {
+        "vanilla": {
+          "bytes": 929,
+          "sha256": "f59b132fb685d8fd56903a8a58f62ca3139002666d6595b8d9c1cbe3ead966e4",
+          "failures": 0,
+          "jsHeapUsed": 2183176,
+          "chromeNodes": 50019,
+          "rows": 50000,
+          "domElements": 50000,
+          "comments": 0,
+          "texts": 0,
+          "retainedBytes": 912384,
+          "retainedPerRow": 18.24768
+        },
+        "saba": {
+          "bytes": 14284,
+          "sha256": "cf3b8f6148a88a48cafdb2a47517d6969aa6742e30c628fd1bea57adbd6de968",
+          "failures": 0,
+          "jsHeapUsed": 128948856,
+          "chromeNodes": 200021,
+          "rows": 50000,
+          "domElements": 50000,
+          "comments": 100002,
+          "texts": 0,
+          "retainedBytes": 127678064,
+          "retainedPerRow": 2553.56128
+        }
+      },
+      "paired": {
+        "jsHeapUsed": 59.064801005507576,
+        "chromeNodes": 3.99890041784122,
+        "rows": 1,
+        "domElements": 1,
+        "comments": null,
+        "texts": null
+      },
+      "extraBytes": 126765680,
+      "extraPerRow": 2535.3136
+    },
+    "videos": {
+      "count": 10000,
+      "mode": "runtime",
+      "callsKeyed": true,
+      "modules": 1,
+      "oneModule": "single module",
+      "byArm": {
+        "vanilla": {
+          "bytes": 885,
+          "sha256": "0b6665c03ad4702454dd22f9184c915e07e948b8cd8f623b66e86ab175c75e7f",
+          "failures": 0,
+          "jsHeapUsed": 1679320,
+          "chromeNodes": 1480019,
+          "rows": 10000,
+          "domElements": 10000,
+          "comments": 0,
+          "texts": 0,
+          "retainedBytes": 408528,
+          "retainedPerRow": 40.8528
+        },
+        "saba": {
+          "bytes": 14280,
+          "sha256": "2c582cb8283c88f0e75e12f02ac809dba4e87840a357b55a87d88a9d3eeb7611",
+          "failures": 0,
+          "jsHeapUsed": 22007384,
+          "chromeNodes": 1510021,
+          "rows": 10000,
+          "domElements": 10000,
+          "comments": 20002,
+          "texts": 0,
+          "retainedBytes": 20736592,
+          "retainedPerRow": 2073.6592
+        }
+      },
+      "paired": {
+        "jsHeapUsed": 13.104937712883787,
+        "chromeNodes": 1.0202713613811714,
+        "rows": 1,
+        "domElements": 1,
+        "comments": null,
+        "texts": null
+      },
+      "extraBytes": 20328064,
+      "extraPerRow": 2032.8064
+    },
+    "nested": {
+      "count": 20000,
+      "mode": "runtime",
+      "callsKeyed": true,
+      "modules": 1,
+      "oneModule": "single module",
+      "byArm": {
+        "vanilla": {
+          "bytes": 1282,
+          "sha256": "4778ef850ee211f9a1577e2ad259cc1366a6ca5285067c10b41d520e5265399c",
+          "failures": 0,
+          "jsHeapUsed": 3008900,
+          "chromeNodes": 100019,
+          "rows": 20000,
+          "domElements": 80000,
+          "comments": 0,
+          "texts": 20000,
+          "retainedBytes": 1738108,
+          "retainedPerRow": 86.9054
+        },
+        "saba": {
+          "bytes": 14524,
+          "sha256": "f02ffcd9281d80db9cfce2463702501636891449c65b75f923da7bcf68c0d261",
+          "failures": 0,
+          "jsHeapUsed": 80947540,
+          "chromeNodes": 160021,
+          "rows": 20000,
+          "domElements": 80000,
+          "comments": 40002,
+          "texts": 20000,
+          "retainedBytes": 79676748,
+          "retainedPerRow": 3983.8374
+        }
+      },
+      "paired": {
+        "jsHeapUsed": 26.902701984113797,
+        "chromeNodes": 1.5999060178566074,
+        "rows": 1,
+        "domElements": 1,
+        "comments": null,
+        "texts": 1
+      },
+      "extraBytes": 77938640,
+      "extraPerRow": 3896.932
+    },
+    "fields": {
+      "count": 20000,
+      "mode": "runtime",
+      "callsKeyed": true,
+      "modules": 1,
+      "oneModule": "single module",
+      "byArm": {
+        "vanilla": {
+          "bytes": 930,
+          "sha256": "3ea37713701a81da822fa71418b176dada7d200c2dc5ca6dc2742af5a07e48c8",
+          "failures": 0,
+          "jsHeapUsed": 2025568,
+          "chromeNodes": 40019,
+          "rows": 20000,
+          "domElements": 20000,
+          "comments": 0,
+          "texts": 20000,
+          "retainedBytes": 754776,
+          "retainedPerRow": 37.7388
+        },
+        "saba": {
+          "bytes": 14348,
+          "sha256": "efd37c4d6e079002c4e0a728b99d4c908860ace4ce51d2515905b9e47e976dc6",
+          "failures": 0,
+          "jsHeapUsed": 45418536,
+          "chromeNodes": 100021,
+          "rows": 20000,
+          "domElements": 20000,
+          "comments": 40002,
+          "texts": 20000,
+          "retainedBytes": 44147744,
+          "retainedPerRow": 2207.3872
+        }
+      },
+      "paired": {
+        "jsHeapUsed": 22.422617260936192,
+        "chromeNodes": 2.4993378145380944,
+        "rows": 1,
+        "domElements": 1,
+        "comments": null,
+        "texts": 1
+      },
+      "extraBytes": 43392968,
+      "extraPerRow": 2169.6484
+    },
+    "sources": {
+      "count": 50000,
+      "mode": "direct",
+      "callsKeyed": false,
+      "modules": 2,
+      "oneModule": "redeclared textOf/create/move",
+      "byArm": {
+        "vanilla": {
+          "bytes": 1162,
+          "sha256": "4830519f3afc12df4a0743b60d21474824d0e5865b3f1d4034043a11f4b153c1",
+          "failures": 0,
+          "jsHeapUsed": 4584880,
+          "chromeNodes": 200021,
+          "rows": 100000,
+          "domElements": 100002,
+          "comments": 0,
+          "texts": 100000,
+          "retainedBytes": 3314088,
+          "retainedPerRow": 33.14088
+        },
+        "saba": {
+          "bytes": 2085,
+          "sha256": "f4292c543698bc8d80e62d4a7927b26d5a87c428bd0d1986c0dc76213d6e0276",
+          "failures": 0,
+          "jsHeapUsed": 4600804,
+          "chromeNodes": 200021,
+          "rows": 100000,
+          "domElements": 100002,
+          "comments": 0,
+          "texts": 100000,
+          "retainedBytes": 3330012,
+          "retainedPerRow": 33.30012
+        }
+      },
+      "paired": {
+        "jsHeapUsed": 1.0034731552407041,
+        "chromeNodes": 1,
+        "rows": 1,
+        "domElements": 1,
+        "comments": null,
+        "texts": 1
+      },
+      "extraBytes": 15924,
+      "extraPerRow": 0.15924
+    }
+  },
+  "visits": [
+    {
+      "round": 0,
+      "scenario": "attrs",
+      "arm": "vanilla",
+      "count": 100000,
+      "reps": 2,
+      "evalMs": 1.7000000476837158,
+      "mountMs": 148.90000009536743,
+      "rows": 100000,
+      "domElements": 100000,
+      "comments": 0,
+      "texts": 100000,
+      "jsHeapUsed": 4586156,
+      "chromeNodes": 200019,
+      "pageErrors": []
+    },
+    {
+      "round": 0,
+      "scenario": "attrs",
+      "arm": "saba",
+      "count": 100000,
+      "reps": 2,
+      "evalMs": 1.600000023841858,
+      "mountMs": 169.89999997615814,
+      "rows": 100000,
+      "domElements": 100000,
+      "comments": 0,
+      "texts": 100000,
+      "jsHeapUsed": 4588324,
+      "chromeNodes": 200019,
+      "pageErrors": []
+    },
+    {
+      "round": 0,
+      "scenario": "images",
+      "arm": "vanilla",
+      "count": 50000,
+      "reps": 2,
+      "evalMs": 1.5,
+      "mountMs": 94.80000007152557,
+      "rows": 50000,
+      "domElements": 50000,
+      "comments": 0,
+      "texts": 0,
+      "jsHeapUsed": 2183176,
+      "chromeNodes": 50019,
+      "pageErrors": []
+    },
+    {
+      "round": 0,
+      "scenario": "images",
+      "arm": "saba",
+      "count": 50000,
+      "reps": 2,
+      "evalMs": 1.8000000715255737,
+      "mountMs": 416,
+      "rows": 50000,
+      "domElements": 50000,
+      "comments": 100002,
+      "texts": 0,
+      "jsHeapUsed": 128948856,
+      "chromeNodes": 200021,
+      "pageErrors": []
+    },
+    {
+      "round": 0,
+      "scenario": "videos",
+      "arm": "vanilla",
+      "count": 10000,
+      "reps": 2,
+      "evalMs": 1.899999976158142,
+      "mountMs": 983.5,
+      "rows": 10000,
+      "domElements": 10000,
+      "comments": 0,
+      "texts": 0,
+      "jsHeapUsed": 1679320,
+      "chromeNodes": 1480019,
+      "pageErrors": []
+    },
+    {
+      "round": 0,
+      "scenario": "videos",
+      "arm": "saba",
+      "count": 10000,
+      "reps": 2,
+      "evalMs": 1.7000000476837158,
+      "mountMs": 1105.0999999046326,
+      "rows": 10000,
+      "domElements": 10000,
+      "comments": 20002,
+      "texts": 0,
+      "jsHeapUsed": 22007384,
+      "chromeNodes": 1510021,
+      "pageErrors": []
+    },
+    {
+      "round": 0,
+      "scenario": "nested",
+      "arm": "vanilla",
+      "count": 20000,
+      "reps": 2,
+      "evalMs": 1.399999976158142,
+      "mountMs": 63.39999997615814,
+      "rows": 20000,
+      "domElements": 80000,
+      "comments": 0,
+      "texts": 20000,
+      "jsHeapUsed": 3008900,
+      "chromeNodes": 100019,
+      "pageErrors": []
+    },
+    {
+      "round": 0,
+      "scenario": "nested",
+      "arm": "saba",
+      "count": 20000,
+      "reps": 2,
+      "evalMs": 1.600000023841858,
+      "mountMs": 312.1999999284744,
+      "rows": 20000,
+      "domElements": 80000,
+      "comments": 40002,
+      "texts": 20000,
+      "jsHeapUsed": 80947540,
+      "chromeNodes": 160021,
+      "pageErrors": []
+    },
+    {
+      "round": 0,
+      "scenario": "fields",
+      "arm": "vanilla",
+      "count": 20000,
+      "reps": 2,
+      "evalMs": 1.2999999523162842,
+      "mountMs": 18.200000047683716,
+      "rows": 20000,
+      "domElements": 20000,
+      "comments": 0,
+      "texts": 20000,
+      "jsHeapUsed": 2025568,
+      "chromeNodes": 40019,
+      "pageErrors": []
+    },
+    {
+      "round": 0,
+      "scenario": "fields",
+      "arm": "saba",
+      "count": 20000,
+      "reps": 2,
+      "evalMs": 1.600000023841858,
+      "mountMs": 125.80000007152557,
+      "rows": 20000,
+      "domElements": 20000,
+      "comments": 40002,
+      "texts": 20000,
+      "jsHeapUsed": 45418536,
+      "chromeNodes": 100021,
+      "pageErrors": []
+    },
+    {
+      "round": 0,
+      "scenario": "sources",
+      "arm": "vanilla",
+      "count": 50000,
+      "reps": 2,
+      "evalMs": 1.399999976158142,
+      "mountMs": 93.89999997615814,
+      "rows": 100000,
+      "domElements": 100002,
+      "comments": 0,
+      "texts": 100000,
+      "jsHeapUsed": 4584880,
+      "chromeNodes": 200021,
+      "pageErrors": []
+    },
+    {
+      "round": 0,
+      "scenario": "sources",
+      "arm": "saba",
+      "count": 50000,
+      "reps": 2,
+      "evalMs": 1.5,
+      "mountMs": 92.60000002384186,
+      "rows": 100000,
+      "domElements": 100002,
+      "comments": 0,
+      "texts": 100000,
+      "jsHeapUsed": 4600804,
+      "chromeNodes": 200021,
+      "pageErrors": []
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+{
+  "mesa": "7bc8044ab02c2daf23bab432c325b39a99d6da7d",
+  "chromium": "145.0.7632.6",
+  "locale": "es",
+  "profile": "behavior smoke, no performance timings",
+  "results": [
+    {
+      "variant": "desk",
+      "operationRequests": {
+        "cold": 1,
+        "loadMore": 2,
+        "refresh": 3,
+        "warmBack": 3,
+        "retry": 5,
+        "reload": 6
+      },
+      "pagination": {
+        "heading": false,
+        "filter": false,
+        "firstRow": false,
+        "focus": "body"
+      },
+      "refresh": {
+        "heading": false,
+        "filter": false,
+        "firstRow": false,
+        "focus": "body"
+      },
+      "deniedEntry": true,
+      "expiredSessionRedirect": true
+    },
+    {
+      "variant": "saba",
+      "operationRequests": {
+        "cold": 1,
+        "loadMore": 2,
+        "refresh": 3,
+        "warmBack": 3,
+        "retry": 5,
+        "reload": 6
+      },
+      "pagination": {
+        "heading": true,
+        "filter": true,
+        "firstRow": true,
+        "focus": "sheet-filter"
+      },
+      "refresh": {
+        "heading": true,
+        "filter": true,
+        "firstRow": false,
+        "focus": "sheet-filter"
+      },
+      "deniedEntry": true,
+      "expiredSessionRedirect": true
+    },
+    {
+      "variant": "solid",
+      "operationRequests": {
+        "cold": 1,
+        "loadMore": 2,
+        "refresh": 3,
+        "warmBack": 3,
+        "retry": 5,
+        "reload": 6
+      },
+      "pagination": {
+        "heading": true,
+        "filter": true,
+        "firstRow": true,
+        "focus": "sheet-filter"
+      },
+      "refresh": {
+        "heading": true,
+        "filter": true,
+        "firstRow": false,
+        "focus": "sheet-filter"
+      },
+      "deniedEntry": true,
+      "expiredSessionRedirect": true
+    }
+  ]
+}

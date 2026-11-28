@@ -1,0 +1,108 @@
+{
+  "created": "2026-11-23T01:42:59.862Z",
+  "machine": {
+    "cpu": "Apple M1 Max",
+    "cores": 10,
+    "memoryBytes": 34359738368
+  },
+  "options": {
+    "rounds": 3,
+    "count": 1000000,
+    "reps": 2,
+    "out": "/Users/kakurega/dev/projects/saba/benchmarks/frameworks/million/result.json"
+  },
+  "byArm": {
+    "vanilla": {
+      "bytes": 553,
+      "sha256": "e40dfa3706877e58153cfc4d9a623a179299c9e1dfa486e313e31f0595360934",
+      "failures": 0,
+      "evalMs": 1.7999999523162842,
+      "mountMs": 1275.6000000238419,
+      "sparseMs": 36.30000001192093,
+      "denseMs": 77.10000002384186
+    },
+    "saba": {
+      "bytes": 553,
+      "sha256": "e40dfa3706877e58153cfc4d9a623a179299c9e1dfa486e313e31f0595360934",
+      "failures": 0,
+      "evalMs": 1.899999976158142,
+      "mountMs": 1283.9000000953674,
+      "sparseMs": 36.450000047683716,
+      "denseMs": 76.75
+    }
+  },
+  "visits": [
+    {
+      "round": 0,
+      "arm": "vanilla",
+      "count": 1000000,
+      "reps": 2,
+      "evalMs": 1.7999999523162842,
+      "mountMs": 1236.8999999761581,
+      "sparseMs": 36.30000001192093,
+      "denseMs": 77.04999995231628,
+      "elements": 1000000,
+      "pageErrors": []
+    },
+    {
+      "round": 0,
+      "arm": "saba",
+      "count": 1000000,
+      "reps": 2,
+      "evalMs": 1.6999999284744263,
+      "mountMs": 1283.9000000953674,
+      "sparseMs": 36.450000047683716,
+      "denseMs": 76.75,
+      "elements": 1000000,
+      "pageErrors": []
+    },
+    {
+      "round": 1,
+      "arm": "saba",
+      "count": 1000000,
+      "reps": 2,
+      "evalMs": 1.899999976158142,
+      "mountMs": 1232.8999999761581,
+      "sparseMs": 36.44999998807907,
+      "denseMs": 76.65000003576279,
+      "elements": 1000000,
+      "pageErrors": []
+    },
+    {
+      "round": 1,
+      "arm": "vanilla",
+      "count": 1000000,
+      "reps": 2,
+      "evalMs": 1.600000023841858,
+      "mountMs": 1275.6000000238419,
+      "sparseMs": 36.09999996423721,
+      "denseMs": 77.10000002384186,
+      "elements": 1000000,
+      "pageErrors": []
+    },
+    {
+      "round": 2,
+      "arm": "vanilla",
+      "count": 1000000,
+      "reps": 2,
+      "evalMs": 1.7999999523162842,
+      "mountMs": 1295.7000000476837,
+      "sparseMs": 40.64999997615814,
+      "denseMs": 79.05000001192093,
+      "elements": 1000000,
+      "pageErrors": []
+    },
+    {
+      "round": 2,
+      "arm": "saba",
+      "count": 1000000,
+      "reps": 2,
+      "evalMs": 2.100000023841858,
+      "mountMs": 1298.3999999761581,
+      "sparseMs": 36.85000002384186,
+      "denseMs": 77.09999996423721,
+      "elements": 1000000,
+      "pageErrors": []
+    }
+  ]
+}

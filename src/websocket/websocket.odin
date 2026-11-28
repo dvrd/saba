@@ -2,10 +2,9 @@ package saba_websocket
 
 import "core:time"
 import core "../core"
-import codec "shared:websocket"
+import codec "shared:async/websocket"
 import "core:mem"
-import charged "core:mem/budget"
-import budget "core:sync/budget"
+import budget "shared:async/budget"
 import async "shared:async"
 import "core:unicode/utf8"
 import rt "base:runtime"
@@ -48,6 +47,15 @@ config_normalize :: proc(config: Config) -> (Config, Error) {
 	}
 	if result.close_timeout == 0 {
 		result.close_timeout = time.Second
+	}
+	// A peer that only receives never resets the idle timer by itself, and a
+	// browser cannot originate pings. The server pings at half the idle timeout
+	// so the peer's pong keeps a healthy receive-only session open.
+	if result.ping_interval == 0 {
+		result.ping_interval = result.idle_timeout / 2
+	}
+	if result.ping_interval > 24 * time.Hour {
+		return {}, {kind = .Invalid_Config}
 	}
 	if result.max_frame_bytes < 1 ||
 	   result.max_frame_bytes > MAX_MESSAGE_BYTES ||
@@ -93,14 +101,14 @@ new_session :: proc(
 	if !scope_managed(scope) {
 		return nil, {kind = .Invalid_Context}
 	}
-	binding, binding_error := charged.create(scope, {backing = backing})
+	binding, binding_error := budget.create(scope, {backing = backing})
 	if binding_error.kind != .None {
 		return nil, {kind = .Budget_Rejected, budget = binding_error.budget, allocation = binding_error.allocation}
 	}
-	allocator := charged.allocator(binding)
+	allocator := budget.allocator(binding)
 	session, allocation := new(Session, allocator)
 	if allocation != nil {
-		charged.release(&binding)
+		budget.binding_release(&binding)
 		return nil, {kind = .Allocation_Failed, allocation = allocation}
 	}
 	resolved.check_origin, resolved.select_subprotocol, resolved.policy_data = nil, nil, nil
@@ -166,7 +174,7 @@ drop_session :: proc(data: rawptr) {
 	binding, allocator := session.binding, session.allocator
 	mem.zero(session, size_of(Session))
 	free(session, allocator)
-	charged.release(&binding)
+	budget.binding_release(&binding)
 
 	if owned {
 		if app.on_close != nil {
@@ -182,6 +190,10 @@ reset_read :: proc(session: ^Session, io: ^IO) {
 	session.header_used, session.header_expected, session.payload_used = 0, 2, 0
 	session.reading_payload, session.payload = false, nil
 	session.read_deadline = async.deadline_after(io._transport.runtime, session.config.idle_timeout)
+	session.ping_deadline = {}
+	if session.config.ping_interval > 0 {
+		session.ping_deadline = async.deadline_after(io._transport.runtime, session.config.ping_interval)
+	}
 
 	if session.message_deadline.epoch != 0 && session.message_deadline.at < session.read_deadline.at {
 		session.read_deadline = session.message_deadline
@@ -213,7 +225,12 @@ accept_header :: proc(session: ^Session, io: ^IO) -> Step {
 		session.payload = session.control_input[:int(header.payload_length)]
 	} else {
 		if session.close_requested {
-			return .Done
+			// The peer may have sent messages before it saw the Close. They are
+			// read and dropped until its own Close arrives or close_deadline ends.
+			session.discarding, session.discard_left = true, header.payload_length
+			session.payload = session.control_input[:int(min(session.discard_left, u64(len(session.control_input))))]
+			session.reading_payload, session.payload_used = true, 0
+			return .Progress
 		}
 
 		if session.fragments == session.config.max_fragments {
@@ -257,6 +274,18 @@ accept_header :: proc(session: ^Session, io: ^IO) -> Step {
 }
 
 finish_frame :: proc(session: ^Session, io: ^IO) -> Step {
+	if session.discarding {
+		session.discard_left -= u64(len(session.payload))
+		if session.discard_left > 0 {
+			session.payload = session.control_input[:int(min(session.discard_left, u64(len(session.control_input))))]
+			session.payload_used = 0
+			return .Progress
+		}
+		session.discarding = false
+		reset_read(session, io)
+		return .Progress
+	}
+
 	session.metrics.frames_in += 1
 	opcode := session.header.opcode
 
@@ -555,6 +584,15 @@ wait_session :: proc(session: ^Session, io: ^IO, read, write: bool) -> async.Res
 	transport := io._transport
 	deadline := semantic_deadline(session)
 
+	// Wake for the keepalive ping as well; unlike the semantic deadlines its
+	// expiry sends a frame instead of ending the session.
+	if !session.close_requested &&
+	   session.control_used == 0 &&
+	   session.ping_deadline.epoch != 0 &&
+	   (deadline.epoch == 0 || session.ping_deadline.at < deadline.at) {
+		deadline = session.ping_deadline
+	}
+
 	if transport.stream_wait != nil {
 		error := transport.stream_wait(transport.stream_data, read, write, deadline)
 		if error.kind == .None || error.kind == .Timeout {
@@ -667,6 +705,9 @@ Config :: struct {
 	max_frame_bytes, max_message_bytes, max_output_bytes, output_capacity:      int,
 	max_fragments:                                                              int,
 	idle_timeout, frame_timeout, message_timeout, write_timeout, close_timeout: time.Duration,
+	// Server keepalive ping cadence, measured from the last inbound frame. Zero
+	// selects half of idle_timeout; a negative value disables server pings.
+	ping_interval:                                                              time.Duration,
 	check_origin:                                                               proc(
 		data: rawptr,
 		request: ^core.Request,
@@ -761,7 +802,7 @@ Session :: struct {
 	config:                                                      Config,
 	app:                                                         Application,
 	allocator:                                                   mem.Allocator,
-	binding:                                                     charged.Binding,
+	binding:                                                     budget.Binding,
 	request_context:                                             core.Request_Context,
 	owns_app, opened, dropped, writable_wanted:                  bool,
 	protocol:                                                    string,
@@ -776,6 +817,8 @@ Session :: struct {
 	control_used, control_sent:                                  int,
 	control_close:                                               bool,
 	close_requested, close_sent, peer_closed, abort_after_close: bool,
+	discarding:                                                  bool,
+	discard_left:                                                u64,
 	close_payload:                                               [125]u8,
 	close_size:                                                  int,
 	close_deadline, control_deadline:                            async.Deadline,
@@ -789,6 +832,7 @@ Session :: struct {
 	message:                                                     codec.Message_State,
 	fragments:                                                   int,
 	read_deadline, message_deadline:                             async.Deadline,
+	ping_deadline:                                               async.Deadline,
 }
 
 Upgrade_Fields :: struct {
@@ -1132,6 +1176,18 @@ write_step :: proc(session: ^Session, io: ^IO) -> Step {
 		assert(error == .None)
 		session.control_used, session.control_sent, session.control_close = count, 0, true
 		session.control_deadline = session.close_deadline
+	}
+
+	if session.control_used == 0 &&
+	   !session.close_requested &&
+	   session.ping_deadline.epoch != 0 &&
+	   async.deadline_after(transport.runtime, 0).at >= session.ping_deadline.at {
+		count, error := codec.frame_encode(session.control[:], true, .Ping, nil, {}, false)
+		assert(error == .None)
+		session.control_used, session.control_sent, session.control_close = count, 0, false
+		session.control_deadline = async.deadline_after(transport.runtime, session.config.write_timeout)
+		// One ping per quiet interval; any inbound frame, the pong included, re-arms it.
+		session.ping_deadline = async.deadline_after(transport.runtime, session.config.ping_interval)
 	}
 
 	if session.control_used > 0 {

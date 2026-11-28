@@ -1,0 +1,274 @@
+{
+  "method": [
+    "One isolated Chromium process per mode. Allocate records with window.scale.start() before the baseline garbage collection.",
+    "Mount and lay out five 4,096-cell bands with window.scale.step(). After two animation frames collect garbage, read CDP counters and capture the heap.",
+    "Heap metrics and object counts are mounted minus baseline for each mode. JS and embedder counters come from CDP Runtime.getHeapUsage.",
+    "Each shallow byte count excludes descendants. Named closure groups are subsets of allClosures. The process RSS benchmark is independent."
+  ],
+  "visits": [
+    {
+      "mode": "saba-band-dom",
+      "cells": 20480,
+      "browser": "145.0.7632.6",
+      "cpu": "Apple M1 Max",
+      "sourceHashes": {
+        "/": "c1e8abdfcfde2a064e60d8652ef26f232dfc619053fbc8848e15c27eb6cb2341",
+        "/scale.js": "504c81fd33dd19ba578f52fc3b775f27f772a58415ba9858052cadc0d07c41ac",
+        "/reactivity.js": "cfa46dbb650c3c66f79a60d998127d8df7981ed64f21dc404b083ae50b091469",
+        "/fixed-cell.js": "e4810ae8880fe83b8aa996029656abd97a9d90a667dc4219f2672ffb71543e93",
+        "/scale-react.js": "1b174949646bbb1cd807b18a6189a3b259576da3300c70615642d28e0ddbdcae",
+        "/text-band.js": "9102d242b35b51ec819cc9313f91b3b760b216461088c184196d2a4a6ca77177"
+      },
+      "base": {
+        "heap": {
+          "usedSize": 1798964,
+          "totalSize": 2670592,
+          "embedderHeapUsedSize": 344704,
+          "backingStorageSize": 16227
+        },
+        "dom": {
+          "documents": 1,
+          "nodes": 37,
+          "jsEventListeners": 16
+        }
+      },
+      "full": {
+        "heap": {
+          "usedSize": 2126572,
+          "totalSize": 2932736,
+          "embedderHeapUsedSize": 53502376,
+          "backingStorageSize": 16245
+        },
+        "dom": {
+          "documents": 1,
+          "nodes": 41002,
+          "jsEventListeners": 16
+        }
+      },
+      "heap": {
+        "usedSize": {
+          "bytes": 327608,
+          "bytesPerCell": 15.996484375
+        },
+        "embedderHeapUsedSize": {
+          "bytes": 53157672,
+          "bytesPerCell": 2595.589453125
+        }
+      },
+      "dom": {
+        "documents": 0,
+        "nodes": 40965,
+        "jsEventListeners": 0
+      },
+      "classes": {
+        "allClosures": {
+          "count": 23,
+          "shallowBytes": 680
+        },
+        "closure.dispose": {
+          "count": 5,
+          "shallowBytes": 140
+        },
+        "lexicalContext": {
+          "count": 5,
+          "shallowBytes": 160
+        },
+        "Text": {
+          "count": 20480,
+          "shallowBytes": 1638400
+        },
+        "cellElement": {
+          "count": 20480,
+          "shallowBytes": 2135952
+        },
+        "DOMStringMap": {
+          "count": 5,
+          "shallowBytes": 248
+        }
+      },
+      "sampleEdges": {},
+      "directReferences": {
+        "arrayEntriesPointingToText": 0,
+        "fixedCellLabelPropertiesPointingToText": 0
+      }
+    },
+    {
+      "mode": "saba-band-text",
+      "cells": 20480,
+      "browser": "145.0.7632.6",
+      "cpu": "Apple M1 Max",
+      "sourceHashes": {
+        "/": "c1e8abdfcfde2a064e60d8652ef26f232dfc619053fbc8848e15c27eb6cb2341",
+        "/scale.js": "cfc7f9f69b63385624a50acdaf709e80627af109acc9b8c7c25c4391fbe4eb9f",
+        "/reactivity.js": "cfa46dbb650c3c66f79a60d998127d8df7981ed64f21dc404b083ae50b091469",
+        "/fixed-cell.js": "e4810ae8880fe83b8aa996029656abd97a9d90a667dc4219f2672ffb71543e93",
+        "/scale-react.js": "1b174949646bbb1cd807b18a6189a3b259576da3300c70615642d28e0ddbdcae",
+        "/text-band.js": "9102d242b35b51ec819cc9313f91b3b760b216461088c184196d2a4a6ca77177"
+      },
+      "base": {
+        "heap": {
+          "usedSize": 1798952,
+          "totalSize": 2670592,
+          "embedderHeapUsedSize": 345248,
+          "backingStorageSize": 16229
+        },
+        "dom": {
+          "documents": 1,
+          "nodes": 37,
+          "jsEventListeners": 16
+        }
+      },
+      "full": {
+        "heap": {
+          "usedSize": 2453252,
+          "totalSize": 3457024,
+          "embedderHeapUsedSize": 53502440,
+          "backingStorageSize": 16247
+        },
+        "dom": {
+          "documents": 1,
+          "nodes": 41002,
+          "jsEventListeners": 16
+        }
+      },
+      "heap": {
+        "usedSize": {
+          "bytes": 654300,
+          "bytesPerCell": 31.9482421875
+        },
+        "embedderHeapUsedSize": {
+          "bytes": 53157192,
+          "bytesPerCell": 2595.566015625
+        }
+      },
+      "dom": {
+        "documents": 0,
+        "nodes": 40965,
+        "jsEventListeners": 0
+      },
+      "classes": {
+        "allClosures": {
+          "count": 35,
+          "shallowBytes": 1024
+        },
+        "lexicalContext": {
+          "count": 5,
+          "shallowBytes": 160
+        },
+        "closure.dispose": {
+          "count": 5,
+          "shallowBytes": 140
+        },
+        "Text": {
+          "count": 20480,
+          "shallowBytes": 1966080
+        },
+        "cellElement": {
+          "count": 20480,
+          "shallowBytes": 2041856
+        },
+        "DOMStringMap": {
+          "count": 5,
+          "shallowBytes": 232
+        }
+      },
+      "sampleEdges": {},
+      "directReferences": {
+        "arrayEntriesPointingToText": 20480,
+        "fixedCellLabelPropertiesPointingToText": 0
+      }
+    },
+    {
+      "mode": "saba-fixed-input-attr",
+      "cells": 20480,
+      "browser": "145.0.7632.6",
+      "cpu": "Apple M1 Max",
+      "sourceHashes": {
+        "/": "c1e8abdfcfde2a064e60d8652ef26f232dfc619053fbc8848e15c27eb6cb2341",
+        "/scale.js": "5fbbbfe487076b799ae09a073ce78d9ed2c7334867b616a60869b25f221073ed",
+        "/reactivity.js": "cfa46dbb650c3c66f79a60d998127d8df7981ed64f21dc404b083ae50b091469",
+        "/fixed-cell.js": "1d443d0bdd30a18f984ace628957a3090135739451150e68a459826708557274",
+        "/scale-react.js": "1b174949646bbb1cd807b18a6189a3b259576da3300c70615642d28e0ddbdcae"
+      },
+      "base": {
+        "heap": {
+          "usedSize": 1799460,
+          "totalSize": 2932736,
+          "embedderHeapUsedSize": 345248,
+          "backingStorageSize": 14599
+        },
+        "dom": {
+          "documents": 1,
+          "nodes": 37,
+          "jsEventListeners": 16
+        }
+      },
+      "full": {
+        "heap": {
+          "usedSize": 3194820,
+          "totalSize": 4243456,
+          "embedderHeapUsedSize": 53502440,
+          "backingStorageSize": 14617
+        },
+        "dom": {
+          "documents": 1,
+          "nodes": 41002,
+          "jsEventListeners": 16
+        }
+      },
+      "heap": {
+        "usedSize": {
+          "bytes": 1395360,
+          "bytesPerCell": 68.1328125
+        },
+        "embedderHeapUsedSize": {
+          "bytes": 53157192,
+          "bytesPerCell": 2595.566015625
+        }
+      },
+      "dom": {
+        "documents": 0,
+        "nodes": 40965,
+        "jsEventListeners": 0
+      },
+      "classes": {
+        "allClosures": {
+          "count": 30,
+          "shallowBytes": 864
+        },
+        "lexicalContext": {
+          "count": 5,
+          "shallowBytes": 140
+        },
+        "closure.dispose": {
+          "count": 5,
+          "shallowBytes": 140
+        },
+        "Text": {
+          "count": 20480,
+          "shallowBytes": 1966080
+        },
+        "cellElement": {
+          "count": 20480,
+          "shallowBytes": 2293760
+        },
+        "DOMStringMap": {
+          "count": 5,
+          "shallowBytes": 264
+        },
+        "fixedCell": {
+          "count": 20480,
+          "shallowBytes": 491520
+        }
+      },
+      "sampleEdges": {},
+      "directReferences": {
+        "arrayEntriesPointingToText": 0,
+        "fixedCellLabelPropertiesPointingToText": 20480
+      }
+    }
+  ],
+  "reproduce": [
+    "node benchmarks/frameworks/experiments/cell-heap.cjs <empty-directory> saba-fixed-input-attr,saba-band-text,saba-band-dom"
+  ]
+}

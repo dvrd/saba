@@ -1,0 +1,968 @@
+{
+  "metadata": {
+    "generatedAt": "2026-11-20T00:30:13.749Z",
+    "cpu": "Apple M1 Max",
+    "os": "Darwin 27.2.0",
+    "totalMemoryMiB": 32768,
+    "viewport": [
+      1200,
+      900
+    ],
+    "trials": 3,
+    "fullCapacityTrials": 1,
+    "sourceSha256": {
+      "benchmarks/frameworks/build.mjs": "4c52aba697f99136c2088f96d78155505ede1b2fce7074df45e6b8090a3359cd",
+      "benchmarks/frameworks/package-lock.json": "0566fc286086eacd7ff53b228a043e7437f0ba7e1932aac3ea3d9f438cdc12ce",
+      "benchmarks/frameworks/dist/scale/manifest.json": "f89e00eaae1fb89cde8cedd69358e8ead5aaa70432d0120fbc281be3dd99dfc4",
+      "benchmarks/frameworks/rich/scale-react.jsx": "baaf256bfe7f369d9f85565d3f2b6b6227233da2247f66bebcac2c87a655ad84",
+      "benchmarks/frameworks/rich/scale-solid.jsx": "a2d51c065ba8aaf2297d808c87847d2f145f0a7c9650e7b571604610afb5f479",
+      "benchmarks/frameworks/rich/scale-svelte.js": "e8c9712b949662ecbfde362ad6aad9b832d56530a2ae72df76e3ec062611f756",
+      "benchmarks/frameworks/rich/ScaleBand.svelte": "6a2a2142ee66d862f6487a2774fa06dc6a68856aa47e35cc364cb1fc9e909d2b",
+      "benchmarks/frameworks/rich/ScaleTile.svelte": "96df47f7e7e9a4c03deb64ee5aa64234414a16f19945e20d8b174bd13e4e621b",
+      "benchmarks/frameworks/rich/scale.html": "c1e8abdfcfde2a064e60d8652ef26f232dfc619053fbc8848e15c27eb6cb2341",
+      "benchmarks/frameworks/rich/scale.js": "37e3b1b31157b6ba41b8876d67f2fdbff822c2adf0a026486141956994b3ea9e",
+      "benchmarks/frameworks/rich/reactivity.js": "cfa46dbb650c3c66f79a60d998127d8df7981ed64f21dc404b083ae50b091469",
+      "src/modules/dom.js": "ad1c71104ff154f9bb883ff59b72eb8b1351bf90680e4a99fd66d1bf664db17c",
+      "benchmarks/frameworks/dist/scale/react.js": "1b174949646bbb1cd807b18a6189a3b259576da3300c70615642d28e0ddbdcae",
+      "benchmarks/frameworks/dist/scale/solid.js": "ef5d63258d552729a8df4e71259d5c467e1bc61ffc67807d5072bde02ad76e12",
+      "benchmarks/frameworks/dist/scale/svelte.js": "20c7fb56362c6e860fe838c9b3e839dbe53a468d9897d9ac3ea275fdf9f15e48",
+      "benchmarks/frameworks/rich/scale-run.cjs": "dbd8a3c0191e7e8820896d43833d6494af8d989581feac93405934a1506b0738"
+    },
+    "build": {
+      "versions": {
+        "@solidjs/compiler": "2.0.2",
+        "@solidjs/web": "2.0.3",
+        "esbuild": "0.28.2",
+        "htmx.org": "2.0.11",
+        "idiomorph": "0.8.0",
+        "react": "19.3.1",
+        "react-dom": "19.3.1",
+        "solid-js": "2.0.3",
+        "svelte": "5.58.0"
+      },
+      "lockSha256": "0566fc286086eacd7ff53b228a043e7437f0ba7e1932aac3ea3d9f438cdc12ce",
+      "bundles": {
+        "react": {
+          "file": "react.js",
+          "bytes": 223790,
+          "sha256": "1b174949646bbb1cd807b18a6189a3b259576da3300c70615642d28e0ddbdcae"
+        },
+        "solid": {
+          "file": "solid.js",
+          "bytes": 38623,
+          "sha256": "ef5d63258d552729a8df4e71259d5c467e1bc61ffc67807d5072bde02ad76e12"
+        },
+        "svelte": {
+          "file": "svelte.js",
+          "bytes": 52479,
+          "sha256": "20c7fb56362c6e860fe838c9b3e839dbe53a468d9897d9ac3ea275fdf9f15e48"
+        }
+      }
+    },
+    "measurements": "Desktop Chromium, fresh browser per run, clocks begin at local data creation or trusted button handler. Mount/seek/update clocks end at visible Element Timing status marker. Complete visits also verify a visible tile by hit test.",
+    "guard": {
+      "rendererRssMiB": 6144,
+      "wallSeconds": 150,
+      "jsOldSpaceMiB": 3072,
+      "pollMs": 200
+    },
+    "model": "One object per record (id, group, score). Full mode mounts one component and visible element per record in 4096-cell bands; native React, Solid and Svelte use a framework root per band. Planned Saba adds two binding comments. Every implementation receives the same immutable per-band record snapshots. Virtual mode mounts 8 columns, 16 visible rows and up to two overscan rows per side.",
+    "checkpoints": "DOM count and last-cell layout confirmed for full chunks. Marker presentation sampled every >=32768 cells and at successful completion. Peak is sampled RSS of the isolated browser’s renderer processes, including baseline."
+  },
+  "visits": [
+    {
+      "mode": "vanilla",
+      "scenario": "capacity",
+      "trial": 1,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 1000000,
+      "lastMountPaintConfirmed": 1000000,
+      "sampledPeakRendererRssMiB": 4635.578125,
+      "checkpoints": [
+        {
+          "mounted": 32768,
+          "markerPaintMs": 385.7000000476837
+        },
+        {
+          "mounted": 65536,
+          "markerPaintMs": 785.7000000476837
+        },
+        {
+          "mounted": 98304,
+          "markerPaintMs": 1173.7000000476837
+        },
+        {
+          "mounted": 131072,
+          "markerPaintMs": 1541.7000000476837
+        },
+        {
+          "mounted": 163840,
+          "markerPaintMs": 1917.7000000476837
+        },
+        {
+          "mounted": 196608,
+          "markerPaintMs": 2325.7000000476837
+        },
+        {
+          "mounted": 229376,
+          "markerPaintMs": 2773.7000000476837
+        },
+        {
+          "mounted": 262144,
+          "markerPaintMs": 3157.7000000476837
+        },
+        {
+          "mounted": 294912,
+          "markerPaintMs": 3533.7000000476837
+        },
+        {
+          "mounted": 327680,
+          "markerPaintMs": 3925.7000000476837
+        },
+        {
+          "mounted": 360448,
+          "markerPaintMs": 4325.700000047684
+        },
+        {
+          "mounted": 393216,
+          "markerPaintMs": 4725.700000047684
+        },
+        {
+          "mounted": 425984,
+          "markerPaintMs": 5141.700000047684
+        },
+        {
+          "mounted": 458752,
+          "markerPaintMs": 5541.700000047684
+        },
+        {
+          "mounted": 491520,
+          "markerPaintMs": 5985.700000047684
+        },
+        {
+          "mounted": 524288,
+          "markerPaintMs": 6757.700000047684
+        },
+        {
+          "mounted": 557056,
+          "markerPaintMs": 7217.700000047684
+        },
+        {
+          "mounted": 589824,
+          "markerPaintMs": 7685.700000047684
+        },
+        {
+          "mounted": 622592,
+          "markerPaintMs": 8157.700000047684
+        },
+        {
+          "mounted": 655360,
+          "markerPaintMs": 8617.700000047684
+        },
+        {
+          "mounted": 688128,
+          "markerPaintMs": 9077.700000047684
+        },
+        {
+          "mounted": 720896,
+          "markerPaintMs": 9565.700000047684
+        },
+        {
+          "mounted": 753664,
+          "markerPaintMs": 10049.700000047684
+        },
+        {
+          "mounted": 786432,
+          "markerPaintMs": 10549.700000047684
+        },
+        {
+          "mounted": 819200,
+          "markerPaintMs": 11125.700000047684
+        },
+        {
+          "mounted": 851968,
+          "markerPaintMs": 11673.700000047684
+        },
+        {
+          "mounted": 884736,
+          "markerPaintMs": 12169.700000047684
+        },
+        {
+          "mounted": 917504,
+          "markerPaintMs": 12653.700000047684
+        },
+        {
+          "mounted": 950272,
+          "markerPaintMs": 13181.700000047684
+        },
+        {
+          "mounted": 983040,
+          "markerPaintMs": 14077.700000047684
+        },
+        {
+          "mounted": 1000000,
+          "markerPaintMs": 14533.700000047684
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 136.34375,
+      "dataMs": 31,
+      "mountPaintMs": 14533.700000047684,
+      "updatePaintMs": 1324.2999999523163,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 140.20000004768372,
+      "mounted": 1000000,
+      "created": 1000000,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "elapsedMs": 17785.604792000002
+    },
+    {
+      "mode": "saba-current",
+      "scenario": "capacity",
+      "trial": 1,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 1000000,
+      "lastMountPaintConfirmed": 1000000,
+      "sampledPeakRendererRssMiB": 5753.984375,
+      "checkpoints": [
+        {
+          "mounted": 32768,
+          "markerPaintMs": 621.5
+        },
+        {
+          "mounted": 65536,
+          "markerPaintMs": 1145.5
+        },
+        {
+          "mounted": 98304,
+          "markerPaintMs": 1773.5
+        },
+        {
+          "mounted": 131072,
+          "markerPaintMs": 2329.5
+        },
+        {
+          "mounted": 163840,
+          "markerPaintMs": 2861.5
+        },
+        {
+          "mounted": 196608,
+          "markerPaintMs": 3413.5
+        },
+        {
+          "mounted": 229376,
+          "markerPaintMs": 3973.5
+        },
+        {
+          "mounted": 262144,
+          "markerPaintMs": 4545.5
+        },
+        {
+          "mounted": 294912,
+          "markerPaintMs": 5537.5
+        },
+        {
+          "mounted": 327680,
+          "markerPaintMs": 6161.5
+        },
+        {
+          "mounted": 360448,
+          "markerPaintMs": 6753.5
+        },
+        {
+          "mounted": 393216,
+          "markerPaintMs": 7313.5
+        },
+        {
+          "mounted": 425984,
+          "markerPaintMs": 7873.5
+        },
+        {
+          "mounted": 458752,
+          "markerPaintMs": 8445.5
+        },
+        {
+          "mounted": 491520,
+          "markerPaintMs": 9021.5
+        },
+        {
+          "mounted": 524288,
+          "markerPaintMs": 9681.5
+        },
+        {
+          "mounted": 557056,
+          "markerPaintMs": 10329.5
+        },
+        {
+          "mounted": 589824,
+          "markerPaintMs": 10961.5
+        },
+        {
+          "mounted": 622592,
+          "markerPaintMs": 11597.5
+        },
+        {
+          "mounted": 655360,
+          "markerPaintMs": 12205.5
+        },
+        {
+          "mounted": 688128,
+          "markerPaintMs": 13709.5
+        },
+        {
+          "mounted": 720896,
+          "markerPaintMs": 14469.5
+        },
+        {
+          "mounted": 753664,
+          "markerPaintMs": 15133.5
+        },
+        {
+          "mounted": 786432,
+          "markerPaintMs": 15769.5
+        },
+        {
+          "mounted": 819200,
+          "markerPaintMs": 16417.5
+        },
+        {
+          "mounted": 851968,
+          "markerPaintMs": 17077.5
+        },
+        {
+          "mounted": 884736,
+          "markerPaintMs": 17741.5
+        },
+        {
+          "mounted": 917504,
+          "markerPaintMs": 19597.5
+        },
+        {
+          "mounted": 950272,
+          "markerPaintMs": 20381.5
+        },
+        {
+          "mounted": 983040,
+          "markerPaintMs": 21089.5
+        },
+        {
+          "mounted": 1000000,
+          "markerPaintMs": 21505.5
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 135.6875,
+      "dataMs": 30,
+      "mountPaintMs": 21505.5,
+      "updatePaintMs": 1429.6000000238419,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 139,
+      "mounted": 1000000,
+      "created": 1000000,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "elapsedMs": 24665.997083
+    },
+    {
+      "mode": "saba-planned",
+      "scenario": "capacity",
+      "trial": 1,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 1000000,
+      "lastMountPaintConfirmed": 1000000,
+      "sampledPeakRendererRssMiB": 5048.28125,
+      "checkpoints": [
+        {
+          "mounted": 32768,
+          "markerPaintMs": 422.2999999523163
+        },
+        {
+          "mounted": 65536,
+          "markerPaintMs": 830.2999999523163
+        },
+        {
+          "mounted": 98304,
+          "markerPaintMs": 1198.2999999523163
+        },
+        {
+          "mounted": 131072,
+          "markerPaintMs": 1582.2999999523163
+        },
+        {
+          "mounted": 163840,
+          "markerPaintMs": 1974.2999999523163
+        },
+        {
+          "mounted": 196608,
+          "markerPaintMs": 2490.2999999523163
+        },
+        {
+          "mounted": 229376,
+          "markerPaintMs": 2858.2999999523163
+        },
+        {
+          "mounted": 262144,
+          "markerPaintMs": 3274.2999999523163
+        },
+        {
+          "mounted": 294912,
+          "markerPaintMs": 3690.2999999523163
+        },
+        {
+          "mounted": 327680,
+          "markerPaintMs": 4098.299999952316
+        },
+        {
+          "mounted": 360448,
+          "markerPaintMs": 4522.299999952316
+        },
+        {
+          "mounted": 393216,
+          "markerPaintMs": 4938.299999952316
+        },
+        {
+          "mounted": 425984,
+          "markerPaintMs": 5382.299999952316
+        },
+        {
+          "mounted": 458752,
+          "markerPaintMs": 5806.299999952316
+        },
+        {
+          "mounted": 491520,
+          "markerPaintMs": 6570.299999952316
+        },
+        {
+          "mounted": 524288,
+          "markerPaintMs": 7094.299999952316
+        },
+        {
+          "mounted": 557056,
+          "markerPaintMs": 7634.299999952316
+        },
+        {
+          "mounted": 589824,
+          "markerPaintMs": 8150.299999952316
+        },
+        {
+          "mounted": 622592,
+          "markerPaintMs": 8626.299999952316
+        },
+        {
+          "mounted": 655360,
+          "markerPaintMs": 9110.299999952316
+        },
+        {
+          "mounted": 688128,
+          "markerPaintMs": 9602.299999952316
+        },
+        {
+          "mounted": 720896,
+          "markerPaintMs": 10118.299999952316
+        },
+        {
+          "mounted": 753664,
+          "markerPaintMs": 10618.299999952316
+        },
+        {
+          "mounted": 786432,
+          "markerPaintMs": 11134.299999952316
+        },
+        {
+          "mounted": 819200,
+          "markerPaintMs": 11726.299999952316
+        },
+        {
+          "mounted": 851968,
+          "markerPaintMs": 12318.299999952316
+        },
+        {
+          "mounted": 884736,
+          "markerPaintMs": 13342.299999952316
+        },
+        {
+          "mounted": 917504,
+          "markerPaintMs": 14002.299999952316
+        },
+        {
+          "mounted": 950272,
+          "markerPaintMs": 14578.299999952316
+        },
+        {
+          "mounted": 983040,
+          "markerPaintMs": 15134.299999952316
+        },
+        {
+          "mounted": 1000000,
+          "markerPaintMs": 15470.299999952316
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 135.453125,
+      "dataMs": 30.799999952316284,
+      "mountPaintMs": 15470.299999952316,
+      "updatePaintMs": 1341.1000000238419,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 170.69999992847443,
+      "mounted": 1000000,
+      "created": 1000000,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "elapsedMs": 18734.793250000002
+    },
+    {
+      "mode": "react",
+      "scenario": "capacity",
+      "trial": 1,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 1000000,
+      "lastMountPaintConfirmed": 1000000,
+      "sampledPeakRendererRssMiB": 4732.5,
+      "checkpoints": [
+        {
+          "mounted": 32768,
+          "markerPaintMs": 419.6999999284744
+        },
+        {
+          "mounted": 65536,
+          "markerPaintMs": 791.6999999284744
+        },
+        {
+          "mounted": 98304,
+          "markerPaintMs": 1167.6999999284744
+        },
+        {
+          "mounted": 131072,
+          "markerPaintMs": 1575.6999999284744
+        },
+        {
+          "mounted": 163840,
+          "markerPaintMs": 2019.6999999284744
+        },
+        {
+          "mounted": 196608,
+          "markerPaintMs": 2419.6999999284744
+        },
+        {
+          "mounted": 229376,
+          "markerPaintMs": 2791.6999999284744
+        },
+        {
+          "mounted": 262144,
+          "markerPaintMs": 3199.6999999284744
+        },
+        {
+          "mounted": 294912,
+          "markerPaintMs": 3615.6999999284744
+        },
+        {
+          "mounted": 327680,
+          "markerPaintMs": 4035.6999999284744
+        },
+        {
+          "mounted": 360448,
+          "markerPaintMs": 4459.699999928474
+        },
+        {
+          "mounted": 393216,
+          "markerPaintMs": 4883.699999928474
+        },
+        {
+          "mounted": 425984,
+          "markerPaintMs": 5343.699999928474
+        },
+        {
+          "mounted": 458752,
+          "markerPaintMs": 5791.699999928474
+        },
+        {
+          "mounted": 491520,
+          "markerPaintMs": 6415.699999928474
+        },
+        {
+          "mounted": 524288,
+          "markerPaintMs": 6835.699999928474
+        },
+        {
+          "mounted": 557056,
+          "markerPaintMs": 7271.699999928474
+        },
+        {
+          "mounted": 589824,
+          "markerPaintMs": 7699.699999928474
+        },
+        {
+          "mounted": 622592,
+          "markerPaintMs": 8131.699999928474
+        },
+        {
+          "mounted": 655360,
+          "markerPaintMs": 8583.699999928474
+        },
+        {
+          "mounted": 688128,
+          "markerPaintMs": 9043.699999928474
+        },
+        {
+          "mounted": 720896,
+          "markerPaintMs": 9515.699999928474
+        },
+        {
+          "mounted": 753664,
+          "markerPaintMs": 9975.699999928474
+        },
+        {
+          "mounted": 786432,
+          "markerPaintMs": 10483.699999928474
+        },
+        {
+          "mounted": 819200,
+          "markerPaintMs": 10991.699999928474
+        },
+        {
+          "mounted": 851968,
+          "markerPaintMs": 11459.699999928474
+        },
+        {
+          "mounted": 884736,
+          "markerPaintMs": 11907.699999928474
+        },
+        {
+          "mounted": 917504,
+          "markerPaintMs": 12375.699999928474
+        },
+        {
+          "mounted": 950272,
+          "markerPaintMs": 12851.699999928474
+        },
+        {
+          "mounted": 983040,
+          "markerPaintMs": 13771.699999928474
+        },
+        {
+          "mounted": 1000000,
+          "markerPaintMs": 14091.699999928474
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 141.125,
+      "dataMs": 28.5,
+      "mountPaintMs": 14091.699999928474,
+      "updatePaintMs": 1470,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 129.79999995231628,
+      "mounted": 1000000,
+      "created": 1000000,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "elapsedMs": 17264.634458
+    },
+    {
+      "mode": "solid",
+      "scenario": "capacity",
+      "trial": 1,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 1000000,
+      "lastMountPaintConfirmed": 1000000,
+      "sampledPeakRendererRssMiB": 4987.296875,
+      "checkpoints": [
+        {
+          "mounted": 32768,
+          "markerPaintMs": 409.2999999523163
+        },
+        {
+          "mounted": 65536,
+          "markerPaintMs": 801.2999999523163
+        },
+        {
+          "mounted": 98304,
+          "markerPaintMs": 1141.2999999523163
+        },
+        {
+          "mounted": 131072,
+          "markerPaintMs": 1509.2999999523163
+        },
+        {
+          "mounted": 163840,
+          "markerPaintMs": 1901.2999999523163
+        },
+        {
+          "mounted": 196608,
+          "markerPaintMs": 2317.2999999523163
+        },
+        {
+          "mounted": 229376,
+          "markerPaintMs": 2685.2999999523163
+        },
+        {
+          "mounted": 262144,
+          "markerPaintMs": 3061.2999999523163
+        },
+        {
+          "mounted": 294912,
+          "markerPaintMs": 3461.2999999523163
+        },
+        {
+          "mounted": 327680,
+          "markerPaintMs": 3833.2999999523163
+        },
+        {
+          "mounted": 360448,
+          "markerPaintMs": 4225.299999952316
+        },
+        {
+          "mounted": 393216,
+          "markerPaintMs": 4617.299999952316
+        },
+        {
+          "mounted": 425984,
+          "markerPaintMs": 5017.299999952316
+        },
+        {
+          "mounted": 458752,
+          "markerPaintMs": 5417.299999952316
+        },
+        {
+          "mounted": 491520,
+          "markerPaintMs": 5825.299999952316
+        },
+        {
+          "mounted": 524288,
+          "markerPaintMs": 6557.299999952316
+        },
+        {
+          "mounted": 557056,
+          "markerPaintMs": 7021.299999952316
+        },
+        {
+          "mounted": 589824,
+          "markerPaintMs": 7481.299999952316
+        },
+        {
+          "mounted": 622592,
+          "markerPaintMs": 7957.299999952316
+        },
+        {
+          "mounted": 655360,
+          "markerPaintMs": 8413.299999952316
+        },
+        {
+          "mounted": 688128,
+          "markerPaintMs": 8905.299999952316
+        },
+        {
+          "mounted": 720896,
+          "markerPaintMs": 9389.299999952316
+        },
+        {
+          "mounted": 753664,
+          "markerPaintMs": 9849.299999952316
+        },
+        {
+          "mounted": 786432,
+          "markerPaintMs": 10329.299999952316
+        },
+        {
+          "mounted": 819200,
+          "markerPaintMs": 10813.299999952316
+        },
+        {
+          "mounted": 851968,
+          "markerPaintMs": 11297.299999952316
+        },
+        {
+          "mounted": 884736,
+          "markerPaintMs": 11789.299999952316
+        },
+        {
+          "mounted": 917504,
+          "markerPaintMs": 12681.299999952316
+        },
+        {
+          "mounted": 950272,
+          "markerPaintMs": 13233.299999952316
+        },
+        {
+          "mounted": 983040,
+          "markerPaintMs": 13741.299999952316
+        },
+        {
+          "mounted": 1000000,
+          "markerPaintMs": 14025.299999952316
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 136.1875,
+      "dataMs": 30,
+      "mountPaintMs": 14025.299999952316,
+      "updatePaintMs": 1268.3999999761581,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 131.29999995231628,
+      "mounted": 1000000,
+      "created": 1000000,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "elapsedMs": 17062.87887500001
+    },
+    {
+      "mode": "svelte",
+      "scenario": "capacity",
+      "trial": 1,
+      "target": 1000000,
+      "status": "completed",
+      "lastLayoutConfirmed": 1000000,
+      "lastMountPaintConfirmed": 1000000,
+      "sampledPeakRendererRssMiB": 5006.484375,
+      "checkpoints": [
+        {
+          "mounted": 32768,
+          "markerPaintMs": 456.5
+        },
+        {
+          "mounted": 65536,
+          "markerPaintMs": 828.5
+        },
+        {
+          "mounted": 98304,
+          "markerPaintMs": 1196.5
+        },
+        {
+          "mounted": 131072,
+          "markerPaintMs": 1628.5
+        },
+        {
+          "mounted": 163840,
+          "markerPaintMs": 1996.5
+        },
+        {
+          "mounted": 196608,
+          "markerPaintMs": 2380.5
+        },
+        {
+          "mounted": 229376,
+          "markerPaintMs": 2764.5
+        },
+        {
+          "mounted": 262144,
+          "markerPaintMs": 3172.5
+        },
+        {
+          "mounted": 294912,
+          "markerPaintMs": 3580.5
+        },
+        {
+          "mounted": 327680,
+          "markerPaintMs": 3980.5
+        },
+        {
+          "mounted": 360448,
+          "markerPaintMs": 4556.5
+        },
+        {
+          "mounted": 393216,
+          "markerPaintMs": 5004.5
+        },
+        {
+          "mounted": 425984,
+          "markerPaintMs": 5412.5
+        },
+        {
+          "mounted": 458752,
+          "markerPaintMs": 5828.5
+        },
+        {
+          "mounted": 491520,
+          "markerPaintMs": 6256.5
+        },
+        {
+          "mounted": 524288,
+          "markerPaintMs": 6704.5
+        },
+        {
+          "mounted": 557056,
+          "markerPaintMs": 7164.5
+        },
+        {
+          "mounted": 589824,
+          "markerPaintMs": 7656.5
+        },
+        {
+          "mounted": 622592,
+          "markerPaintMs": 8228.5
+        },
+        {
+          "mounted": 655360,
+          "markerPaintMs": 8796.5
+        },
+        {
+          "mounted": 688128,
+          "markerPaintMs": 9272.5
+        },
+        {
+          "mounted": 720896,
+          "markerPaintMs": 9788.5
+        },
+        {
+          "mounted": 753664,
+          "markerPaintMs": 10296.5
+        },
+        {
+          "mounted": 786432,
+          "markerPaintMs": 10796.5
+        },
+        {
+          "mounted": 819200,
+          "markerPaintMs": 11868.5
+        },
+        {
+          "mounted": 851968,
+          "markerPaintMs": 12388.5
+        },
+        {
+          "mounted": 884736,
+          "markerPaintMs": 12888.5
+        },
+        {
+          "mounted": 917504,
+          "markerPaintMs": 13444.5
+        },
+        {
+          "mounted": 950272,
+          "markerPaintMs": 14012.5
+        },
+        {
+          "mounted": 983040,
+          "markerPaintMs": 14544.5
+        },
+        {
+          "mounted": 1000000,
+          "markerPaintMs": 14888.5
+        }
+      ],
+      "chromium": "145.0.7632.6",
+      "initialRendererRssMiB": 137.203125,
+      "dataMs": 29.100000023841858,
+      "mountPaintMs": 14888.5,
+      "updatePaintMs": 1462.6000000238419,
+      "changed": 10311,
+      "checksum": 499566514,
+      "seekPaintMs": 127.39999997615814,
+      "mounted": 1000000,
+      "created": 1000000,
+      "lastId": 999999,
+      "lastText": "999999 · 35",
+      "elapsedMs": 18097.667917
+    }
+  ]
+}

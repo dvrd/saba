@@ -1,12 +1,11 @@
 package saba_core
 
 import rt "base:runtime"
-import http "shared:http"
-import http1 "shared:http/v1"
+import http "shared:async/http"
+import http1 "shared:async/http/v1"
 import "core:log"
 import "core:mem"
-import charged "core:mem/budget"
-import budget "core:sync/budget"
+import budget "shared:async/budget"
 import "core:net"
 import "core:strings"
 import "core:sync"
@@ -17,6 +16,21 @@ import signal "shared:async/signal"
 CONNECTION_STEP_LIMIT :: 32
 RESPONSE_WRITE_CHUNK_BYTES :: 64 * mem.Kilobyte
 
+// Serves one request. It runs on a worker and must not block it (see
+// default_workers).
+//
+// While it runs, and while the callbacks of the response it returned run (a
+// deferred poll, a stream producer, an upgrade handler, their drops),
+// context.allocator is the request's heap and context.temp_allocator the
+// request's arena. Nothing allocated with either outlives the request, freed
+// or not, so a handler leaks nothing by forgetting; an upgraded connection
+// keeps its heap until it ends. Memory the application keeps longer (a cache
+// entry, a session, a map it fills over time, state for another thread) needs
+// an allocator the application names. See Request_Heap, and
+// Server.handler_allocator to give handlers the process heap instead.
+//
+// A response body allocated with either of the two is sent from where it is.
+// Any other body is copied before the handler's worker moves on.
 Handler :: #type proc(data: rawptr, conn: ^Connection, request: ^Request) -> Response
 
 Connection_Phase :: enum {
@@ -65,7 +79,7 @@ connection_storage_free :: proc(task: ^Connection_Task) {
 
 Connection_Task :: struct {
 	resource_connection, resource_operation:           budget.Scope,
-	resource_binding, resource_transport:              charged.Binding,
+	resource_binding, resource_transport:              budget.Binding,
 	// HTTP/1 only; nil for HTTP/2 streams (see Connection_Storage).
 	resource_emergency:                                []u8,
 	task:                                              async.Task,
@@ -105,6 +119,26 @@ Connection_Task :: struct {
 	upgrade_established:                               bool,
 	upgrade:                                           Upgrade,
 	upgrade_prefetched:                                []u8,
+	// Request body storage that outgrew its first arena block. It is owned by
+	// the request and released with it; body_target is the size it may reach.
+	body_owned:                                        []u8,
+	body_allocator:                                    mem.Allocator,
+	body_target:                                       int,
+	// "100 Continue" owed before the body is read, and how much of it is written.
+	continue_pending:                                  bool,
+	continue_sent:                                     int,
+	// Progress budget of the current body read or response write: when it
+	// started, its stall window and the bytes moved so far. A zero start keeps
+	// the armed deadline fixed.
+	transfer_started:                                  time.Tick,
+	transfer_stall:                                    time.Duration,
+	transfer_bytes:                                    i64,
+	// The handler's stream head failed validation; HTTP/1 answers with a 500.
+	response_rejected:                                 bool,
+	// What application code allocated with the default allocator while it
+	// served this request and has not freed. Nil until it first allocates;
+	// released with the request.
+	heap:                                              ^Request_Heap,
 }
 
 handle_http :: proc(data: rawptr) -> async.Resume_Result {
@@ -129,7 +163,6 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 			}
 			task.socket = socket
 			conn._task = task
-			observe_start(task)
 
 			if task.runtime.config.tls != nil {
 				conn._secure = true
@@ -170,7 +203,7 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 				continue
 			}
 
-			if strings.contains(string(task.header[:task.header_used]), HTTP_HEADERS_END) {
+			if http1.request_head_length(string(task.header[:task.header_used])) >= 0 {
 				if !prepare_request(task) {
 					return .Done
 				}
@@ -225,18 +258,43 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 			}
 
 			if n > 0 {
-				if task.observed {
-					task.event.bytes_received += u64(n)
-				}
-
 				if task.header_used == 0 {
+					// A connection that never sends a byte is not a request.
+					if !task.observed {
+						observe_start(task)
+					}
 					task.deadline = task.header_deadline
 					conn.read_deadline = task.header_read_deadline
+				}
+
+				if task.observed {
+					task.event.bytes_received += u64(n)
 				}
 			}
 
 			task.header_used += n
 		case .Body:
+			if task.continue_pending {
+				if waiting, failed := continue_write(task); failed {
+					return .Done
+				} else if waiting {
+					return .Waiting
+				}
+			}
+
+			if task.body_used == len(task.request.body) && task.body_used < task.body_target {
+				// Storage follows the bytes that arrived, never the declared length.
+				if !request_body_grow(task) {
+					if resource_pressure(task) {
+						resource_reject(task)
+						continue
+					}
+
+					observe_failure(task, .Allocation_Error)
+					return .Done
+				}
+			}
+
 			if task.body_used == len(task.request.body) {
 				if deadline_expired(conn.read_deadline) {
 					if task.observed {
@@ -280,8 +338,19 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 			}
 
 			task.body_used += n
+			if n > 0 {
+				transfer_progress(task, false, n)
+			}
 
 		case .Chunked_Body:
+			if task.continue_pending {
+				if waiting, failed := continue_write(task); failed {
+					return .Done
+				} else if waiting {
+					return .Waiting
+				}
+			}
+
 			if deadline_expired(conn.read_deadline) {
 				if !queue_response(task, {status = .Request_Timeout, close_connection = true}) {
 					return .Done
@@ -320,6 +389,7 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 				}
 
 				conn.read_buffer = task.chunked.input[:n]
+				transfer_progress(task, false, n)
 			}
 
 			consumed, written, done, error := http1.chunk_decoder_feed(
@@ -337,6 +407,21 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 				observe_failure(task, .Protocol_Error)
 				if !queue_response(task, {status = chunk_error_status(error), close_connection = true}) {
 					return .Done
+				}
+				continue
+			}
+
+			// The decoder stops without progress only when the destination is full.
+			if !done && consumed == 0 && written == 0 && len(conn.read_buffer) > 0 {
+				if !request_body_grow(task) {
+					if resource_pressure(task) {
+						resource_reject(task)
+						continue
+					}
+
+					if !queue_response(task, {status = .Content_Too_Large, close_connection = true}) {
+						return .Done
+					}
 				}
 				continue
 			}
@@ -434,6 +519,9 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 			}
 
 			task.output_offset += n
+			if n > 0 {
+				write_progress(task, n)
+			}
 		case .Upgrade:
 			if async.cancelled(&task.task) {
 				return .Done
@@ -446,7 +534,7 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 			if task.tls_state == nil {
 				io.socket = task.socket
 			}
-			result := task.upgrade.resume(task.upgrade.data, &io)
+			result := resume_upgrade(task, &io)
 			upgrade_resume_finished(task)
 			if result != .Yield {
 				return result
@@ -459,16 +547,45 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 	return .Yield
 }
 
+// Writes the "100 Continue" interim response a request asked for before its
+// body is read. The body read deadline bounds a peer that will not take it.
+continue_write :: proc(task: ^Connection_Task) -> (waiting, failed: bool) {
+	interim := http1.RESPONSE_CONTINUE
+
+	for task.continue_sent < len(interim) {
+		if deadline_expired(task.connection.read_deadline) {
+			observe_io_error(task, {kind = .Timeout})
+			return false, true
+		}
+
+		n, error := transport_write(task, transmute([]u8)interim[task.continue_sent:], task.deadline)
+		if error.kind == .Pending {
+			return true, false
+		}
+		if error.kind != .None || n == 0 {
+			observe_io_error(task, error)
+			return false, true
+		}
+
+		task.continue_sent += n
+	}
+
+	task.continue_pending = false
+
+	return false, false
+}
+
 prepare_request :: proc(task: ^Connection_Task) -> bool {
 	allocator := mem.dynamic_arena_allocator(&task.arena)
 	raw := string(task.header[:task.header_used])
-	end := strings.index(raw, HTTP_HEADERS_END)
+	// The head's length counts any empty lines a peer sent before the request line.
+	head_length := http1.request_head_length(raw)
 	if task.observed {
-		task.event.bytes_received = u64(end + len(HTTP_HEADERS_END))
+		task.event.bytes_received = u64(head_length)
 	}
 	// Allocate header entries only after a request arrives, rather than
 	// retaining the maximum table for every idle connection.
-	count := min(strings.count(raw[:end], CRLF), REQUEST_HEADER_COUNT_LIMIT)
+	count := min(strings.count(raw[:head_length], CRLF), REQUEST_HEADER_COUNT_LIMIT)
 	headers, header_error := make([]Header, count, allocator)
 
 	if header_error != nil {
@@ -483,7 +600,7 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 	task.request = request
 	task.request.allocator = allocator
 	task.request.resources = task.resource_operation
-	task.request.backing_allocator = charged.allocator(task.resource_binding)
+	task.request.backing_allocator = budget.allocator(task.resource_binding)
 	task.request.request_id = task.event.request_id
 	task.request._observe = task.observed
 
@@ -492,7 +609,7 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 		return queue_response(task, {status = status})
 	}
 
-	task.connection.read_buffer = task.header[end + len(HTTP_HEADERS_END):task.header_used]
+	task.connection.read_buffer = task.header[head_length:task.header_used]
 	limit := REQUEST_BODY_LIMIT
 
 	if task.runtime.config.request_body_limit != nil {
@@ -503,11 +620,14 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 		return queue_response(task, {status = .Content_Too_Large})
 	}
 
+	// The declared (or, for chunked, the permitted) size is only a ceiling. A
+	// peer pins memory by sending bytes, not by announcing them.
 	body_capacity := request.content_length
 	if request.chunked {
 		body_capacity = min(limit, http.MAX_BODY_SIZE)
 	}
-	body, body_error := make([]u8, body_capacity, allocator)
+	task.body_target = body_capacity
+	body, body_error := make([]u8, min(body_capacity, REQUEST_BODY_INITIAL), allocator)
 
 	if body_error != nil {
 		if resource_pressure(task) {
@@ -518,8 +638,12 @@ prepare_request :: proc(task: ^Connection_Task) -> bool {
 	}
 
 	task.request.body = body
-	duration := body_timeout(task.runtime.timeouts, request.content_length)
-	arm_read_deadline(task, duration)
+	// The body limit has passed, so a peer waiting on "Expect: 100-continue" is
+	// told to send. Body bytes that already arrived make the interim moot.
+	task.continue_sent = 0
+	task.continue_pending =
+		request._expect_continue && (request.content_length > 0 || request.chunked) && len(task.connection.read_buffer) == 0
+	arm_read_deadline(task, transfer_begin(task, task.runtime.timeouts.body))
 	task.phase = .Body
 
 	if request.chunked {
@@ -572,10 +696,117 @@ task_read :: proc(task: ^Connection_Task, destination: []u8) -> (int, async.Erro
 	return n, err
 }
 
+REQUEST_BODY_INITIAL :: 8 * mem.Kilobyte
+// Slowest average rate a transfer may sustain before its total budget ends.
+MIN_TRANSFER_RATE :: 4 * mem.Kilobyte
+
+// Doubles body storage up to body_target. Storage beyond the first arena block
+// comes from the request's charged allocator so the outgrown buffer is returned.
+request_body_grow :: proc(task: ^Connection_Task) -> bool {
+	current := len(task.request.body)
+	if current >= task.body_target {
+		return false
+	}
+	capacity := min(task.body_target, max(2 * current, 2 * REQUEST_BODY_INITIAL))
+	grown: []u8
+	error: mem.Allocator_Error
+
+	if task.body_owned != nil {
+		grown, error = mem.resize_bytes_non_zeroed(task.body_owned, capacity, allocator = task.body_allocator)
+	} else {
+		allocator := task.request.backing_allocator
+		if allocator.procedure == nil {
+			allocator = rt.heap_allocator()
+		}
+		grown, error = mem.alloc_bytes_non_zeroed(capacity, allocator = allocator)
+		if error == nil && len(grown) == capacity {
+			copy(grown, task.request.body[:task.body_used])
+			task.body_allocator = allocator
+		}
+	}
+
+	if error != nil || len(grown) != capacity {
+		return false
+	}
+
+	task.body_owned = grown
+	task.request.body = grown
+
+	return true
+}
+
+release_request_body :: proc(task: ^Connection_Task) {
+	if task.body_owned != nil {
+		if raw_data(task.request.body) == raw_data(task.body_owned) {
+			task.request.body = nil
+		}
+		delete(task.body_owned, task.body_allocator)
+	}
+	task.body_owned = nil
+	task.body_allocator = {}
+	task.body_target = 0
+}
+
+// Time a transfer may have taken once `size` bytes have moved: the stall budget
+// plus what those bytes need at MIN_TRANSFER_RATE. Bytes that were only
+// announced earn nothing, so a peer cannot buy time with a large declared length.
+transfer_budget :: proc(base: time.Duration, size: i64) -> time.Duration {
+	if base <= 0 {
+		return base
+	}
+	bytes := max(size, 0)
+	if bytes >= i64(MAX_SERVER_TIMEOUT / time.Second) * MIN_TRANSFER_RATE {
+		return MAX_SERVER_TIMEOUT
+	}
+	extra := time.Duration(bytes * i64(time.Second) / MIN_TRANSFER_RATE)
+
+	return min(base + extra, MAX_SERVER_TIMEOUT)
+}
+
+// Starts a progress-based transfer and returns its first stall window.
+transfer_begin :: proc(task: ^Connection_Task, stall: time.Duration) -> time.Duration {
+	task.transfer_started = time.tick_now()
+	task.transfer_stall = stall
+	task.transfer_bytes = 0
+
+	return stall
+}
+
+// Next window: one stall budget, but never past the point where the bytes
+// moved so far fall below MIN_TRANSFER_RATE on average. A peer that stops is cut
+// after one budget; one that trickles is cut as soon as it falls behind; one that
+// keeps a usable rate is never cut, however large the transfer.
+transfer_window :: proc(task: ^Connection_Task) -> time.Duration {
+	allowed := time.tick_add(task.transfer_started, transfer_budget(task.transfer_stall, task.transfer_bytes))
+
+	return min(task.transfer_stall, time.tick_diff(time.tick_now(), allowed))
+}
+
+transfer_progress :: proc(task: ^Connection_Task, write: bool, count: int) {
+	if task.transfer_started == (time.Tick{}) {
+		return
+	}
+	task.transfer_bytes += i64(count)
+
+	if write {
+		arm_write_deadline(task, transfer_window(task))
+	} else {
+		arm_read_deadline(task, transfer_window(task))
+	}
+}
+
+write_progress :: proc(task: ^Connection_Task, count: int) {
+	if task.streaming != nil {
+		stream_progress(task, count)
+		return
+	}
+	transfer_progress(task, true, count)
+}
+
 init_connection_arena :: proc(task: ^Connection_Task) {
-	allocator := charged.allocator(task.resource_binding)
+	allocator := budget.allocator(task.resource_binding)
 	if allocator.procedure == nil {
-		allocator = charged.allocator(task.resource_transport)
+		allocator = budget.allocator(task.resource_transport)
 	}
 	if allocator.procedure == nil {
 		allocator = rt.heap_allocator()
@@ -612,9 +843,11 @@ release_upgrade_request :: proc(task: ^Connection_Task) -> bool {
 
 	// Upgraded sessions no longer use HTTP headers, response bytes or request
 	// allocations. Preserve only prefetched frame bytes across arena release.
+	release_request_body(task)
 	task.request = {}
 	task.header = nil
 	task.output = {}
+	task.transfer_started = {}
 	mem.dynamic_arena_destroy(&task.arena)
 	finish_operation_resources(task)
 	if connection_storage_allocator(task).procedure == nil {
@@ -634,12 +867,12 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 
 	if resource_pressure(task) {
 		discarded := response
-		discard_response(&discarded)
+		discard_request_response(task, &discarded)
 		return resource_reject(task, resource_failure_status(response.status))
 	}
 
 	if deferred_present(response.deferred) {
-		if queue_deferred(task, response) {
+		if queue_http1_deferred(task, response) {
 			return true
 		}
 
@@ -656,7 +889,20 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 	content_coding_prepare(&task.request, &prepared)
 	task.upgrade = prepared.upgrade
 	if stream_present(prepared.stream) {
-		return queue_stream_response(task, prepared)
+		task.response_rejected = false
+		if queue_stream_response(task, prepared) {
+			return true
+		}
+		if !task.response_rejected {
+			return false
+		}
+		task.response_rejected = false
+		drop_response_stream(task)
+		return queue_handler_fault(task, "its stream head could not be encoded")
+	}
+
+	if len(prepared.trailers) > 0 {
+		return queue_handler_fault(task, "trailers are not supported on HTTP/1 responses")
 	}
 
 	if !resource_copy_response(task, &prepared) {
@@ -693,8 +939,8 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 	headers, ok := response_headers(prepared, buffer, task.reuse_after_write)
 
 	if !ok {
-		observe_failure(task, .Protocol_Error)
-		return false
+		// response_headers logged the offending field. The client still gets an answer.
+		return queue_handler_fault(task, "its head could not be encoded")
 	}
 
 	task.output = {headers, prepared.body, nil}
@@ -703,7 +949,8 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 	}
 	task.output_index = 0
 	task.output_offset = 0
-	arm_write_deadline(task, task.runtime.timeouts.response)
+	// A reader that keeps accepting bytes at a usable rate is not cut off.
+	arm_write_deadline(task, transfer_begin(task, task.runtime.timeouts.response))
 
 	if task.observed {
 		task.event.status = prepared.status
@@ -727,20 +974,70 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 	return true
 }
 
+// Replaces a handler response the server cannot put on the wire with a 500, so
+// the client is not left with an empty reply. The connection closes afterwards.
+queue_handler_fault :: proc(task: ^Connection_Task, reason: string) -> bool {
+	drop_upgrade(task)
+	observe_failure(task, .Protocol_Error)
+	log.errorf("Handler response rejected: %s; sent 500 Internal Server Error instead", reason)
+	storage := task.resource_emergency
+
+	if len(storage) == 0 {
+		if task.arena.block_allocator.procedure == nil {
+			return false
+		}
+		allocated, error := make([]u8, 128, mem.dynamic_arena_allocator(&task.arena))
+		if error != nil {
+			return false
+		}
+		storage = allocated
+	}
+
+	head, encoded := response_headers({status = .Internal_Server_Error}, storage)
+	if !encoded {
+		return false
+	}
+
+	task.output = {head, nil, nil}
+	task.output_index, task.output_offset = 0, 0
+	task.reuse_after_write = false
+	task.finish_after_write = true
+	task.transfer_started = {}
+	arm_write_deadline(task, task.runtime.timeouts.response)
+	task.phase = .Write
+
+	if task.observed {
+		task.event.status = .Internal_Server_Error
+	}
+
+	return true
+}
+
 dispatch_request :: proc(task: ^Connection_Task) -> Response {
 	if !begin_request_context(task) {
 		return Response{status = .Internal_Server_Error, close_connection = true}
 	}
-	response := task.runtime.config.handler(task.runtime.config.handler_data, &task.connection, &task.request)
+	return call_request_handler(task, task.runtime.config.handler, task.runtime.config.handler_data)
+}
+
+call_request_handler :: proc(task: ^Connection_Task, handler: Handler, data: rawptr) -> Response {
+	response: Response
+	{
+		context.allocator = request_default_allocator(task)
+		response = handler(data, &task.connection, &task.request)
+	}
 	status := request_context_status(task.request.cancellation)
 	if status == .Active {
 		return response
 	}
-	discard_response(&response)
+	discard_request_response(task, &response)
 	observe_failure(task, .Timeout if status == .Deadline else .Cancelled)
 
+	// The handler ran to completion, so its effects may have happened. 408 tells
+	// clients and proxies the request never arrived and invites an automatic
+	// replay; a 5xx does not.
 	return Response {
-		status = .Request_Timeout if status == .Deadline else .Service_Unavailable,
+		status = .Gateway_Timeout if status == .Deadline else .Service_Unavailable,
 		close_connection = true,
 	}
 }
@@ -763,7 +1060,9 @@ finish_connection :: proc(data: rawptr) {
 		delete(task.upgrade_prefetched, connection_storage_allocator(task))
 	}
 
+	release_request_body(task)
 	mem.dynamic_arena_destroy(&task.arena)
+	request_heap_release(task)
 
 	if task.tls_state != nil {
 		mem.zero(task.tls_state, size_of(TLS_State))
@@ -771,7 +1070,7 @@ finish_connection :: proc(data: rawptr) {
 	}
 
 	finish_operation_resources(task)
-	charged.release(&task.resource_transport)
+	budget.binding_release(&task.resource_transport)
 	budget.release_scope(&task.resource_connection)
 	sync.atomic_sub(&task.runtime.active_connections, 1)
 	drain_connection_finished(task.runtime)
@@ -972,7 +1271,7 @@ server_limits :: proc(config: Server) -> (int, int, int, bool) {
 	}
 	workers := config.workers
 	if workers == 0 {
-		workers = DEFAULT_WORKERS
+		workers = default_workers()
 	}
 	// Reserve a listener slot and one retiring task per worker. Socket tokens
 	// have 32-bit indices. Bound arithmetic before deriving reserve sizes.
@@ -1046,9 +1345,12 @@ server_capacity_grow_locked :: proc(runtime: ^Server_Runtime, active: int) -> Ca
 	}
 
 	target := state.current + min(state.current, state.maximum - state.current)
-	workers := runtime.config.workers
+	workers := runtime.workers
 	if workers == 0 {
-		workers = DEFAULT_WORKERS
+		workers = runtime.config.workers
+	}
+	if workers == 0 {
+		workers = default_workers()
 	}
 	err := async.reserve(&runtime.executor, {target + workers + 1, target + 1})
 	if err.kind == .Stopping {
@@ -1237,7 +1539,7 @@ start_operation_resources :: proc(task: ^Connection_Task) -> bool {
 	if error != .None {
 		return false
 	}
-	binding, binding_error := charged.create(owner)
+	binding, binding_error := budget.create(owner)
 
 	if binding_error.kind != .None {
 		budget.release_scope(&owner)
@@ -1249,19 +1551,24 @@ start_operation_resources :: proc(task: ^Connection_Task) -> bool {
 	return true
 }
 finish_operation_resources :: proc(task: ^Connection_Task) {
+	// The lease of a body sent from the request's heap ends with the operation.
+	if heap := task.heap; heap != nil {
+		budget.release(&heap.body_lease)
+	}
 	_ = budget.close(task.resource_operation)
-	charged.release(&task.resource_binding)
+	budget.binding_release(&task.resource_binding)
 	budget.release_scope(&task.resource_operation)
 }
 release_task_storage :: proc(task: ^Connection_Task) {
 	mem.dynamic_arena_destroy(&task.arena)
+	request_heap_release(task)
 	finish_operation_resources(task)
-	charged.release(&task.resource_transport)
+	budget.binding_release(&task.resource_transport)
 	budget.release_scope(&task.resource_connection)
 }
 
 resource_pressure :: proc(task: ^Connection_Task) -> bool {
-	return charged.stats(task.resource_binding).rejected != 0
+	return budget.stats(task.resource_binding).rejected != 0
 }
 // Fixed task storage remains usable after payload admission is exhausted.
 resource_reject :: proc(task: ^Connection_Task, status: HTTP_Status = .Service_Unavailable) -> bool {
@@ -1277,6 +1584,7 @@ resource_reject :: proc(task: ^Connection_Task, status: HTTP_Status = .Service_U
 	task.output_index, task.output_offset = 0, 0
 	task.reuse_after_write = false
 	task.finish_after_write = true
+	task.transfer_started = {}
 	arm_write_deadline(task, task.runtime.timeouts.response)
 	task.phase = .Write
 
@@ -1287,9 +1595,65 @@ resource_reject :: proc(task: ^Connection_Task, status: HTTP_Status = .Service_U
 
 	return true
 }
-// Unknown raw borrows have no full-allocation provenance. Copy before suspension.
+// Whether bytes lies in storage of arena that stays where it is until the
+// arena is destroyed: inside one of its blocks, or from the start of one of
+// its larger allocations.
+arena_owns :: proc(arena: ^mem.Dynamic_Arena, bytes: []u8) -> bool {
+	if len(bytes) == 0 {
+		return false
+	}
+	first := uintptr(raw_data(bytes))
+	last := first + uintptr(len(bytes))
+	size := uintptr(arena.block_size)
+
+	if block := uintptr(arena.current_block); block != 0 && first >= block && last <= block + size {
+		return true
+	}
+
+	for used in arena.used_blocks {
+		if block := uintptr(used); first >= block && last <= block + size {
+			return true
+		}
+	}
+
+	for large in arena.out_band_allocations {
+		if large == raw_data(bytes) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Whether the request already owns a response body, so the server sends it
+// from where it is. The request's arena is charged for what it holds. A body
+// on the request's heap is charged to the operation here, for as long as the
+// request lasts: without that, bodies nobody counted could pile up behind
+// slow readers.
+request_keeps_body :: proc(task: ^Connection_Task, body: []u8) -> bool {
+	if len(body) == 0 || arena_owns(&task.arena, body) {
+		return true
+	}
+
+	if !request_heap_owns(task, body) {
+		return false
+	}
+
+	lease, refused := budget.reserve(task.resource_operation, {bytes = u64(len(body))})
+	if refused != .None {
+		return false
+	}
+	budget.release(&task.heap.body_lease)
+	task.heap.body_lease = lease
+
+	return true
+}
+
+// A body the request owns is sent from where it is. Any other borrow has no
+// provenance the server can check, and is copied before the task suspends.
 resource_copy_response :: proc(task: ^Connection_Task, response: ^Response) -> bool {
-	if len(response.trailers) > 0 && task.request.version != "HTTP/3" {
+	// HTTP/1 responses are not sent chunked with a trailer section.
+	if len(response.trailers) > 0 && task.request.version != "HTTP/2" && task.request.version != "HTTP/3" {
 		return false
 	}
 
@@ -1300,7 +1664,7 @@ resource_copy_response :: proc(task: ^Connection_Task, response: ^Response) -> b
 	allocator := mem.dynamic_arena_allocator(&task.arena)
 	body := response.body
 	// HEAD only needs the representation length while encoding its head.
-	if task.request.method != "HEAD" {
+	if task.request.method != "HEAD" && !request_keeps_body(task, body) {
 		storage, error := make([]u8, len(body), allocator)
 		if error != nil {
 			return false
@@ -1353,15 +1717,15 @@ connection_storage_allocator :: proc(task: ^Connection_Task) -> mem.Allocator {
 		return rt.heap_allocator()
 	}
 
-	allocator := charged.allocator(task.resource_transport)
+	allocator := budget.allocator(task.resource_transport)
 
 	if allocator.procedure == nil {
-		binding, error := charged.create(task.resource_connection)
+		binding, error := budget.create(task.resource_connection)
 		if error.kind != .None {
 			return {}
 		}
 		task.resource_transport = binding
-		allocator = charged.allocator(binding)
+		allocator = budget.allocator(binding)
 	}
 
 	return allocator
@@ -1398,7 +1762,9 @@ Request_Event :: struct {
 	outcome:                    Request_Outcome,
 }
 
-// Keep data and callback state alive until serve returns. The synchronous hook
+// Keep data and callback state alive until serve returns. An HTTP/1 connection
+// is observed from its first request byte: one that connects and stays silent
+// is not a request and is neither counted nor reported. The synchronous hook
 // runs on the finishing worker, once per HTTP attempt (101 completes on upgrade),
 // before request storage is released and outside internal locks. Different
 // requests may call it concurrently. Copy any retained event/strings. It may
@@ -1771,7 +2137,9 @@ Deferred_Step :: enum {
 
 // Owned pre-header continuation. poll/drop run serially on the connection owner,
 // outside locks. poll must be bounded and nonblocking; it may submit independent
-// work on its first invocation. Returning transfers ownership even on rejection.
+// work on its first invocation. A poll that answers Waiting runs again once
+// Deferred_IO.wake is raised, on every protocol: it may run sooner, but nothing
+// calls it on a clock. Returning transfers ownership even on rejection.
 // No response fields may accompany it. A zero timeout uses the response timeout;
 // the request deadline always caps it. Pending pipeline input is bounded by the
 // ordinary header limit; exceeding it closes the connection without dispatch.
@@ -1803,33 +2171,26 @@ drop_deferred :: proc(task: ^Connection_Task) {
 	signal.detach(task.deferred_signal)
 	signal.release(&task.deferred_signal)
 	if old.drop != nil {
+		context.allocator = request_default_allocator(task)
 		old.drop(old.data)
 	}
 }
 
-// queue_deferred wakes the TCP task; multiplexed transports hand the wake to their owner task.
-rebind_deferred_signal :: proc(task: ^Connection_Task, owner: ^async.Task) -> bool {
-	signal.detach(task.deferred_signal)
-	signal.release(&task.deferred_signal)
-	created: bool
-	task.deferred_signal, created = signal.create(&task.runtime.executor, owner)
-
-	return created
-}
-
-queue_deferred :: proc(task: ^Connection_Task, response: Response) -> bool {
+start_deferred :: proc(task: ^Connection_Task, response: Response, owner: ^async.Task) -> bool {
 	prepared := response
 	value := response.deferred
 	if value.poll == nil ||
 	   response.status != .None ||
 	   response.close_connection ||
 	   len(response.headers) != 0 ||
+	   len(response.trailers) != 0 ||
+	   response.uncoded ||
 	   len(response.body) != 0 ||
 	   stream_present(response.stream) ||
 	   response.upgrade.data != nil ||
 	   response.upgrade.resume != nil ||
 	   response.upgrade.drop != nil {
-		discard_response(&prepared)
+		discard_request_response(task, &prepared)
 		observe_failure(task, .Protocol_Error)
 		return false
 	}
@@ -1840,7 +2201,7 @@ queue_deferred :: proc(task: ^Connection_Task, response: Response) -> bool {
 	}
 
 	if duration <= 0 || duration > MAX_SERVER_TIMEOUT {
-		discard_response(&prepared)
+		discard_request_response(task, &prepared)
 		observe_failure(task, .Protocol_Error)
 		return false
 	}
@@ -1854,11 +2215,8 @@ queue_deferred :: proc(task: ^Connection_Task, response: Response) -> bool {
 	}
 
 	remaining := time.tick_diff(time.tick_now(), task.deferred_expires)
-	if remaining <= 0 {
-		return false
-	}
 	task.deferred_deadline = async.deadline_after(&task.runtime.executor, remaining)
-	s, ok := signal.create(&task.runtime.executor, &task.task)
+	s, ok := signal.create(&task.runtime.executor, owner)
 
 	if !ok {
 		observe_failure(task, .Allocation_Error)
@@ -1866,47 +2224,49 @@ queue_deferred :: proc(task: ^Connection_Task, response: Response) -> bool {
 	}
 
 	task.deferred_signal = s
-	task.deferred_used = len(task.connection.read_buffer)
-	if task.deferred_used > REQUEST_HEADER_LIMIT {
+	return true
+}
+
+// Only HTTP/1 reads pipelined bytes while waiting for a response. Multiplexed
+// transports keep processing their connection through their own owner task.
+queue_http1_deferred :: proc(task: ^Connection_Task, response: Response) -> bool {
+	if !start_deferred(task, response, &task.task) {
 		return false
 	}
-	capacity := max(512, task.deferred_used)
-	buffer, error := make([]u8, capacity, mem.dynamic_arena_allocator(&task.arena))
-
-	if error != nil {
-		observe_failure(task, .Allocation_Error)
+	buffered := task.connection.read_buffer
+	if len(buffered) > REQUEST_HEADER_LIMIT {
 		return false
 	}
-
-	copy(buffer, task.connection.read_buffer)
-	task.deferred_buffer = buffer
+	// Borrow the existing input until a waiting callback needs more capacity.
+	task.deferred_buffer = buffered
+	task.deferred_used = len(buffered)
 	task.phase = .Await_Response
 
 	return true
 }
 
-await_response :: proc(task: ^Connection_Task) -> async.Resume_Result {
+Deferred_Poll_Result :: enum {
+	Waiting,
+	Ready,
+	Failed,
+	Cancelled,
+	Invalid,
+}
+
+deferred_cancelled :: proc(task: ^Connection_Task) -> bool {
 	if deadline_expired(task.deferred_expires) {
 		cancel_request_context(task.request.cancellation, .Deadline)
+		return true
 	}
+	return request_context_status(task.request.cancellation) != .Active
+}
 
-	status := request_context_status(task.request.cancellation)
-
-	if status != .Active {
+// Only Ready transfers a response to the transport. Every other outcome disposes
+// callback output here. Only Waiting keeps the continuation and wake signal alive.
+poll_deferred :: proc(task: ^Connection_Task) -> (Response, Deferred_Poll_Result) {
+	if deferred_cancelled(task) {
 		drop_deferred(task)
-		observe_failure(task, .Timeout if status == .Deadline else .Cancelled)
-		response := Response {
-			status           = .Request_Timeout,
-			close_connection = true,
-		}
-
-		if status != .Deadline {
-			response.status = .Service_Unavailable
-		}
-		if !queue_response(task, response) {
-			return .Done
-		}
-		return .Yield
+		return {}, .Cancelled
 	}
 
 	io := Deferred_IO {
@@ -1916,42 +2276,70 @@ await_response :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		cancellation      = task.request.cancellation,
 		wake              = task.deferred_signal,
 	}
-
-	response, step := task.deferred.poll(task.deferred.data, &io)
-	// A nonblocking callback can still lose its budget before returning a result.
-	if deadline_expired(task.deferred_expires) || request_cancelled(io.cancellation) {
-		discard_response(&response)
-
-		if deadline_expired(task.deferred_expires) {
-			cancel_request_context(io.cancellation, .Deadline)
+	response: Response
+	step: Deferred_Step
+	{
+		context.allocator = request_default_allocator(task)
+		response, step = task.deferred.poll(task.deferred.data, &io)
+	}
+	result := Deferred_Poll_Result.Ready
+	switch step {
+	case .Waiting:
+		discard_request_response(task, &response)
+		if !deferred_cancelled(task) {
+			return {}, .Waiting
 		}
-
-		return .Yield
+		result = .Cancelled
+	case .Failed:
+		discard_request_response(task, &response)
+		result = .Failed
+	case .Ready:
+		if deferred_present(response.deferred) {
+			discard_request_response(task, &response)
+			result = .Invalid
+		}
 	}
 
-	if step != .Ready {
-		discard_response(&response)
+	// Both the poll and its final drop run application code. Check the deadline
+	// after retirement and before transferring a ready result to the transport.
+	drop_deferred(task)
+	if deferred_cancelled(task) {
+		discard_request_response(task, &response)
+		return {}, .Cancelled
+	}
+	return response, result
+}
 
-		if step == .Failed {
-			if resource_pressure(task) {
-				drop_deferred(task)
-				resource_reject(task)
-				return .Yield
-			}
-
-			observe_failure(task, .IO_Error)
+await_response :: proc(task: ^Connection_Task) -> async.Resume_Result {
+	response, result := poll_deferred(task)
+	switch result {
+	case .Waiting:
+		return await_peer_or_result(task)
+	case .Cancelled:
+		expired := request_context_status(task.request.cancellation) == .Deadline
+		observe_failure(task, .Timeout if expired else .Cancelled)
+		// The request arrived and the handler accepted it, so the work behind the
+		// deferred response may already have had effects. 504 reports the late
+		// answer without the replay that 408 invites.
+		rejection := Response {
+			status           = .Gateway_Timeout if expired else .Service_Unavailable,
+			close_connection = true,
+		}
+		if !queue_response(task, rejection) {
 			return .Done
 		}
-
-		return await_peer_or_result(task)
-	}
-
-	drop_deferred(task)
-
-	if deferred_present(response.deferred) {
-		discard_response(&response)
+		return .Yield
+	case .Failed:
+		if resource_pressure(task) {
+			resource_reject(task)
+			return .Yield
+		}
+		observe_failure(task, .IO_Error)
+		return .Done
+	case .Invalid:
 		observe_failure(task, .Protocol_Error)
 		return .Done
+	case .Ready:
 	}
 
 	task.connection.read_buffer = task.deferred_buffer[:task.deferred_used]
@@ -1974,7 +2362,7 @@ await_peer_or_result :: proc(task: ^Connection_Task) -> async.Resume_Result {
 			return .Done
 		}
 
-		capacity := min(2 * len(task.deferred_buffer), REQUEST_HEADER_LIMIT)
+		capacity := clamp(2 * len(task.deferred_buffer), 512, REQUEST_HEADER_LIMIT)
 		buffer, error := make([]u8, capacity, mem.dynamic_arena_allocator(&task.arena))
 
 		if error != nil {
@@ -2002,6 +2390,10 @@ await_peer_or_result :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		return .Yield
 	}
 
+	// A FIN cannot be told apart from a full close until something is written, so
+	// both cancel the pending work. A client that half-closes its sending side
+	// therefore loses a deferred response; tests/upstream relies on a closed peer
+	// releasing its slot at once.
 	if error.kind != .None || n == 0 {
 		cancel_request_context(task.request.cancellation, .Peer_Closed)
 		observe_failure(task, .Cancelled)

@@ -1,21 +1,21 @@
 package server
 
-import core "core"
-import dev "development"
-import db "shared:kakunou"
-import "core:net"
-import "core:time"
-import "core:log"
-import "core:mem"
-import "core:os"
-import "core:strings"
 import application "application"
 import assets "assets"
+import core "core"
+import "shared:async/tls"
+import "core:log"
+import "core:mem"
+import "core:net"
+import "core:os"
+import "core:strings"
+import "core:time"
+import dev "development"
+import jsx "jsx"
 import modules "modules"
 import pages "pages"
-import jsx "jsx"
 import s3 "s3"
-import "core:crypto/tls"
+import db "shared:kakunou"
 
 // Compatibility view: valid only during a synchronous facade handler/helper.
 // Do not retain this pointer. Core handlers receive the real stable connection.
@@ -63,6 +63,14 @@ connection_refresh :: proc(view: ^Connection, transport: ^core.Connection) {
 	view.write_deadline = transport.write_deadline
 }
 
+// Deprecated. read_connection, write_connection and send_response block the
+// calling worker in poll() on the raw socket. Workers are shared by every
+// connection, so a handler that waits here stalls the server in proportion: do
+// not use them on a server with other traffic. Return a Response (optionally
+// deferred or streamed) or an upgrade instead. Each call is bounded: without an
+// explicit read_deadline/write_deadline the body/response timeout applies. On
+// TLS connections they fail with .Invalid_Argument, because there is no raw
+// plaintext socket to use.
 read_connection :: proc(conn: ^Connection, buffer: []u8) -> (int, net.TCP_Recv_Error) {
 	local: core.Connection
 	io := connection_transport(conn, &local)
@@ -107,6 +115,7 @@ send_response :: proc(conn: ^Connection, response: Response, request_method: str
 }
 
 Server_Control :: core.Server_Control
+Signal_Config :: core.Signal_Config
 Timeout_Config :: core.Timeout_Config
 Keep_Alive_Config :: core.Keep_Alive_Config
 Observability_Config :: core.Observability_Config
@@ -149,8 +158,6 @@ Deferred_IO :: core.Deferred_IO
 Deferred_Step :: core.Deferred_Step
 
 Resource_Config :: core.Resource_Config
-
-
 
 
 Http2_Config :: core.Http2_Config
@@ -241,7 +248,9 @@ environment_value :: proc(raw: string, allocator: mem.Allocator) -> (string, boo
 		if c == 0 {
 			return "", false
 		}
-		if quote == 0 && c == '#' && (index == 0 || line[index - 1] == ' ' || line[index - 1] == '\t') {
+		if quote == 0 &&
+		   c == '#' &&
+		   (index == 0 || line[index - 1] == ' ' || line[index - 1] == '\t') {
 			break
 		}
 
@@ -298,25 +307,27 @@ environment_parse :: proc(source: string, allocator: mem.Allocator) -> (map[stri
 	for raw in strings.split_lines_iterator(&rest) {
 		line_number += 1
 		line := strings.trim_space(raw)
-		if line == "" || line[0] == '#' {
-			continue
-		}
+		if line == "" || line[0] == '#' do continue
+
 		if len(line) > 6 && line[:6] == "export" && (line[6] == ' ' || line[6] == '\t') {
 			line = strings.trim_left_space(line[6:])
 		}
+
 		equal := strings.index_byte(line, '=')
 		key := ""
 		if equal > 0 {
 			key = strings.trim_space(line[:equal])
 		}
-		value: string
-		valid := environment_key_ok(key)
-		if valid {
-			value, valid = environment_value(line[equal + 1:], allocator)
+
+		if !environment_key_ok(key) {
+			return nil, line_number
 		}
+
+		value, valid := environment_value(line[equal + 1:], allocator)
 		if !valid {
 			return nil, line_number
 		}
+
 		values[key] = value
 	}
 
@@ -335,6 +346,8 @@ Server :: struct {
 	address:                              string,
 	port:                                 int,
 	max_connections, initial_connections: int,
+	// Completed TCP handshakes queued until accepted; zero selects 128.
+	backlog:                              int,
 	runtime_allocator:                    mem.Allocator,
 	database:                             ^db.SQLite_DB,
 	handler:                              Handler,
@@ -342,10 +355,30 @@ Server :: struct {
 	modules:                              []Module_Mount,
 	assets:                               []Asset_Mount,
 	asset_limits:                         Asset_Limits,
+	// Size limits for module mounts; zero selects the module defaults.
+	module_limits:                        Asset_Limits,
 	pages:                                Page_Mount,
+	handler_routes:                       []string,
 	development:                          bool,
 	hot_reload_directory:                 string,
+	// Zero selects one worker per logical core, at least four. Handlers run on
+	// these workers and are never preempted: a handler that blocks (a slow
+	// query, a sleep, the deprecated blocking helpers above) holds its worker,
+	// and when all are held the server stops accepting, reading and timing out
+	// connections. Return a deferred response for work that waits.
 	workers:                              int,
+	// Off by default. Polls sockets and timers on one extra thread so accepts,
+	// deadlines and drain stay timely while every worker is busy. A ready
+	// request still waits for a free worker; it does not make blocking safe.
+	dedicated_poller:                     bool,
+	// SIGTERM and SIGINT drain the server gracefully by default: the listener
+	// closes, admitted requests finish (bounded by drain_timeout, five seconds
+	// when zero) and serve returns; a second signal terminates the process.
+	// The handlers are installed only while serve runs and only for signals
+	// still at their default disposition. Set signals.disabled to keep signal
+	// handling entirely in the application; it must then forward the signal to
+	// a thread before calling drain_server, which is not async-signal-safe.
+	signals:                              Signal_Config,
 	control:                              ^Server_Control,
 	timeouts:                             Timeout_Config,
 	handler_timeout:                      time.Duration,
@@ -375,10 +408,13 @@ serve :: proc(config: Server) -> bool {
 				port = config.port,
 				max_connections = config.max_connections,
 				initial_connections = config.initial_connections,
+				backlog = config.backlog,
 				runtime_allocator = config.runtime_allocator,
 				handler_data = &snapshot,
 				request_body_limit = config.request_body_limit,
 				workers = config.workers,
+				dedicated_poller = config.dedicated_poller,
+				signals = config.signals,
 				control = config.control,
 				timeouts = config.timeouts,
 				handler_timeout = config.handler_timeout,
@@ -389,7 +425,9 @@ serve :: proc(config: Server) -> bool {
 			modules = config.modules,
 			assets = config.assets,
 			asset_limits = config.asset_limits,
+			module_limits = config.module_limits,
 			pages = config.pages,
+			handler_routes = config.handler_routes,
 			development = config.development,
 			hot_reload_directory = config.hot_reload_directory,
 			dispatch = legacy_dispatch,
@@ -422,7 +460,18 @@ JSX_RUNTIME_URL :: modules.JSX_RUNTIME_URL
 JSX_RUNTIME :: modules.JSX_RUNTIME
 PAGE_ENTRY_URL :: modules.PAGE_ENTRY_URL
 PAGE_ENTRY :: modules.PAGE_ENTRY
+SLIDING_WINDOW_URL :: modules.SLIDING_WINDOW_URL
+SLIDING_WINDOW :: modules.SLIDING_WINDOW
+SLOT_WINDOW_URL :: modules.SLOT_WINDOW_URL
+SLOT_WINDOW :: modules.SLOT_WINDOW
+READS_URL :: modules.READS_URL
+READS :: modules.READS
+MUTATIONS_URL :: modules.MUTATIONS_URL
+EDITOR_URL :: modules.EDITOR_URL
 Page_Mount :: pages.Page_Mount
+Template_Build :: pages.Template_Build
+Compiled_Page :: pages.Compiled_Page
+Template_Variant :: pages.Template_Variant
 prepare_pages :: pages.prepare_pages
 serve_prepared_pages :: pages.serve_prepared_pages
 transform_jsx :: jsx.transform_jsx
@@ -439,11 +488,38 @@ AWS_Credentials :: s3.AWS_Credentials
 S3_Result :: s3.S3_Result
 load_s3_config :: s3.load_s3_config
 s3_config_error :: s3.s3_config_error
+s3_download_url :: s3.s3_download_url
+
+// Servers lease credentials from a cache that refreshes ahead of expiry and
+// wipes what it held; a lease never blocks a request worker.
+Credential_Cache :: s3.Credential_Cache
+Credential_Lease :: s3.Credential_Lease
+Credential_Error :: s3.Credential_Error
+Credential_Error_Kind :: s3.Credential_Error_Kind
+Credential_Source :: s3.Credential_Source
+Credential_Clock :: s3.Credential_Clock
+credential_cache_init :: s3.credential_cache_init
+credential_cache_destroy :: s3.credential_cache_destroy
+credential_lease_cached :: s3.credential_lease_cached
+credential_lease_release :: s3.credential_lease_release
+credential_refresh :: s3.credential_refresh
+credential_clock_system :: s3.credential_clock_system
+lease_credentials :: s3.lease_credentials
+
+// Signing only, no I/O: send the request through an asynchronous client.
+S3_Request :: s3.S3_Request
+s3_put_request :: s3.s3_put_request
+s3_delete_request :: s3.s3_delete_request
+s3_get_request :: s3.s3_get_request
+s3_head_request :: s3.s3_head_request
+
+// For scripts and tools only. These block the calling thread on the network
+// (credential lookup up to several seconds, uploads up to 120 s) and must not
+// run on a request worker.
 aws_credentials :: s3.aws_credentials
 s3_put :: s3.s3_put
 s3_put_file :: s3.s3_put_file
 s3_delete :: s3.s3_delete
-s3_download_url :: s3.s3_download_url
 
 TLS_Peer_Identity :: tls.Peer_Identity
 
@@ -456,4 +532,3 @@ tls_peer_identity :: proc(connection: ^Connection) -> TLS_Peer_Identity {
 
 	return core.tls_peer_identity(connection._transport)
 }
-

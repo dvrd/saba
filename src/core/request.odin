@@ -1,12 +1,12 @@
 package saba_core
 
 import "core:log"
-import http "shared:http"
-import http1 "shared:http/v1"
+import http "shared:async/http"
+import http1 "shared:async/http/v1"
 import "core:strings"
 import "core:encoding/json"
 import "core:mem"
-import budget "core:sync/budget"
+import budget "shared:async/budget"
 
 // Only the generic read_json uses these; a program that never instantiates
 // it would otherwise fail -vet on unused imports.
@@ -20,9 +20,8 @@ REQUEST_BODY_LIMIT :: 4096
 // Decode shared wire semantics, then attach Saba-owned routing/body state.
 // The transport's smaller head limit remains independent of the codec limit.
 parse_request :: proc(raw: string, storage: []Header) -> (Request, HTTP_Status) {
-	end := strings.index(raw, HTTP_HEADERS_END)
-	if (end >= 0 && end + len(HTTP_HEADERS_END) > REQUEST_HEADER_LIMIT) ||
-	   (end < 0 && len(raw) >= REQUEST_HEADER_LIMIT) {
+	length := http1.request_head_length(raw)
+	if length > REQUEST_HEADER_LIMIT || (length < 0 && len(raw) >= REQUEST_HEADER_LIMIT) {
 		return {}, .Request_Header_Fields_Too_Large
 	}
 
@@ -37,6 +36,7 @@ parse_request :: proc(raw: string, storage: []Header) -> (Request, HTTP_Status) 
 			content_length = head.content_length,
 			has_content_length = head.has_content_length,
 			chunked = head.chunked,
+			_expect_continue = head.expect_continue,
 		},
 		status
 }
@@ -44,6 +44,7 @@ parse_request :: proc(raw: string, storage: []Header) -> (Request, HTTP_Status) 
 CRLF :: http1.CRLF
 HTTP_HEADERS_END :: http1.HTTP_HEADERS_END
 HTTP_VERSION :: http1.HTTP_VERSION
+HTTP_VERSION_1_0 :: http1.HTTP_VERSION_1_0
 
 // Request fields borrow the connection's buffers and remain valid during routing.
 Header :: http.Header
@@ -68,6 +69,8 @@ Request :: struct {
 	request_id:           u64,
 	route:                string,
 	_observe:             bool,
+	// The peer holds its body back until "100 Continue" (HTTP/1.1 only).
+	_expect_continue:     bool,
 	method:               string,
 	path:                 string,
 	query:                string,
@@ -107,7 +110,9 @@ read_json :: proc(request: ^Request, input: ^$T) -> HTTP_Status {
 		return .Unsupported_Media_Type
 	}
 
-	if !request.has_content_length && !request.chunked {
+	// HTTP/2 and HTTP/3 delimit a body by the end of its stream.
+	framed := request.version == "HTTP/2" || request.version == "HTTP/3"
+	if !framed && !request.has_content_length && !request.chunked {
 		return .Length_Required
 	}
 

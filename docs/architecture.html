@@ -1717,7 +1717,7 @@ const detailGraph = (() => {
     if ((n.id === 'handler' || n.id === 'service') && currentState.route === 'inline') key = 'lookup';
     let requested = typeof n.line === 'number' ? {line:n.line} : n.line || {};
     if (n.id === 'service') {
-      const line = {inline:2, surf:201, pool:103}[currentState.route];
+      const line = {inline:2, surf:209, pool:103}[currentState.route];
       requested = {line};
     }
     // Keep the chosen component in view while its sometimes distant peer is
@@ -2604,43 +2604,43 @@ const tracePrograms = (() => {
     '#client-module-response', numbers.map(n => [n, emittedLines[n - 1]]), stops);
   return {
     "install": program("Build machine", "Repository source", ".krs/packages.json", "../.krs/packages.json", [[25, "    {"], [26, "      \"name\": \"kessel\","], [27, "      \"source\": \"https://github.com/dvrd/kessel.git\","], [28, "      \"tag\": \"v0.21.0\","], [29, "      \"commit\": \"a9ba38301296771ce512f64063e7286844a86679\","], [30, "      \"hash\": \"80aa6d59edd17676d0bae28378106d96c52e49214679a91aaf53cab1522c38a3\""], [31, "    },"]], [[0, 26, "krs reads the project lock. Each library is pinned by tag, commit and content hash."], [0.33, 28, "The JSX compiler parses with Kessel v0.21.0, the tag this lock records."], [0.62, 29, "krs install --frozen refuses a tag that now resolves to another commit, so a moved tag cannot change a build."], [0.95, 30, "The hash covers the installed package tree. The Odin root now holds exactly these sources."]]),
-    "parse": program("Build machine", "Repository source", "src/jsx/jsx.odin", "../src/jsx/jsx.odin", [[405, "compile_page_template :: proc("], [412, "  return compile_module(source, file, true, allocator)"], [452, "  if !k.parse_job_open_inline(&job, source, config, file) {"], [457, "  k.parse_job_run(&job)"], [458, "  if len(job.parser.errors) == 0 {"], [459, "    k.checker_run_for_job(&job)"], [460, "  }"], [512, "  if template {"], [513, "    page = extract_page(&p, job.program, allocator)"]], [[0, 405, "prepare_templates calls compile_page_template with the source of web/inbox.jsx."], [0.36, 457, "Kessel parses the module into a syntax tree. Every node keeps its byte span in the original source."], [0.64, 459, "The checker resolves names, so the compiler knows which identifiers are the module’s own."], [0.95, 513, "Hand the tree to extract_page, which looks for the default export and the element it returns."]]),
+    "parse": program("Build machine", "Repository source", "src/jsx/jsx.odin", "../src/jsx/jsx.odin", [[408, "compile_page_template :: proc("], [415, "  return compile_module(source, file, true, allocator)"], [455, "  if !k.parse_job_open_inline(&job, source, config, file) {"], [460, "  k.parse_job_run(&job)"], [461, "  if len(job.parser.errors) == 0 {"], [462, "    k.checker_run_for_job(&job)"], [463, "  }"], [515, "  if template {"], [516, "    page = extract_page(&p, job.program, allocator)"]], [[0, 408, "prepare_templates calls compile_page_template with the source of web/inbox.jsx."], [0.36, 460, "Kessel parses the module into a syntax tree. Every node keeps its byte span in the original source."], [0.64, 462, "The checker resolves names, so the compiler knows which identifiers are the module’s own."], [0.95, 516, "Hand the tree to extract_page, which looks for the default export and the element it returns."]]),
     "emit": program("Build machine", "Repository source", "src/jsx/template.odin", "../src/jsx/template.odin", [[222, "  setup := template_instance(&b, root, -1)"], [226, "  manifest, marshal_error := json.marshal(b.targets[:])"], [230, "  jsx_emit(p, fmt.tprintf(\"\\nimport * as %s from \\\"/__saba/attach.js\\\";\\n\", b.attach))"], [231, "  jsx_emit(p, strings.to_string(b.declarations))"], [232, "  jsx_emit(p, \"export function __sabaAttach(host, props) { return \")"], [233, "  jsx_emit(p, fmt.tprintf(\"%s.attach(host, %s, () => \", b.attach, string(manifest)))"], [236, "  return {"], [237, "    supported = true,"], [238, "    html = strings.clone(strings.to_string(b.html), allocator),"]], [[0, 222, "Walk the returned \u003cmain>. Proven markup goes to HTML with a numbered target per element; {label()} becomes an empty range."], [0.2, 226, "Record each target’s tag, parent and instance as a manifest for the browser to check."], [0.76, 232, "Append __sabaAttach to the module. It binds the component’s setup to the served targets."], [0.97, 238, "Return the HTML for the document. The author’s code stays in the module unchanged."]]),
     "stage": program("Saba server", "Repository source", "src/pages/build.odin", "../src/pages/build.odin", [[341, "      linker.input[view] = template.javascript"], [342, "      linker.input[start] = fmt.aprintf("], [349, "      if !link_module(&linker, start) {"], [353, "      document := fmt.aprintf("], [379, "  sha2.init_256(&hasher)"], [400, "  id := hex_string(digest[:BUILD_ID_BYTES], allocator)"], [442, "  cache.build = build"]], [[0, 341, "Store the compiled view and write a two-line entry that calls startPage with this route and language."], [0.26, 349, "Link every import to a build URL. An unresolved build-owned import fails the build here."], [0.98, 400, "Name the generation after a SHA-256 of every file and document. Same sources, same name; any change, a new one."]]),
     "navigate": program("Browser", "Example code", "Inbox navigation", "", [[1, "location.assign(\"/inbox\")"]], [[0, 1, "Navigate to /inbox. The browser sends a GET for that page to Saba."]]),
     "open.h1": program(
       "Saba server", "Repository source", "src/core/server.odin",
       "../src/core/server.odin", [
-        [998, "dispatch_request :: proc(task: ^Connection_Task) -> Response {"],
-        [999, "  if !begin_request_context(task) {"],
-        [1000, "    return Response{status = .Internal_Server_Error, close_connection = true}"],
-        [1001, "  }"],
-        [1002, "  return call_request_handler(task, task.runtime.config.handler, task.runtime.config.handler_data)"],
-        [1003, "}"]
+        [997, "dispatch_request :: proc(task: ^Connection_Task) -> Response {"],
+        [998, "  if !begin_request_context(task) {"],
+        [999, "    return Response{status = .Internal_Server_Error, close_connection = true}"],
+        [1000, "  }"],
+        [1001, "  return call_request_handler(task, task.runtime.config.handler, task.runtime.config.handler_data)"],
+        [1002, "}"]
       ], [
-        [0, 998, "Enter shared dispatch with the connection task for this completed HTTP/1.1 request."],
-        [0.34, 999, "Ensure the request has a cancellation context. If this fails, dispatch returns a server error."],
-        [0.78, 1002, "Call the configured handler through the shared wrapper and return its response."]
+        [0, 997, "Enter shared dispatch with the connection task for this completed HTTP/1.1 request."],
+        [0.34, 998, "Ensure the request has a cancellation context. If this fails, dispatch returns a server error."],
+        [0.78, 1001, "Call the configured handler through the shared wrapper and return its response."]
       ]
     ),
-    "open.h2": program("Saba server", "Repository source", "src/core/http2.odin", "../src/core/http2.odin", [[1620, "  task.request.body = task.request.body[:request.body_len]"], [1621, "  request.response_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.response)"], [1622, "  response := dispatch_request(task)"], [1623, ""], [1624, "  if !h2_queue_response(task, response) {"], [1625, "    request.failed = true"]], [[0, 1620, "Trim this stream’s request body to the bytes received. For this GET it is empty."], [0.34, 1621, "Set this stream’s response deadline: now plus the configured response timeout."], [0.78, 1622, "Dispatch the completed HTTP/2 request and queue its response on the stream."]]),
+    "open.h2": program("Saba server", "Repository source", "src/core/http2.odin", "../src/core/http2.odin", [[1662, "  task.request.body = task.request.body[:request.body_len]"], [1663, "  request.response_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.response)"], [1664, "  response := dispatch_request(task)"], [1665, ""], [1666, "  if !h2_queue_response(task, response) {"], [1667, "    request.failed = true"]], [[0, 1662, "Trim this stream’s request body to the bytes received. For this GET it is empty."], [0.34, 1663, "Set this stream’s response deadline: now plus the configured response timeout."], [0.78, 1664, "Dispatch the completed HTTP/2 request and queue its response on the stream."]]),
     "open.h3": program(
       "Saba server", "Repository source", "src/core/http3.odin",
       "../src/core/http3.odin", [
-        [363, "state := cast(^Http3_Request)wire.user_data"],
-        [364, ""],
-        [365, "if state == nil {"],
-        [366, "  state = http3_create_request(owner, wire)"],
-        [367, "  if state == nil {"],
-        [368, "    return .Failed"],
-        [369, "  }"],
-        [370, "  wire.user_data = state"],
-        [371, "}"],
-        [398, "    response = call_request_handler(task, owner.config.handler, owner.config.handler_data)"]
+        [366, "state := cast(^Http3_Request)wire.user_data"],
+        [367, ""],
+        [368, "if state == nil {"],
+        [369, "  state = http3_create_request(owner, wire)"],
+        [370, "  if state == nil {"],
+        [371, "    return .Failed"],
+        [372, "  }"],
+        [373, "  wire.user_data = state"],
+        [374, "}"],
+        [401, "    response = call_request_handler(task, owner.config.handler, owner.config.handler_data)"]
       ], [
-        [0, 363, "Read the Saba request state attached to this HTTP/3 exchange. On the first poll, the pointer is empty."],
-        [0.34, 366, "Create the server-side request state for this new HTTP/3 exchange."],
-        [0.78, 398, "Call the configured handler for this HTTP/3 request and save the response it returns."]
+        [0, 366, "Read the Saba request state attached to this HTTP/3 exchange. On the first poll, the pointer is empty."],
+        [0.34, 369, "Create the server-side request state for this new HTTP/3 exchange."],
+        [0.78, 401, "Call the configured handler for this HTTP/3 request and save the response it returns."]
       ]
     ),
     "html": program("Saba server", "Repository source", "src/pages/build.odin", "../src/pages/build.odin", [[886, "serve_document :: proc(request: ^Request, doc: Compiled_Document, development := false) -> Response {"], [888, "    denial, allowed := authorize(request)"], [895, "    if selected := select_language(request); selected in doc.variants {"], [902, "    policy = .Private_No_Store if doc.config.authorize != nil else .No_Store"], [916, "  return assets.prepared_representation_response(request, &rep, policy, vary)"]], [[0, 886, "serve_prepared_pages matched /inbox to a compiled document of the active build."], [0.25, 888, "Run the page’s authorize callback first, when it has one. This example has none."], [0.5, 895, "Pick the language variant the application selects; otherwise the first, English."], [0.8, 916, "Send the prepared bytes with no-store. “Inbox” and the reload link work before any script runs."]]),

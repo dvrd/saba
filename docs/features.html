@@ -362,7 +362,7 @@ const operations = [
         3,
         "Count expression",
         "unread() is a call, so it is outside the one-shot grammar. The compiler wraps it in a binding descriptor; when the binding runs in the browser, the read subscribes it to unread.",
-        "src/jsx/jsx.odin:758",
+        "src/jsx/jsx.odin:761",
         "hole = unread()",
         "\u003coutput>{unread()}\u003c/output>"
       ]
@@ -406,7 +406,7 @@ const operations = [
         1,
         "Module text",
         "compile_module opens one Kessel parse job for the file in JSX module mode, then runs the parser and the checker.",
-        "src/jsx/jsx.odin:457",
+        "src/jsx/jsx.odin:460",
         "module = Inbox.jsx",
         "k.parse_job_run(&job)"
       ],
@@ -415,7 +415,7 @@ const operations = [
         2,
         "Syntax tree",
         "With no parser errors the program is available. A parser error would stop the build with its message at its source position.",
-        "src/jsx/jsx.odin:477",
+        "src/jsx/jsx.odin:480",
         "parser errors = 0",
         "visit_tree(job.program.body, &nodes, nil, advice = &advice, guard = &guard)"
       ],
@@ -486,7 +486,7 @@ const operations = [
         1,
         "Read the holes",
         "For each hole the emitter walks its expression, noting any await or yield, and then decides how to emit it.",
-        "src/jsx/jsx.odin:749",
+        "src/jsx/jsx.odin:752",
         "literal · tag · callback · await",
         "\u003cp>{\"Inbox\"}\u003c/p>  \u003cp>{label`unread`}\u003c/p>"
       ],
@@ -495,7 +495,7 @@ const operations = [
         2,
         "Literal child",
         "A primitive literal is in the one-shot grammar. Its value is emitted in place, with no binding.",
-        "src/jsx/jsx.odin:722",
+        "src/jsx/jsx.odin:725",
         "string value",
         "__saba_jsx(\"p\", {}, (\"Inbox\"))"
       ],
@@ -504,7 +504,7 @@ const operations = [
         3,
         "Tagged template",
         "A tagged template is outside the one-shot grammar. The compiler wraps it in a private binding descriptor, so the tag runs in the browser while the binding tracks reads.",
-        "src/jsx/jsx.odin:815",
+        "src/jsx/jsx.odin:818",
         "binding descriptor",
         "__saba_jsx(\"p\", {}, __saba_binding(() => (label`unread`)))"
       ],
@@ -531,7 +531,7 @@ const operations = [
         3,
         "Keep await",
         "An await in a hole makes it a snapshot. The awaited value is emitted where the author wrote it, so the loader runs once.",
-        "src/jsx/jsx.odin:643",
+        "src/jsx/jsx.odin:646",
         "one awaited snapshot",
         "async function row() { return __saba_jsx(\"p\", {}, (await loadLabel())) }"
       ],
@@ -540,7 +540,7 @@ const operations = [
         0,
         "Reject yield",
         "A yield inside a hole stops the build with a diagnostic at the yield. Assigning the resumed value first keeps its order.",
-        "src/jsx/jsx.odin:756",
+        "src/jsx/jsx.odin:759",
         "diagnostic at the yield",
         "function* row() { const text = yield next(); return \u003cp>{text}\u003c/p> }"
       ]
@@ -592,7 +592,7 @@ const operations = [
         1,
         "Reader function",
         "label() is a call, outside the one-shot grammar. The compiler emits a binding descriptor whose reader runs in the browser.",
-        "src/jsx/jsx.odin:758",
+        "src/jsx/jsx.odin:761",
         "reader = () => label()",
         "__saba_jsx(\"p\", {}, __saba_binding(() => (label())))"
       ],
@@ -754,7 +754,7 @@ const operations = [
         1,
         "Sole child",
         "The hole is the only child of an intrinsic element, so a single text node can stand in for it.",
-        "src/jsx/jsx.odin:869",
+        "src/jsx/jsx.odin:872",
         "sole intrinsic child",
         "\u003ch1>{\"Inbox: \" + count()}\u003c/h1>"
       ],
@@ -763,7 +763,7 @@ const operations = [
         1,
         "Always a string",
         "A + with a string literal operand always produces a string, so the compiler picks the text-only binding.",
-        "src/jsx/jsx.odin:812",
+        "src/jsx/jsx.odin:815",
         "produces_string = true",
         "produces_string(hole.expr)"
       ],
@@ -772,7 +772,7 @@ const operations = [
         2,
         "Emit textBinding",
         "The emitted call wraps the author's expression unchanged in a textBinding reader.",
-        "src/jsx/jsx.odin:813",
+        "src/jsx/jsx.odin:816",
         "helper = textBinding",
         "__saba_jsx(\"h1\", {}, __saba_textBinding(() => (\"Inbox: \" + count())))"
       ],
@@ -827,7 +827,7 @@ const operations = [
         1,
         "Attribute expression",
         "The emitter reads the attribute name and the expression between its braces.",
-        "src/jsx/jsx.odin:1009",
+        "src/jsx/jsx.odin:1012",
         "attribute = aria-expanded",
         "aria-expanded={open()}"
       ],
@@ -836,7 +836,7 @@ const operations = [
         2,
         "Binding value",
         "open() is a call, so the attribute value becomes a binding descriptor. The label stays a plain child.",
-        "src/jsx/jsx.odin:1079",
+        "src/jsx/jsx.odin:1082",
         "value = binding",
         "{\"aria-expanded\": __saba_binding(() => (open())),}"
       ],
@@ -910,7 +910,7 @@ const operations = [
         1,
         "Clock expression",
         "Date.now() is a call, outside the one-shot grammar, so the compiler emits a binding for it.",
-        "src/jsx/jsx.odin:758",
+        "src/jsx/jsx.odin:761",
         "Date.now() → binding",
         "classify(Date.now())  // live"
       ],
@@ -919,7 +919,7 @@ const operations = [
         2,
         "Reader function",
         "The reader runs in the visitor's browser. For a snapshot instead, write const openedAt = Date.now() in setup and use {openedAt}: an identifier is one-shot.",
-        "src/jsx/jsx.odin:815",
+        "src/jsx/jsx.odin:818",
         "binding; 0 evaluations",
         "__saba_jsx(\"time\", {}, __saba_binding(() => (Date.now())))"
       ],
@@ -996,7 +996,7 @@ const operations = [
         1,
         "Element hierarchy",
         "Kessel parses svg and circle as lowercase intrinsic elements. Child elements are emitted as deferred child descriptors, so each is built once its parent exists.",
-        "src/jsx/jsx.odin:857",
+        "src/jsx/jsx.odin:860",
         "svg → circle",
         "__saba_jsx(\"svg\", {\"viewBox\": \"0 0 10 10\",}, __saba_child(\"circle\", {…}))"
       ],
@@ -1070,7 +1070,7 @@ const operations = [
         1,
         "Spread child",
         "Kessel parses the spread inside the expression container. The compiler unwraps it and emits its argument.",
-        "src/jsx/jsx.odin:939",
+        "src/jsx/jsx.odin:942",
         "child = spread(cells)",
         "{...cells}"
       ],
@@ -1079,7 +1079,7 @@ const operations = [
         1,
         "One-shot value",
         "cells is a bare identifier, which is one-shot, so the array is passed as a value with no binding.",
-        "src/jsx/jsx.odin:722",
+        "src/jsx/jsx.odin:725",
         "value = cells",
         "__saba_jsx(\"p\", {}, (cells))"
       ],
@@ -1164,7 +1164,7 @@ const operations = [
         3,
         "Request the map",
         "Developer tools request inbox.js.map. The map route compiles the JSX source again and asks the transform for a version 3 source map built from the recorded origins.",
-        "src/jsx/jsx.odin:546",
+        "src/jsx/jsx.odin:549",
         "version 3 · recorded origins",
         "publish_source_map(source_map, &p, file, shift, allocator)"
       ],
@@ -1226,7 +1226,7 @@ const operations = [
         1,
         "One parameter",
         "The compiler visits every function. Badge has one parameter, an object pattern, so its fields are prop names.",
-        "src/jsx/jsx.odin:620",
+        "src/jsx/jsx.odin:623",
         "props: count → props.count",
         "function Badge({count}) {"
       ],
@@ -1253,7 +1253,7 @@ const operations = [
         4,
         "Live read",
         "Reading props.count in JSX keeps the parent's getter, so the output follows later changes and the warning goes away.",
-        "src/jsx/jsx.odin:1059",
+        "src/jsx/jsx.odin:1062",
         "warnings = 0",
         "function Badge(props) { return \u003coutput>{props.count}\u003c/output>; }"
       ]
@@ -1329,7 +1329,7 @@ const operations = [
         4,
         "Parse",
         "Each compilation opens a Kessel parse job on the original source and file name and consumes the syntax tree while the job is open.",
-        "src/jsx/jsx.odin:452",
+        "src/jsx/jsx.odin:455",
         "syntax tree + source spans",
         "k.parse_job_open_inline(&job, source, config, file)"
       ]
@@ -2683,7 +2683,7 @@ const operations = [
         3,
         "Binding",
         "2 + 3 is not one-shot, so the attach module passes a binding for the range.",
-        "src/jsx/jsx.odin:758",
+        "src/jsx/jsx.odin:761",
         "binding · 0 dependencies",
         "range(2, __saba_binding(() => (2 + 3)))"
       ],
@@ -3244,7 +3244,7 @@ const operations = [
         1,
         "Getter prop",
         "unread() is a live hole on a component prop, so the compiler passes a getter with liveProp. Nothing reads unread yet.",
-        "src/jsx/jsx.odin:1059",
+        "src/jsx/jsx.odin:1062",
         "Relay setup = 1; count = getter",
         "__saba_jsx(Relay, __saba_liveProp(\"count\", () => (unread())))"
       ],
@@ -4211,18 +4211,18 @@ const sourceAnchors = {
   "src/modules/dom.js:1026": "      const node = withContext(scope, position, () => untrack(() => tag(input)));",
   "src/modules/dom.js:312": "export function signal(value) {",
   "src/jsx/template.odin:564": "\t\t\thtml_text(&b.html, text)",
-  "src/jsx/jsx.odin:758": "\thole.live = !force_snapshot && !suspension.awaited && !one_shot(expr)",
-  "src/jsx/jsx.odin:457": "\tk.parse_job_run(&job)",
-  "src/jsx/jsx.odin:477": "\t\tjsx_fail(&p, strings.clone(err.message, allocator))",
+  "src/jsx/jsx.odin:761": "\thole.live = !force_snapshot && !suspension.awaited && !one_shot(expr)",
+  "src/jsx/jsx.odin:460": "\tk.parse_job_run(&job)",
+  "src/jsx/jsx.odin:480": "\t\tjsx_fail(&p, strings.clone(err.message, allocator))",
   "src/jsx/template.odin:215": "\tvisit_tree(program.body, nil, nil, &b.names)",
   "src/jsx/template.odin:579": "\t\t   b.names[name] == 1 &&",
-  "src/jsx/jsx.odin:749": "\tvisit_tree(expr, &hole.nodes, &suspension, guard = &guard)",
-  "src/jsx/jsx.odin:722": "one_shot :: proc(expr: ^k.Expression) -> bool {",
-  "src/jsx/jsx.odin:815": "\t\t\tuse_helper(p, .Binding)",
+  "src/jsx/jsx.odin:752": "\tvisit_tree(expr, &hole.nodes, &suspension, guard = &guard)",
+  "src/jsx/jsx.odin:725": "one_shot :: proc(expr: ^k.Expression) -> bool {",
+  "src/jsx/jsx.odin:818": "\t\t\tuse_helper(p, .Binding)",
   "src/modules/dom.js:614": "        value = read();",
   "src/modules/dom.js:515": "    throw new TypeError(\"JSX children must be nodes, text, numbers, or arrays.\");",
-  "src/jsx/jsx.odin:643": "\t\t\tsuspension.awaited = true",
-  "src/jsx/jsx.odin:756": "\t\tjsx_fail(p, \"Assign the yield result to a variable before using it in JSX\")",
+  "src/jsx/jsx.odin:646": "\t\t\tsuspension.awaited = true",
+  "src/jsx/jsx.odin:759": "\t\tjsx_fail(p, \"Assign the yield result to a variable before using it in JSX\")",
   "src/modules/dom.js:139": "  tracking.reads.set(source, source.version);",
   "docs/SABA_UI_CONTEXT.md:44": "A hole the compiler emits as a tracked reader or prop getter. Evaluating it records the signals it actually reads.",
   "src/modules/dom.js:634": "          if (text.data !== next) text.data = next;",
@@ -4230,36 +4230,36 @@ const sourceAnchors = {
   "src/jsx/template.odin:596": "\t\tif text, known := literal_child_text(v.expression);",
   "src/jsx/template.odin:610": "\tfmt.sbprintf(&b.html, \"\u003c!--saba:%d:start-->\u003c!--saba:%d:end-->\", local, local)",
   "src/pages/build.odin:354": "\t\t\t\t`\u003c!doctype html>\u003chtml lang=\"%s\">\u003chead>\u003cmeta charset=\"utf-8\">\u003cmeta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\u003ctitle>%s\u003c/title>%s\u003c/head>\u003cbody>\u003cdiv id=\"app\" data-saba-pending aria-busy=\"true\" data-generation=\"%s\" data-route=\"%s\">%s\u003c/div>\u003ca data-saba-recover href=\"\">%s\u003c/a>\u003cscript type=\"module\" src=\"%s\">\u003c/script>\u003c/body>\u003c/html>`,",
-  "src/jsx/jsx.odin:869": "\temit_children(p, el.children[:], !component && emits_one_child(p, el.children[:]))",
-  "src/jsx/jsx.odin:812": "\t\tif sole_intrinsic_child && produces_string(hole.expr) {",
-  "src/jsx/jsx.odin:813": "\t\t\tuse_helper(p, .Text_Binding)",
+  "src/jsx/jsx.odin:872": "\temit_children(p, el.children[:], !component && emits_one_child(p, el.children[:]))",
+  "src/jsx/jsx.odin:815": "\t\tif sole_intrinsic_child && produces_string(hole.expr) {",
+  "src/jsx/jsx.odin:816": "\t\t\tuse_helper(p, .Text_Binding)",
   "src/modules/dom.js:564": "    if (text.data !== value) text.data = value;",
-  "src/jsx/jsx.odin:1009": "\t\t\t\t\tattr.hole = prepare_hole(p, value.expression, event || attr.name == \"ref\")",
-  "src/jsx/jsx.odin:1079": "\t\t\t\t\temit_binding(p, prop.hole)",
+  "src/jsx/jsx.odin:1012": "\t\t\t\t\tattr.hole = prepare_hole(p, value.expression, event || attr.name == \"ref\")",
+  "src/jsx/jsx.odin:1082": "\t\t\t\t\temit_binding(p, prop.hole)",
   "src/modules/dom.js:966": "  const stringValue = name.startsWith(\"aria-\") || name.startsWith(\"data-\") ||",
   "src/modules/dom.js:974": "    else node.setAttribute(name, text);",
   "src/modules/dom.js:1000": "        writeAttribute(node, name, next, previous);",
   "src/modules/dom.js:179": "    node.sources = node.reads;",
-  "src/jsx/jsx.odin:857": "\tuse_helper(p, .Child if deferred else .Factory)",
+  "src/jsx/jsx.odin:860": "\tuse_helper(p, .Child if deferred else .Factory)",
   "src/modules/dom.js:875": "  if (space === html && tag === \"svg\") return svg;",
   "src/modules/dom.js:1047": "    : document.createElementNS(space, tag);",
   "src/jsx/template.odin:305": "template_intrinsic :: proc(el: ^k.JSXElement, parent: string) -> bool {",
-  "src/jsx/jsx.odin:939": "\t\t\tspread, is_spread := expr^.(^k.SpreadElement)",
+  "src/jsx/jsx.odin:942": "\t\t\tspread, is_spread := expr^.(^k.SpreadElement)",
   "src/modules/dom.js:502": "    for (const item of value) append(parent, item);",
   "src/modules/dom.js:506": "    parent.append(document.createTextNode(String(value)));",
   "src/jsx/map.odin:24": "note_origin :: proc(p: ^Emitter, loc: k.Loc) {",
   "src/modules/modules.odin:121": "\t\toutput = fmt.aprintf(\"%s\\n//# sourceMappingURL=%s\\n\", output, source_map_url, allocator = request.allocator)",
-  "src/jsx/jsx.odin:546": "\t\tpublish_source_map(source_map, &p, file, shift, allocator)",
+  "src/jsx/jsx.odin:549": "\t\tpublish_source_map(source_map, &p, file, shift, allocator)",
   "src/modules/modules.odin:184": "\t\tsources_content = {string(source)},",
   "src/modules/modules.odin:48": "\tif development && strings.has_suffix(relative, SOURCE_MAP_SUFFIX) {",
-  "src/jsx/jsx.odin:620": "\t\t\tadvise_snapshot(advice, n.params[:], n.body.body[:])",
+  "src/jsx/jsx.odin:623": "\t\t\tadvise_snapshot(advice, n.params[:], n.body.body[:])",
   "src/jsx/advice.odin:126": "\t\tid, bare := expr^.(^k.Identifier)",
   "src/jsx/advice.odin:136": "\t\t\t\"Destructured %s is a setup snapshot. Read %s in JSX to follow later changes.\",",
-  "src/jsx/jsx.odin:1059": "\t\t\tuse_helper(p, .Live_Prop)",
+  "src/jsx/jsx.odin:1062": "\t\t\tuse_helper(p, .Live_Prop)",
   ".krs/packages.json:28": "      \"tag\": \"v0.21.0\",",
   "README.md:53": "`krs install --frozen` into a private root, so it tests the locked",
   "src/jsx/jsx.odin:8": "import k \"shared:kessel\"",
-  "src/jsx/jsx.odin:452": "\tif !k.parse_job_open_inline(&job, source, config, file) {",
+  "src/jsx/jsx.odin:455": "\tif !k.parse_job_open_inline(&job, source, config, file) {",
   "src/pages/build.odin:400": "\tid := hex_string(digest[:BUILD_ID_BYTES], allocator)",
   "src/pages/build.odin:895": "\t\tif selected := select_language(request); selected in doc.variants {",
   "src/pages/build.odin:902": "\t\tpolicy = .Private_No_Store if doc.config.authorize != nil else .No_Store",
@@ -4366,13 +4366,13 @@ const currentFunctions = {
   "src/jsx/jsx.odin#transform_jsx": {
     "name": "transform_jsx",
     "path": "src/jsx/jsx.odin",
-    "line": 393,
+    "line": 396,
     "excerpt": "transform_jsx :: proc(\n\tsource, file: string,\n\tallocator := context.allocator,\n\tsource_map: ^Source_Map = nil,\n) -> (\n\tjavascript: string,\n\terror: JSX_Error,\n) {\n\tpage, failure := compile_module(source, file, false, allocator, nil, source_map)\n\treturn page.javascript, failure\n}"
   },
   "src/jsx/jsx.odin#compile_module": {
     "name": "compile_module",
     "path": "src/jsx/jsx.odin",
-    "line": 415,
+    "line": 418,
     "excerpt": "compile_module :: proc(\n\tsource, file: string,\n\ttemplate: bool,\n\tallocator := context.allocator,\n\twarnings: ^[dynamic]JSX_Error = nil,\n\tsource_map: ^Source_Map = nil,\n) -> (\n\tPage_Template,\n\tJSX_Error,\n) {\n\tpage: Page_Template\n\tjob: k.ParseJob\n\tconfig := k.ParseConfig {\n\t\tlang_override        = k.Lang.JSX,\n\t\tsource_type_override = k.SourceType.Module,\n\t\tpreserve_parens      = true,\n  …"
   },
   "src/jsx/template.odin#extract_page": {
@@ -4384,13 +4384,13 @@ const currentFunctions = {
   "src/jsx/jsx.odin#prepare_hole": {
     "name": "prepare_hole",
     "path": "src/jsx/jsx.odin",
-    "line": 745,
+    "line": 748,
     "excerpt": "prepare_hole :: proc(p: ^Emitter, expr: ^k.Expression, force_snapshot := false) -> (hole: Hole) {\n\thole.expr = expr\n\tsuspension: Suspension\n\tguard: Visit_Guard\n\tvisit_tree(expr, &hole.nodes, &suspension, guard = &guard)\n\tif guard.exceeded {\n\t\tp.position = int(guard.at.start if guard.located else k.get_expression_loc(expr).start)\n\t\tjsx_fail(p, \"Expression nesting is too deep to compile\")\n\t}\n\tif suspension.yielded != nil {\n\t\tp.position = int(suspension.yielded.loc.start)\n\t\tjsx_fail(p, \"Assign the yield result to a variable before using it in JSX\")\n\t}\n\thole.live = !force_snapshot && !suspension.awaited && !one_shot(expr)\n\treturn\n}"
   },
   "src/jsx/jsx.odin#one_shot": {
     "name": "one_shot",
     "path": "src/jsx/jsx.odin",
-    "line": 722,
+    "line": 725,
     "excerpt": "one_shot :: proc(expr: ^k.Expression) -> bool {\n\t#partial switch v in expr^ {\n\tcase ^k.NullLiteral,\n\t     ^k.BooleanLiteral,\n\t     ^k.NumericLiteral,\n\t     ^k.StringLiteral,\n\t     ^k.BigIntLiteral,\n\t     ^k.Identifier,\n\t     ^k.FunctionExpression,\n\t     ^k.ArrowFunctionExpression:\n\t\treturn true\n\tcase ^k.ParenthesizedExpression:\n\t\treturn one_shot(v.expression)\n\t}\n\treturn false\n}"
   },
   "src/modules/dom.js#binding": {
@@ -4420,7 +4420,7 @@ const currentFunctions = {
   "src/jsx/jsx.odin#produces_string": {
     "name": "produces_string",
     "path": "src/jsx/jsx.odin",
-    "line": 774,
+    "line": 777,
     "excerpt": "produces_string :: proc(expr: ^k.Expression) -> bool {\n\t// A long a + b + c is left-deep. Following the left operand in a loop\n\t// keeps the length of the chain off the native stack.\n\tcurrent := expr\n\tfor {\n\t\t#partial switch v in current^ {\n\t\tcase ^k.StringLiteral, ^k.TemplateLiteral:\n\t\t\treturn true\n\t\tcase ^k.ParenthesizedExpression:\n\t\t\tcurrent = v.expression\n\t\t\tcontinue\n\t\tcase ^k.BinaryExpression:\n\t\t\tif v.operator != .Add {\n\t\t\t\treturn false\n\t\t\t}\n\t\t\tif produces_string(v.right) {\n  …"
   },
   "src/modules/dom.js#appendText": {
@@ -4450,7 +4450,7 @@ const currentFunctions = {
   "src/jsx/jsx.odin#emit_children": {
     "name": "emit_children",
     "path": "src/jsx/jsx.odin",
-    "line": 912,
+    "line": 915,
     "excerpt": "emit_children :: proc(p: ^Emitter, children: []k.JSXChild, sole_intrinsic_child := false) {\n\tfor child in children {\n\t\tif p.error.message != \"\" {\n\t\t\treturn\n\t\t}\n\t\tswitch v in child {\n\t\tcase ^k.JSXText:\n\t\t\tp.position = int(v.loc.start)\n\t\t\tjsx_text_child(p, p.source[v.loc.start:v.loc.end], v.loc)\n\t\tcase ^k.JSXElement:\n\t\t\tjsx_emit(p, \", \")\n\t\t\temit_element(p, v, true)\n\t\tcase ^k.JSXFragment:\n\t\t\tjsx_emit(p, \", \")\n\t\t\temit_fragment(p, v, true)\n\t\tcase ^k.JSXExpressionContainer:\n  …"
   },
   "src/modules/dom.js#append": {

@@ -496,3 +496,95 @@ h2_request_trailers_reach_the_handler :: proc(t: ^testing.T) {
 		testing.expect_value(t, string(body[:]), "c0ffee")
 	})
 }
+
+// RFC 9113 section 8.1.1: a request whose DATA does not add up to its
+// content-length is malformed, a stream error of type PROTOCOL_ERROR. The
+// handler never sees the short body, and the connection goes on serving.
+@(test)
+h2_body_shorter_than_its_content_length_is_malformed :: proc(t: ^testing.T) {
+	state := H2W_Server {
+		idle = H2W_PATIENCE,
+	}
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		wire: [dynamic]u8
+		defer delete(wire)
+		h2w_headers(
+			&wire,
+			1,
+			false,
+			{{":method", "POST"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/echo"}, {"content-length", "10"}},
+		)
+		h2w_frame(&wire, 0, 0x1, 1, transmute([]u8)string("short"))
+		h2w_get(&wire, 3, "/")
+		if !testing.expect(t, h2w_preface(peer) && h2w_send(peer, wire[:])) {
+			return
+		}
+		reset, served := false, false
+		for !served {
+			frame, ok := h2w_next(peer, true)
+			if !testing.expect(t, ok && frame.kind != 7, "the connection ended over one malformed request") {
+				return
+			}
+			if frame.stream == 1 {
+				testing.expect(t, frame.kind != 0, "a malformed request was answered with content")
+				if frame.kind == 3 {
+					reset = true
+					testing.expect_value(t, h2w_code(frame), u32(1))
+				}
+			}
+			served = frame.stream == 3 && frame.kind <= 1 && frame.flags & 1 != 0
+		}
+		testing.expect(t, reset, "the malformed request was not reset")
+		testing.expect_value(t, sync.atomic_load(&state.echoed), 0)
+	})
+}
+
+// The field section limit counts every field, pseudo-header fields included:
+// REQUEST_HEADER_COUNT_LIMIT fields are served and one more is refused
+// without reaching the handler, on a connection that goes on serving.
+@(test)
+h2_field_section_limit_boundary :: proc(t: ^testing.T) {
+	state := H2W_Server {
+		idle = H2W_PATIENCE,
+	}
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		request :: proc(wire: ^[dynamic]u8, stream: u32, regular: int) {
+			fields := make([dynamic][2]string, context.temp_allocator)
+			append(&fields, [2]string{":method", "GET"}, [2]string{":scheme", "https"}, [2]string{":authority", "localhost"}, [2]string{":path", "/"})
+			for _ in 0 ..< regular {
+				append(&fields, [2]string{"x-filler", "v"})
+			}
+			h2w_headers(wire, stream, true, fields[:])
+		}
+		wire: [dynamic]u8
+		defer delete(wire)
+		request(&wire, 1, REQUEST_HEADER_COUNT_LIMIT - 4)
+		request(&wire, 3, REQUEST_HEADER_COUNT_LIMIT - 3)
+		h2w_get(&wire, 5, "/")
+		if !testing.expect(t, h2w_preface(peer) && h2w_send(peer, wire[:])) {
+			return
+		}
+		status: [3]int
+		refused, served := false, false
+		for !served {
+			frame, ok := h2w_next(peer, true)
+			if !testing.expect(t, ok && frame.kind != 7, "the connection ended over one oversized field section") {
+				return
+			}
+			if frame.stream == 0 || frame.stream > 5 {
+				continue
+			}
+			if frame.kind == 1 {
+				status[frame.stream / 2] = h2w_status(frame)
+			}
+			if frame.stream == 3 && frame.kind == 3 {
+				refused = true
+			}
+			served = frame.stream == 5 && frame.kind <= 1 && frame.flags & 1 != 0
+		}
+		testing.expect_value(t, status[0], 200)
+		testing.expect(t, refused || status[1] != 200 && status[1] != -1, "a field section over the limit was served")
+		testing.expect_value(t, status[2], 200)
+		testing.expect_value(t, sync.atomic_load(&state.handled), 2)
+	})
+}

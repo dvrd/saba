@@ -101,8 +101,9 @@ https80_lifecycle_leave :: proc(probe: ^HTTPS80_Lifecycle) {
 	sync.atomic_store(&probe.inside, false)
 }
 
+// Waits for a lifecycle step, not for a deadline under test.
 https80_wait_flag :: proc(flag: ^bool) {
-	deadline := time.tick_add(time.tick_now(), 5 * time.Second)
+	deadline := time.tick_add(time.tick_now(), 60 * time.Second)
 
 	for !sync.atomic_load(flag) {
 		assert(time.tick_diff(time.tick_now(), deadline) > 0, "bounded lifecycle wait")
@@ -183,7 +184,9 @@ https80_lifecycle_run :: proc(
 		https80_wait_flag(&probe.initialized)
 
 		if hello {
-			deadline := time.tick_add(time.tick_now(), 5 * time.Second)
+			// Only how long the server takes to start, not what the test checks:
+			// generous, so a loaded machine does not fail it.
+			deadline := time.tick_add(time.tick_now(), 60 * time.Second)
 
 			for {
 				view, error := credential_store.stats(store)

@@ -68,18 +68,21 @@ Emitter :: struct {
 	origin_pos, origin_line, origin_col: int,
 }
 
-// Kessel v0.4.1 parses and checks recursively without a depth limit. Refuse
-// input whose bracket nesting would overflow the native stack before it is
-// parsed. Reflection adds several frames per syntax level, so the tree walk
-// carries its own, larger frame budget.
+// Kessel refuses nesting deeper than its own limit (512 by default), sized
+// for an 8 MB stack. Saba compiles on threads it does not size, so it refuses
+// bracket nesting earlier, before the source is parsed. Reflection adds
+// several frames per syntax level, so the tree walk carries its own, larger
+// frame budget.
 MAX_BRACKET_DEPTH :: 256
 MAX_VISIT_DEPTH :: 2500
 // Elements below one another in the emitted tree.
 JSX_DEPTH_MAX :: 128
-// Operators in one expression at one bracket level. Kessel v0.4.1 parses a
-// chain such as a + b + c in a loop but checks it by recursion; an optimized
-// build overflows near 28,000 links. An unoptimized build overflows from about
-// 4,200, which this limit does not cover.
+// Operators in one expression at one bracket level. Kessel parses a chain
+// such as a + b + c in a loop and does not count it against its depth limit,
+// so only this limit bounds a recursive walk over one. Measured with Kessel
+// v0.4.1, whose checker recursed: an optimized build overflowed near 28,000
+// links, an unoptimized build from about 4,200, which this limit does not
+// cover.
 MAX_CHAIN_LENGTH :: 20000
 
 Visit_Guard :: struct {
@@ -934,7 +937,7 @@ emit_children :: proc(p: ^Emitter, children: []k.JSXChild, sole_intrinsic_child 
 				}
 				continue
 			}
-			// Kessel v0.4.1 parses spread children as a SpreadElement inside
+			// Kessel parses spread children as a SpreadElement inside
 			// the container. Saba's child normalization flattens their arrays.
 			spread, is_spread := expr^.(^k.SpreadElement)
 			if is_spread {

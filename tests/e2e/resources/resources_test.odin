@@ -111,19 +111,28 @@ byte_admission :: proc(t: ^testing.T, binary: string) -> bool {
 		}
 		wait_usage(t, &s, proc(v: Usage) -> bool {return v.bytes == 0}) or_return
 	}
-	// A slow reader of a buffered response holds both real copies, so
-	// another large response is rejected.
+	// A slow reader of a buffered response holds its body, and holds it once:
+	// the handler allocated it with the request's allocator, so the server
+	// sends it from there. Two such readers leave no room for another large
+	// response.
 	{
 		s := launch(t, binary, mode = "bytes") or_return
 		defer close(t, &s)
 		reply := exchange(t, &s, "/slow")
 		testing.expectf(t, reply.status == 200 && len(reply.body) == MiB, "/slow: %d, %d bytes", reply.status, len(reply.body))
 		wait_usage(t, &s, proc(v: Usage) -> bool {return v.bytes == 0}) or_return
-		conn := slow_reader(t, &s, "/slow")
+		first := slow_reader(t, &s, "/slow")
+		wait_usage(t, &s, proc(v: Usage) -> bool {return v.bytes >= MiB}) or_return
+		// Long enough for a second copy to have been made, were there one.
+		time.sleep(200 * time.Millisecond)
+		one := usage(t, &s)
+		testing.expectf(t, one.bytes < 2 * MiB, "one slow reader holds its body twice: %v", one)
+		second := slow_reader(t, &s, "/slow")
 		wait_usage(t, &s, proc(v: Usage) -> bool {return v.bytes >= 2 * MiB}) or_return
 		rejected(t, &s, "/large")
 		cheap(t, &s)
-		harness.reset(conn)
+		harness.reset(first)
+		harness.reset(second)
 		wait_usage(t, &s, proc(v: Usage) -> bool {return v.bytes == 0}) or_return
 	}
 	return true
@@ -171,12 +180,15 @@ mixed :: proc(t: ^testing.T, binary: string) -> bool {
 	defer for conn in clients {
 		net.close(conn)
 	}
-	append(&clients, slow_reader(t, &s, "/slow"))
-	wait_usage(t, &s, proc(v: Usage) -> bool {return v.bytes >= 8 * MiB}) or_return
+	// Three bodies of 4 MiB, each held once.
+	for _ in 0 ..< 3 {
+		append(&clients, slow_reader(t, &s, "/slow"))
+	}
+	wait_usage(t, &s, proc(v: Usage) -> bool {return v.bytes >= 12 * MiB}) or_return
 	upload := dial(t, &s)
 	append(&clients, upload)
 	partial_upload(upload, 4 * MiB)
-	wait_usage(t, &s, proc(v: Usage) -> bool {return v.bytes >= 12 * MiB}) or_return
+	wait_usage(t, &s, proc(v: Usage) -> bool {return v.bytes >= 16 * MiB}) or_return
 	payload := strings.repeat("j", 512 * KiB, context.temp_allocator)
 	for _ in 0 ..< 2 {
 		conn := dial(t, &s)
@@ -187,7 +199,7 @@ mixed :: proc(t: ^testing.T, binary: string) -> bool {
 	for _ in 0 ..< 2 {
 		append(&clients, slow_reader(t, &s, "/stream"))
 	}
-	held := wait_usage(t, &s, proc(v: Usage) -> bool {return v.streams == 2 && v.bytes > 14 * MiB}) or_return
+	held := wait_usage(t, &s, proc(v: Usage) -> bool {return v.streams == 2 && v.bytes > 16 * MiB}) or_return
 	testing.expectf(t, held.queued == 0 && held.held == 0, "under pressure: %v", held)
 	rejected(t, &s, "/work")
 	rejected(t, &s, "/stream")

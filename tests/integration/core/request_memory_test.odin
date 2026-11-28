@@ -2,6 +2,7 @@ package saba_core
 
 import rt "base:runtime"
 import "core:fmt"
+import "core:mem"
 import "core:net"
 import "core:strconv"
 import "core:strings"
@@ -9,13 +10,15 @@ import "core:testing"
 import "core:thread"
 import "core:time"
 import async "shared:async"
+import budget "shared:async/budget"
 import http3 "shared:async/http/v3"
 import "shared:async/tls"
 import credential_store "shared:async/tls/credentials/store"
 
 // What application code allocates with the default allocator while it serves
 // a request belongs to the request: it is freed with it, the handler's state
-// for a later callback included.
+// for a later callback included, and a body allocated that way is sent from
+// where it is.
 
 RM_LEFT :: 4096
 RM_GREETING :: "kept past the request"
@@ -114,9 +117,22 @@ rm_handler :: proc(_: rawptr, conn: ^Connection, request: ^Request) -> Response 
 			},
 		}
 		return response
+	case "/arena":
+		// As large as the operation's whole budget allows once, not twice.
+		body, error := make([]u8, RM_ARENA_BODY, request.allocator)
+		if error != nil {
+			return {status = .Service_Unavailable}
+		}
+		for &value, index in body {
+			value = u8('a' + index % 26)
+		}
+		return {status = .OK, body = body}
 	}
 	return {status = .Not_Found}
 }
+
+RM_OPERATION_BYTES :: 512 * mem.Kilobyte
+RM_ARENA_BODY :: 300 * mem.Kilobyte
 
 rm_start :: proc(fixture: ^RM_Server, config: Server = {}) -> (net.Endpoint, bool) {
 	fixture.config = config
@@ -283,6 +299,104 @@ handler_allocator_can_be_the_process_heap :: proc(t: ^testing.T) {
 	status, body := rm_exchange(socket, "/default")
 	testing.expect_value(t, status, 200)
 	testing.expect_value(t, body, "other")
+}
+
+// A body allocated with the request's allocator is sent from where it is. The
+// operation's budget has room for it once: the copy the server used to make
+// would not fit.
+@(test)
+body_the_request_owns_is_not_copied :: proc(t: ^testing.T) {
+	fixture: RM_Server
+	endpoint, ready := rm_start(&fixture, {resources = {operation_limits = budget.Limits{RM_OPERATION_BYTES, 1, 1}}})
+	defer rm_stop(&fixture)
+	if !testing.expect(t, ready) {
+		return
+	}
+	socket, dialed := rm_dial(t, endpoint)
+	if !dialed {
+		return
+	}
+	defer net.close(socket)
+
+	status, body := rm_exchange(socket, "/arena")
+	testing.expect_value(t, status, 200)
+	if testing.expect_value(t, len(body), RM_ARENA_BODY) {
+		testing.expect(t, body[0] == 'a' && body[27] == 'b' && body[len(body) - 1] == u8('a' + (RM_ARENA_BODY - 1) % 26))
+	}
+}
+
+// Which bodies the server keeps and which it copies, and what a kept one
+// costs the operation.
+@(test)
+response_body_ownership_follows_its_storage :: proc(t: ^testing.T) {
+	fixture: Resource_Test
+	resource_test_init(&fixture)
+	defer resource_test_finish(&fixture)
+	task := &fixture.task
+	used :: proc(fixture: ^Resource_Test) -> u64 {
+		view, error := budget.snapshot(fixture.runtime.resources)
+		assert(error == .None)
+		return view.used.bytes
+	}
+
+	// In a block of the request's arena.
+	small, _ := make([]u8, 100, task.request.allocator)
+	response := Response {
+		status = .OK,
+		body   = small,
+	}
+	testing.expect(t, resource_copy_response(task, &response))
+	testing.expect(t, raw_data(response.body) == raw_data(small), "a body in the request's arena was copied")
+
+	// One of the arena's larger allocations, from its start.
+	large, _ := make([]u8, 64 * mem.Kilobyte, task.request.allocator)
+	before := used(&fixture)
+	response = {
+		status = .OK,
+		body   = large,
+	}
+	testing.expect(t, resource_copy_response(task, &response))
+	testing.expect(t, raw_data(response.body) == raw_data(large), "a large body in the request's arena was copied")
+	testing.expect_value(t, used(&fixture), before)
+
+	// The same allocation from its middle has no provenance the server can check.
+	response = {
+		status = .OK,
+		body   = large[10:],
+	}
+	testing.expect(t, resource_copy_response(task, &response))
+	testing.expect(t, raw_data(response.body) != raw_data(large[10:]), "a slice from the middle of an allocation was kept")
+
+	// On the request's heap: kept, and charged to the operation for as long
+	// as the request lasts.
+	owned, _ := make([]u8, 32 * mem.Kilobyte, request_default_allocator(task))
+	before = used(&fixture)
+	response = {
+		status = .OK,
+		body   = owned,
+	}
+	testing.expect(t, resource_copy_response(task, &response))
+	testing.expect(t, raw_data(response.body) == raw_data(owned), "a body on the request's heap was copied")
+	testing.expect_value(t, used(&fixture), before + u64(len(owned)))
+
+	// Anything else is a borrow, and is copied.
+	borrowed := transmute([]u8)string("a static body")
+	response = {
+		status = .OK,
+		body   = borrowed,
+	}
+	testing.expect(t, resource_copy_response(task, &response))
+	testing.expect(t, raw_data(response.body) != raw_data(borrowed), "a borrowed body was not copied")
+	testing.expect_value(t, string(response.body), "a static body")
+
+	// A body on the request's heap that the operation has no room for is not
+	// sent at all.
+	huge, _ := make([]u8, 40 * mem.Megabyte, request_default_allocator(task))
+	response = {
+		status = .OK,
+		body   = huge,
+	}
+	testing.expect(t, !resource_copy_response(task, &response), "a body over the operation's budget was accepted")
 }
 
 // Every HTTP/2 stream is a request of its own, with a heap of its own.

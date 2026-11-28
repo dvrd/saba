@@ -28,6 +28,9 @@ RESPONSE_WRITE_CHUNK_BYTES :: 64 * mem.Kilobyte
 // entry, a session, a map it fills over time, state for another thread) needs
 // an allocator the application names. See Request_Heap, and
 // Server.handler_allocator to give handlers the process heap instead.
+//
+// A response body allocated with either of the two is sent from where it is.
+// Any other body is copied before the handler's worker moves on.
 Handler :: #type proc(data: rawptr, conn: ^Connection, request: ^Request) -> Response
 
 Connection_Phase :: enum {
@@ -1548,6 +1551,10 @@ start_operation_resources :: proc(task: ^Connection_Task) -> bool {
 	return true
 }
 finish_operation_resources :: proc(task: ^Connection_Task) {
+	// The lease of a body sent from the request's heap ends with the operation.
+	if heap := task.heap; heap != nil {
+		budget.release(&heap.body_lease)
+	}
 	_ = budget.close(task.resource_operation)
 	budget.binding_release(&task.resource_binding)
 	budget.release_scope(&task.resource_operation)
@@ -1588,7 +1595,62 @@ resource_reject :: proc(task: ^Connection_Task, status: HTTP_Status = .Service_U
 
 	return true
 }
-// Unknown raw borrows have no full-allocation provenance. Copy before suspension.
+// Whether bytes lies in storage of arena that stays where it is until the
+// arena is destroyed: inside one of its blocks, or from the start of one of
+// its larger allocations.
+arena_owns :: proc(arena: ^mem.Dynamic_Arena, bytes: []u8) -> bool {
+	if len(bytes) == 0 {
+		return false
+	}
+	first := uintptr(raw_data(bytes))
+	last := first + uintptr(len(bytes))
+	size := uintptr(arena.block_size)
+
+	if block := uintptr(arena.current_block); block != 0 && first >= block && last <= block + size {
+		return true
+	}
+
+	for used in arena.used_blocks {
+		if block := uintptr(used); first >= block && last <= block + size {
+			return true
+		}
+	}
+
+	for large in arena.out_band_allocations {
+		if large == raw_data(bytes) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Whether the request already owns a response body, so the server sends it
+// from where it is. The request's arena is charged for what it holds. A body
+// on the request's heap is charged to the operation here, for as long as the
+// request lasts: without that, bodies nobody counted could pile up behind
+// slow readers.
+request_keeps_body :: proc(task: ^Connection_Task, body: []u8) -> bool {
+	if len(body) == 0 || arena_owns(&task.arena, body) {
+		return true
+	}
+
+	if !request_heap_owns(task, body) {
+		return false
+	}
+
+	lease, refused := budget.reserve(task.resource_operation, {bytes = u64(len(body))})
+	if refused != .None {
+		return false
+	}
+	budget.release(&task.heap.body_lease)
+	task.heap.body_lease = lease
+
+	return true
+}
+
+// A body the request owns is sent from where it is. Any other borrow has no
+// provenance the server can check, and is copied before the task suspends.
 resource_copy_response :: proc(task: ^Connection_Task, response: ^Response) -> bool {
 	// HTTP/1 responses are not sent chunked with a trailer section.
 	if len(response.trailers) > 0 && task.request.version != "HTTP/2" && task.request.version != "HTTP/3" {
@@ -1602,7 +1664,7 @@ resource_copy_response :: proc(task: ^Connection_Task, response: ^Response) -> b
 	allocator := mem.dynamic_arena_allocator(&task.arena)
 	body := response.body
 	// HEAD only needs the representation length while encoding its head.
-	if task.request.method != "HEAD" {
+	if task.request.method != "HEAD" && !request_keeps_body(task, body) {
 		storage, error := make([]u8, len(body), allocator)
 		if error != nil {
 			return false

@@ -4,6 +4,7 @@ import rt "base:runtime"
 import "core:log"
 import "core:mem"
 import "core:sync"
+import budget "shared:async/budget"
 
 // The default allocator of application code while it serves one request:
 // context.allocator inside the handler and inside the callbacks of the
@@ -24,12 +25,15 @@ import "core:sync"
 //
 // A task has none until its request first allocates.
 Request_Heap :: struct {
-	mutex:  sync.Mutex,
-	live:   map[rawptr]Request_Allocation,
+	mutex:      sync.Mutex,
+	live:       map[rawptr]Request_Allocation,
 	// Bytes the request holds, as it asked for them.
-	bytes:  int,
+	bytes:      int,
 	// A foreign free or resize was already logged for this request.
-	warned: bool,
+	warned:     bool,
+	// The bytes of a response body on this heap that the server sends from
+	// where it is, charged to the operation instead of copied.
+	body_lease: budget.Lease,
 }
 
 Request_Allocation :: struct {
@@ -72,6 +76,7 @@ request_heap_release :: proc(task: ^Connection_Task) {
 	if heap == nil {
 		return
 	}
+	budget.release(&heap.body_lease)
 	backing := rt.heap_allocator()
 	for memory, held in heap.live {
 		_ = mem.free_with_size(memory, held.size, backing)

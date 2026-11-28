@@ -465,7 +465,7 @@ footer{margin-top:64px;padding:22px 0 0;border-top:1px solid var(--line);display
     <li><h3>Negotiate</h3><p>With TLS configured, the task runs the handshake first. ALPN picks <code>h2</code> when the client offers it, otherwise <code>http/1.1</code>. An <code>h2</code> connection becomes one session whose streams are tasks of their own.</p></li>
     <li><h3>Receive</h3><p>Headers must arrive within the header timeout and fit 8 KiB. The body has a limit (4 KiB unless <code>request_body_limit</code> raises it per request) and a stall budget that each byte of progress re-arms.</p></li>
     <li><h3>Route</h3><p><code>handle_request</code> answers from development routes, built-in <code>/__saba/</code> modules and build files, assets, modules or pages, unless the path is reserved for your handler. Everything else goes to your handler. While it runs, <code>context.allocator</code> is the request's heap: what the handler allocates and does not free is freed when the request ends.</p></li>
-    <li><h3>Respond</h3><p>The response is coded with Brotli or gzip when the client accepts it and the body was not prepared already coded, then written in the framing of its protocol. On keep-alive the task returns to <code>Idle</code>.</p></li>
+    <li><h3>Respond</h3><p>The server takes a body where it is when the request already owns it, on its heap or in its arena, and copies any other body first. The response is then coded with Brotli or gzip when the client accepts it and the body was not prepared already coded, then written in the framing of its protocol. On keep-alive the task returns to <code>Idle</code>.</p></li>
   </ol>
 </section>
 

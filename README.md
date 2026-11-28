@@ -84,6 +84,10 @@ dependencies, not sibling working copies. `--shared PATH` (or
   the request did not allocate is refused and logged. Set
   `handler_allocator = runtime.heap_allocator()` to give every handler the
   process heap instead.
+- **Response bodies.** A body allocated with the request's heap or arena is
+  sent from where it is. Any other body is copied into the request first. Both
+  count against `resources.operation_limits` (32 MiB a request by default)
+  until the request ends: stream what is larger.
 - **Deprecated blocking helpers.** The facade's `read_connection`,
   `write_connection` and `send_response` block the calling worker on the raw
   socket and fail on TLS connections. Return a `Response` instead.

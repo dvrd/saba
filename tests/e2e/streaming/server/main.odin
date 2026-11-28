@@ -15,7 +15,17 @@ State :: struct {
 	control:                                           server.Server_Control,
 	result:                                            bool,
 	next_id, active, live, allocated, released, drops: int,
+	// One per /release request; each /wait producer takes one before its
+	// first chunk.
+	passes:                                            int,
 }
+
+// No test is about these: a slow client on a loaded machine stays inside them.
+// The response timeout of the server comes from SABA_STREAM_RESPONSE_MS, and
+// /stall has a stream deadline of its own.
+PATIENT :: time.Minute
+STALL_DEADLINE :: 100 * time.Millisecond
+STALL_WAIT :: 10 * time.Second
 Mode :: enum {
 	Normal,
 	Error,
@@ -34,6 +44,19 @@ Producer :: struct {
 	mode:                                                    Mode,
 	pending:                                                 owned.Chunk,
 	next_at:                                                 async.Deadline,
+	passed:                                                  bool,
+}
+
+take_pass :: proc(state: ^State) -> bool {
+	for {
+		count := sync.atomic_load(&state.passes)
+		if count <= 0 {
+			return false
+		}
+		if _, taken := sync.atomic_compare_exchange_strong(&state.passes, count, count - 1); taken {
+			return true
+		}
+	}
 }
 
 release_bytes :: proc(storage: []u8, data: rawptr) {
@@ -56,7 +79,7 @@ next :: proc(data: rawptr, io: ^server.Stream_IO) -> server.Stream_Step {
 	}
 
 	if producer.mode == .Stall {
-		err := server.stream_wait(io, async.deadline_after(io.runtime, 10 * time.Second))
+		err := server.stream_wait(io, async.deadline_after(io.runtime, STALL_WAIT))
 		return .Waiting if err.kind == .Pending else .Failed
 	}
 
@@ -65,6 +88,23 @@ next :: proc(data: rawptr, io: ^server.Stream_IO) -> server.Stream_Step {
 	}
 	if producer.sequence == producer.count {
 		return .Done
+	}
+
+	// Suspended on a timer, never on the worker, until a client asks /release:
+	// what the server does meanwhile is done beside a waiting stream.
+	for producer.mode == .Wait && !producer.passed {
+		if producer.next_at.at == 0 {
+			producer.next_at = async.deadline_after(io.runtime, 10 * time.Millisecond)
+		}
+		error := server.stream_wait(io, producer.next_at)
+		if error.kind == .Pending {
+			return .Waiting
+		}
+		if error.kind != .None {
+			return .Failed
+		}
+		producer.next_at = {}
+		producer.passed = take_pass(producer.state)
 	}
 
 	if producer.mode == .Wait {
@@ -147,6 +187,11 @@ route :: proc(data: rawptr, _: ^server.Connection, request: ^server.Request) -> 
 	if request.path == "/fast" {
 		return server.make_response(request, .OK, nil, transmute([]u8)string("ok"))
 	}
+
+	if request.path == "/release" {
+		sync.atomic_add(&state.passes, 1)
+		return server.make_response(request, .OK, nil, transmute([]u8)string("ok"))
+	}
 	producer, error := new(Producer, rt.heap_allocator())
 	if error != nil {
 		return {status = .Internal_Server_Error}
@@ -160,7 +205,7 @@ route :: proc(data: rawptr, _: ^server.Connection, request: ^server.Request) -> 
 
 	sync.atomic_add(&state.active, 1)
 	length: i64 = -1
-	timeout := 3 * time.Second
+	timeout := PATIENT
 	max_body: i64 = 8 * 1024 * 1024
 	status: server.HTTP_Status = .OK
 
@@ -188,7 +233,7 @@ route :: proc(data: rawptr, _: ^server.Connection, request: ^server.Request) -> 
 		producer.size = 3
 	case "/stall":
 		producer.mode = .Stall
-		timeout = 100 * time.Millisecond
+		timeout = STALL_DEADLINE
 	case "/backpressure":
 		producer.mode = .Backpressure
 		producer.size = 1
@@ -244,7 +289,11 @@ main :: proc() {
 		if workers == 0 {
 			workers = 1
 		}
-		state.result = server.serve({port = 0, workers = workers, handler = route, handler_data = state, control = &state.control, keep_alive = {enabled = true}, timeouts = {response = 150 * time.Millisecond}})
+		response := PATIENT
+		if milliseconds, _ := strconv.parse_int(os.get_env("SABA_STREAM_RESPONSE_MS", context.temp_allocator)); milliseconds > 0 {
+			response = time.Duration(milliseconds) * time.Millisecond
+		}
+		state.result = server.serve({port = 0, workers = workers, handler = route, handler_data = state, control = &state.control, keep_alive = {enabled = true}, timeouts = {response = response}})
 	}); assert(worker != nil)
 	// Polled until the listener is published or serve returns, with no bound of
 	// its own: the test's ready timeout reports a server that never starts.

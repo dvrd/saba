@@ -2,9 +2,16 @@
 // ownership (every chunk released, every producer dropped once), timer waits
 // that free the sole worker, slow readers, disconnect and shutdown. The SSE
 // example is driven the same way.
+//
+// Only two deadlines are short, each for the request that is about it: the
+// 100 ms stream deadline of /stall, and the 150 ms response timeout of the
+// server that write_timeout starts for itself. Everything else runs on a
+// server whose timeouts a starved client stays inside, so no other step
+// depends on how fast this process is scheduled.
 package saba_e2e_streaming_test
 
 import "core:crypto/sha2"
+import "core:fmt"
 import "core:net"
 import "core:os"
 import "core:slice"
@@ -39,6 +46,10 @@ streaming :: proc(t: ^testing.T) {
 		return
 	}
 	free_all(context.temp_allocator)
+	if !write_timeout(t, binary) {
+		return
+	}
+	free_all(context.temp_allocator)
 	sse_example(t, example)
 }
 
@@ -50,9 +61,22 @@ Server :: struct {
 	finished: bool,
 }
 
-launch :: proc(t: ^testing.T, binary: string, example := false) -> (s: Server, ok: bool) {
+// The stream deadline of /stall and the wait its producer asks for, as the
+// fixture sets them.
+STALL_DEADLINE :: 100 * time.Millisecond
+STALL_WAIT :: 10 * time.Second
+// The response timeout of the server write_timeout starts.
+WRITE_TIMEOUT :: 150 * time.Millisecond
+
+// response is the fixture's response timeout; without one it is a minute.
+launch :: proc(t: ^testing.T, binary: string, example := false, response: time.Duration = 0) -> (s: Server, ok: bool) {
 	s.example = example
-	s.process, s.input = harness.start_with_input(t, {binary}, {"SABA_STREAM_WORKERS=1"}) or_return
+	env := make([dynamic]string, context.temp_allocator)
+	append(&env, "SABA_STREAM_WORKERS=1")
+	if response > 0 {
+		append(&env, fmt.tprintf("SABA_STREAM_RESPONSE_MS=%d", response / time.Millisecond))
+	}
+	s.process, s.input = harness.start_with_input(t, {binary}, env[:]) or_return
 	// The example prints its own lowercase line.
 	s.port = harness.ready(t, s.process, prefix = "ready " if example else "READY ") or_return
 	return s, true
@@ -330,49 +354,44 @@ producers :: proc(t: ^testing.T, binary: string) -> bool {
 		idle(t, &s) or_return
 	}
 
-	// Timer-suspended producers free the sole worker; waits clamp to the total
-	// stream deadline.
+	// A timer-suspended producer frees the sole worker. The producer waits on
+	// its timer until /release, so the requests answered before that were
+	// answered beside a stream that had not moved, however long they took.
 	{
 		conn := harness.connect(t, s.port) or_return
 		defer net.close(conn)
 		harness.send_text(conn, request("/wait"))
 		harness.read_head(t, conn) or_return
-		started := time.tick_now()
 		r := fast(t, &s) or_return
 		testing.expect_value(t, string(r.body), "ok") or_return
-		elapsed := time.tick_since(started)
-		testing.expectf(t, elapsed < 500 * time.Millisecond, "/fast took %v behind a waiting stream", elapsed) or_return
-		body, _ := harness.read_chunked(t, conn) or_return
-		testing.expect(t, slice.equal(body, []u8{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}), "/wait content") or_return
+		r = fast(t, &s, "/stats") or_return
+		testing.expectf(t, strings.has_prefix(string(r.body), "1 0 "), "the waiting stream is not the one active producer: %q", r.body) or_return
+		testing.expect(t, harness.quiet(conn, 20 * time.Millisecond), "the waiting stream sent a chunk before its release") or_return
+		r = fast(t, &s, "/release") or_return
+		testing.expect_value(t, string(r.body), "ok") or_return
+		body, chunks := harness.read_chunked(t, conn) or_return
+		testing.expectf(t, chunks == 4 && slice.equal(body, []u8{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}), "/wait content: %d chunks, %v", chunks, body) or_return
 	}
+	// A wait clamps to the stream deadline: the producer asks for STALL_WAIT
+	// and the stream ends at STALL_DEADLINE, never before it. The clock starts
+	// before the request leaves, so the lower bound is exact; the upper bound
+	// is the wait the producer asked for.
 	{
-		conn := harness.connect(t, s.port) or_return
+		conn := harness.connect(t, s.port, STALL_WAIT) or_return
 		defer net.close(conn)
+		started := time.tick_now()
 		harness.send_text(conn, request("/stall"))
 		harness.read_head(t, conn) or_return
-		started := time.tick_now()
 		rest, result := harness.read_to_close(conn)
 		elapsed := time.tick_since(started)
 		testing.expectf(t, result == .Eof && len(rest) == 0, "/stall sent %q (%v)", rest, result) or_return
-		testing.expectf(t, elapsed < time.Second, "/stall closed after %v", elapsed) or_return
+		testing.expectf(t, elapsed >= STALL_DEADLINE && elapsed < STALL_WAIT, "/stall closed after %v", elapsed) or_return
 	}
 	idle(t, &s) or_return
 
-	// A consumer that stops reading reaches the write timeout and releases the
-	// pending chunk and producer while cheap routes progress.
-	{
-		slow := harness.connect(t, s.port) or_return
-		defer net.close(slow)
-		_ = net.set_option(slow, .Receive_Buffer_Size, 1024)
-		harness.send_text(slow, request("/slow"))
-		harness.read_head(t, slow) or_return
-		r := fast(t, &s) or_return
-		testing.expect_value(t, string(r.body), "ok") or_return
-		idle(t, &s) or_return
-	}
-
 	// Disconnect and shutdown destroy every accepted chunk, rejected owner and
-	// producer exactly once.
+	// producer exactly once. No timeout of this server is near: the producer of
+	// the closed connection is dropped because the peer left.
 	{
 		peer := harness.connect(t, s.port) or_return
 		harness.send_text(peer, request("/slow"))
@@ -381,6 +400,8 @@ producers :: proc(t: ^testing.T, binary: string) -> bool {
 		read or_return
 		idle(t, &s) or_return
 	}
+	// Stopped with one producer suspended on its timer (never released) and
+	// one blocked on a reader that does not read.
 	held := harness.connect(t, s.port) or_return
 	defer net.close(held)
 	harness.send_text(held, request("/wait"))
@@ -389,6 +410,32 @@ producers :: proc(t: ^testing.T, binary: string) -> bool {
 	defer net.close(blocked)
 	harness.send_text(blocked, request("/slow"))
 	harness.read_head(t, blocked) or_return
+	return stop(t, &s)
+}
+
+// A consumer that stops reading reaches the write timeout, which releases the
+// pending chunk and the producer while cheap routes progress. This server's
+// response timeout is WRITE_TIMEOUT and the stream's own deadline is a minute
+// away, so a producer dropped under a connected reader was dropped by the
+// write timeout. It is not dropped early: the clock starts before the request
+// leaves, and the last write the server completed is later than that.
+write_timeout :: proc(t: ^testing.T, binary: string) -> bool {
+	s := launch(t, binary, response = WRITE_TIMEOUT) or_return
+	defer dispose(&s)
+	{
+		slow := harness.connect(t, s.port) or_return
+		defer net.close(slow)
+		_ = net.set_option(slow, .Receive_Buffer_Size, 1024)
+		started := time.tick_now()
+		harness.send_text(slow, request("/slow"))
+		harness.read_head(t, slow) or_return
+		r := fast(t, &s) or_return
+		testing.expect_value(t, string(r.body), "ok") or_return
+		values := idle(t, &s) or_return
+		elapsed := time.tick_since(started)
+		testing.expectf(t, values[4] == 1, "%d producers dropped, want the slow one", values[4]) or_return
+		testing.expectf(t, elapsed >= WRITE_TIMEOUT, "the slow stream was dropped after %v", elapsed) or_return
+	}
 	return stop(t, &s)
 }
 

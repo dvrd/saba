@@ -334,6 +334,7 @@ drop_response_stream :: proc(task: ^Connection_Task) {
 	producer := old.producer
 	old.producer = {}
 	if producer.drop != nil {
+		context.allocator = request_default_allocator(task)
 		producer.drop(producer.data)
 	}
 	free(old, old.allocator)
@@ -601,7 +602,11 @@ produce_stream :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		_deadline         = state.deadline,
 	}
 
-	step := state.producer.next(state.producer.data, &io)
+	step: Stream_Step
+	{
+		context.allocator = request_default_allocator(task)
+		step = state.producer.next(state.producer.data, &io)
+	}
 	if stream_interrupted(task) {
 		return .Done
 	}
@@ -757,8 +762,31 @@ drop_upgrade :: proc(task: ^Connection_Task) {
 	owned := task.upgrade
 	task.upgrade = {}
 	if owned.drop != nil {
+		context.allocator = request_default_allocator(task)
 		owned.drop(owned.data)
 	}
+}
+
+// One call of the upgrade handler, as the application code it is.
+resume_upgrade :: proc(task: ^Connection_Task, io: ^Upgrade_IO) -> async.Resume_Result {
+	context.allocator = request_default_allocator(task)
+	return task.upgrade.resume(task.upgrade.data, io)
+}
+
+// The allocator application code sees as context.allocator while it serves
+// this request: the request's heap, unless the server names another one.
+request_default_allocator :: proc(task: ^Connection_Task) -> mem.Allocator {
+	if task.runtime != nil && task.runtime.config.handler_allocator.procedure != nil {
+		return task.runtime.config.handler_allocator
+	}
+	return request_heap_allocator(task)
+}
+
+// Runs the drops of a response the server will not serve, as the application
+// code they are.
+discard_request_response :: proc(task: ^Connection_Task, response: ^Response) {
+	context.allocator = request_default_allocator(task)
+	discard_response(response)
 }
 
 // Callback borrows remain valid until resume returns, even after consumption.

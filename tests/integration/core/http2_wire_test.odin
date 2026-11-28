@@ -90,6 +90,8 @@ h2w_handler :: proc(data: rawptr, conn: ^Connection, request: ^Request) -> Respo
 		return waiting_later(&state.gate, H2W_PATIENCE - time.Second)
 	case "/yields":
 		return waiting_yields()
+	case "/default":
+		return rm_default(conn)
 	case "/refuse":
 		if conn != nil && conn._task != nil && conn._task.http2_request != nil {
 			sync.atomic_store(&state.refused, conn._task.http2_request.parent)

@@ -249,6 +249,12 @@ Server :: struct {
 	handler:             Handler,
 	// Caller-owned state, immutable until serve returns.
 	handler_data:        rawptr,
+	// The allocator application code runs with (context.allocator) while it
+	// serves a request: the handler and the callbacks of its response. Zero
+	// selects the request's heap, which frees whatever the request left when
+	// it ends (Request_Heap). Name the process heap here to keep what handlers
+	// allocate until they free it themselves.
+	handler_allocator:   mem.Allocator,
 	request_body_limit:  proc(request: ^Request) -> int,
 	// Zero leaves synchronous handlers without a deadline. Positive budgets are cooperative.
 	handler_timeout:     time.Duration,
@@ -1535,6 +1541,7 @@ keep_alive_next_request :: #force_no_inline proc(task: ^Connection_Task) -> bool
 	task.header = nil
 	task.transfer_started = {}
 	mem.dynamic_arena_destroy(&task.arena)
+	request_heap_release(task)
 	finish_operation_resources(task)
 	task.observed, task.observation_finished, task.response_finished = false, false, false
 	task.event = {}

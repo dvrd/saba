@@ -72,6 +72,18 @@ dependencies, not sibling working copies. `--shared PATH` (or
   on I/O holds its worker; when all are held nothing is accepted, read or timed
   out. Return a deferred or streamed response, or use `src/offload`, for work
   that waits.
+- **Memory in handlers.** A handler, and the callbacks of the response it
+  returns (deferred poll, stream producer, upgrade handler, their drops), run
+  with the request's heap as `context.allocator`. It is the process heap with
+  a record of what the request holds: memory is freed as usual, and whatever
+  is left when the request ends is freed then, so a handler that forgets to
+  free does not leak. `context.temp_allocator` is the request's arena, as
+  before. Memory that must outlive the request (a cache entry, a session, a
+  map or dynamic array the application fills over time, state handed to
+  another thread) needs an allocator the application names; a free of memory
+  the request did not allocate is refused and logged. Set
+  `handler_allocator = runtime.heap_allocator()` to give every handler the
+  process heap instead.
 - **Deprecated blocking helpers.** The facade's `read_connection`,
   `write_connection` and `send_response` block the calling worker on the raw
   socket and fail on TLS connections. Return a `Response` instead.

@@ -41,6 +41,7 @@ resource_test_finish :: proc(fixture: ^Resource_Test) {
 	drop_response_stream(&fixture.task)
 	drop_upgrade(&fixture.task)
 	mem.dynamic_arena_destroy(&fixture.task.arena)
+	request_heap_release(&fixture.task)
 	finish_operation_resources(&fixture.task)
 	budget.binding_release(&fixture.task.resource_transport)
 	_ = budget.close(fixture.task.resource_connection)

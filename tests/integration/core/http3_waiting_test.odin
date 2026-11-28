@@ -22,9 +22,11 @@ H3W_Server :: struct {
 	gate:    Waiting_Gate,
 }
 
-h3w_handler :: proc(data: rawptr, _: ^Connection, request: ^Request) -> Response {
+h3w_handler :: proc(data: rawptr, conn: ^Connection, request: ^Request) -> Response {
 	fixture := cast(^H3W_Server)data
 	switch request.path {
+	case "/default":
+		return rm_default(conn)
 	case "/yields":
 		return waiting_yields()
 	case "/later":

@@ -553,7 +553,7 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 	   response.status == .Switching_Protocols {
 		// TCP upgrades have no HTTP3 transport. Reject explicitly and release their
 		// transferred ownership through the ordinary response disposal path.
-		discard_response(response)
+		discard_request_response(task, response)
 		response^ = {
 			status = .Not_Implemented,
 		}
@@ -643,7 +643,7 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 	}
 
 	if !representable || count > HTTP3_RESPONSE_FIELDS {
-		discard_response(response)
+		discard_request_response(task, response)
 		response^ = {
 			status = .Internal_Server_Error,
 		}
@@ -802,7 +802,7 @@ http3_release :: proc(user: rawptr, wire: ^http3.Server_Request) {
 	}
 	task := &state.connection
 	task.response_finished = wire.completed
-	discard_response(&state.response)
+	discard_request_response(task, &state.response)
 	drop_deferred(task)
 	drop_response_stream(task)
 	finish_request_context(task)
@@ -903,7 +903,7 @@ http3_upgrade_response :: proc(
 		response.status = .OK
 	}
 	if response.status != .OK || stream_present(response.stream) || len(response.body) > 0 {
-		discard_response(response)
+		discard_request_response(&state.connection, response)
 		out.status = 500
 		return true, .Ready
 	}
@@ -929,7 +929,7 @@ http3_upgrade_response :: proc(
 		}
 
 		if !http3_field_valid(name, header.value) || count == HTTP3_RESPONSE_FIELDS {
-			discard_response(response)
+			discard_request_response(&state.connection, response)
 			out.status = 500
 			return true, .Ready
 		}
@@ -976,7 +976,7 @@ http3_upgrade_resume :: proc(data: rawptr, endpoint: ^http3.Connect_Stream) -> h
 		stream_wait  = http3_upgrade_wait,
 	}
 
-	result := task.upgrade.resume(task.upgrade.data, &io)
+	result := resume_upgrade(task, &io)
 
 	// The listener moves a tunnel's bytes once a step, around this call: one
 	// buffer in before it and one out after it. A handler that took input,

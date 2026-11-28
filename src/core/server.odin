@@ -16,6 +16,18 @@ import signal "shared:async/signal"
 CONNECTION_STEP_LIMIT :: 32
 RESPONSE_WRITE_CHUNK_BYTES :: 64 * mem.Kilobyte
 
+// Serves one request. It runs on a worker and must not block it (see
+// default_workers).
+//
+// While it runs, and while the callbacks of the response it returned run (a
+// deferred poll, a stream producer, an upgrade handler, their drops),
+// context.allocator is the request's heap and context.temp_allocator the
+// request's arena. Nothing allocated with either outlives the request, freed
+// or not, so a handler leaks nothing by forgetting; an upgraded connection
+// keeps its heap until it ends. Memory the application keeps longer (a cache
+// entry, a session, a map it fills over time, state for another thread) needs
+// an allocator the application names. See Request_Heap, and
+// Server.handler_allocator to give handlers the process heap instead.
 Handler :: #type proc(data: rawptr, conn: ^Connection, request: ^Request) -> Response
 
 Connection_Phase :: enum {
@@ -120,6 +132,10 @@ Connection_Task :: struct {
 	transfer_bytes:                                    i64,
 	// The handler's stream head failed validation; HTTP/1 answers with a 500.
 	response_rejected:                                 bool,
+	// What application code allocated with the default allocator while it
+	// served this request and has not freed. Nil until it first allocates;
+	// released with the request.
+	heap:                                              ^Request_Heap,
 }
 
 handle_http :: proc(data: rawptr) -> async.Resume_Result {
@@ -515,7 +531,7 @@ handle_http :: proc(data: rawptr) -> async.Resume_Result {
 			if task.tls_state == nil {
 				io.socket = task.socket
 			}
-			result := task.upgrade.resume(task.upgrade.data, &io)
+			result := resume_upgrade(task, &io)
 			upgrade_resume_finished(task)
 			if result != .Yield {
 				return result
@@ -848,7 +864,7 @@ queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 
 	if resource_pressure(task) {
 		discarded := response
-		discard_response(&discarded)
+		discard_request_response(task, &discarded)
 		return resource_reject(task, resource_failure_status(response.status))
 	}
 
@@ -1002,12 +1018,16 @@ dispatch_request :: proc(task: ^Connection_Task) -> Response {
 }
 
 call_request_handler :: proc(task: ^Connection_Task, handler: Handler, data: rawptr) -> Response {
-	response := handler(data, &task.connection, &task.request)
+	response: Response
+	{
+		context.allocator = request_default_allocator(task)
+		response = handler(data, &task.connection, &task.request)
+	}
 	status := request_context_status(task.request.cancellation)
 	if status == .Active {
 		return response
 	}
-	discard_response(&response)
+	discard_request_response(task, &response)
 	observe_failure(task, .Timeout if status == .Deadline else .Cancelled)
 
 	// The handler ran to completion, so its effects may have happened. 408 tells
@@ -1039,6 +1059,7 @@ finish_connection :: proc(data: rawptr) {
 
 	release_request_body(task)
 	mem.dynamic_arena_destroy(&task.arena)
+	request_heap_release(task)
 
 	if task.tls_state != nil {
 		mem.zero(task.tls_state, size_of(TLS_State))
@@ -1533,6 +1554,7 @@ finish_operation_resources :: proc(task: ^Connection_Task) {
 }
 release_task_storage :: proc(task: ^Connection_Task) {
 	mem.dynamic_arena_destroy(&task.arena)
+	request_heap_release(task)
 	finish_operation_resources(task)
 	budget.binding_release(&task.resource_transport)
 	budget.release_scope(&task.resource_connection)
@@ -2087,6 +2109,7 @@ drop_deferred :: proc(task: ^Connection_Task) {
 	signal.detach(task.deferred_signal)
 	signal.release(&task.deferred_signal)
 	if old.drop != nil {
+		context.allocator = request_default_allocator(task)
 		old.drop(old.data)
 	}
 }
@@ -2105,7 +2128,7 @@ start_deferred :: proc(task: ^Connection_Task, response: Response, owner: ^async
 	   response.upgrade.data != nil ||
 	   response.upgrade.resume != nil ||
 	   response.upgrade.drop != nil {
-		discard_response(&prepared)
+		discard_request_response(task, &prepared)
 		observe_failure(task, .Protocol_Error)
 		return false
 	}
@@ -2116,7 +2139,7 @@ start_deferred :: proc(task: ^Connection_Task, response: Response, owner: ^async
 	}
 
 	if duration <= 0 || duration > MAX_SERVER_TIMEOUT {
-		discard_response(&prepared)
+		discard_request_response(task, &prepared)
 		observe_failure(task, .Protocol_Error)
 		return false
 	}
@@ -2191,21 +2214,26 @@ poll_deferred :: proc(task: ^Connection_Task) -> (Response, Deferred_Poll_Result
 		cancellation      = task.request.cancellation,
 		wake              = task.deferred_signal,
 	}
-	response, step := task.deferred.poll(task.deferred.data, &io)
+	response: Response
+	step: Deferred_Step
+	{
+		context.allocator = request_default_allocator(task)
+		response, step = task.deferred.poll(task.deferred.data, &io)
+	}
 	result := Deferred_Poll_Result.Ready
 	switch step {
 	case .Waiting:
-		discard_response(&response)
+		discard_request_response(task, &response)
 		if !deferred_cancelled(task) {
 			return {}, .Waiting
 		}
 		result = .Cancelled
 	case .Failed:
-		discard_response(&response)
+		discard_request_response(task, &response)
 		result = .Failed
 	case .Ready:
 		if deferred_present(response.deferred) {
-			discard_response(&response)
+			discard_request_response(task, &response)
 			result = .Invalid
 		}
 	}
@@ -2214,7 +2242,7 @@ poll_deferred :: proc(task: ^Connection_Task) -> (Response, Deferred_Poll_Result
 	// after retirement and before transferring a ready result to the transport.
 	drop_deferred(task)
 	if deferred_cancelled(task) {
-		discard_response(&response)
+		discard_request_response(task, &response)
 		return {}, .Cancelled
 	}
 	return response, result

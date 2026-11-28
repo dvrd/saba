@@ -1045,7 +1045,7 @@ h2_upgrade_release :: proc(stream: ^H2_Upgrade) {
 
 	task := &stream.connection
 	drop_upgrade(task)
-	discard_response(&stream.response)
+	discard_request_response(&stream.connection, &stream.response)
 	finish_request_context(task)
 	release_task_storage(task)
 
@@ -1184,7 +1184,7 @@ h2_upgrade_open :: proc(parent: ^Connection_Task, event: h2.Headers_Event) -> bo
 	response := dispatch_request(task)
 
 	if !resource_copy_response(task, &response) {
-		discard_response(&response)
+		discard_request_response(task, &response)
 		h2_upgrade_release(stream)
 		return false
 	}
@@ -1202,7 +1202,7 @@ h2_upgrade_open :: proc(parent: ^Connection_Task, event: h2.Headers_Event) -> bo
 	upgrade_present := response.upgrade.resume != nil || response.upgrade.drop != nil || response.upgrade.data != nil
 
 	if upgrade_present && !stream.accepted || stream_present(response.stream) || deferred_present(response.deferred) {
-		discard_response(&response)
+		discard_request_response(task, &response)
 		response = {
 			status = .Not_Implemented,
 		}
@@ -1435,7 +1435,7 @@ h2_upgrade_headers :: proc(stream: ^H2_Upgrade) -> bool {
 	if !h2_append_response_fields(fields[:], &count, names[:], &used, stream.response.headers, true) {
 		// The response cannot be represented: answer 500 and never start the tunnel.
 		drop_upgrade(&stream.connection)
-		discard_response(&stream.response)
+		discard_request_response(&stream.connection, &stream.response)
 		stream.response = {
 			status = .Internal_Server_Error,
 		}
@@ -1523,7 +1523,7 @@ h2_upgrade_pump :: proc(parent: ^Connection_Task) -> bool {
 			stream.app_done = true
 		} else if !stream.app_done {
 			io := h2_upgrade_io(stream)
-			result := stream.connection.upgrade.resume(stream.connection.upgrade.data, &io)
+			result := resume_upgrade(&stream.connection, &io)
 
 			if result == .Done {
 				stream.app_done = true
@@ -1584,7 +1584,7 @@ h2_upgrade_reset :: proc(stream: ^H2_Upgrade) {
 		io := h2_upgrade_io(stream)
 		// One final serialized callback observes cancellation; the owner retires the
 		// stream regardless of whether application code correctly returns Done.
-		_ = stream.connection.upgrade.resume(stream.connection.upgrade.data, &io)
+		_ = resume_upgrade(&stream.connection, &io)
 	}
 
 	h2_upgrade_release(stream)
@@ -1637,7 +1637,7 @@ h2_request_release :: proc(request: ^H2_Request, success: bool, status: Request_
 	task.response_finished = success
 	drop_deferred(task)
 	drop_response_stream(task)
-	discard_response(&request.response)
+	discard_request_response(task, &request.response)
 	finish_request_context(task)
 	observe_finish(task)
 	release_task_storage(task)
@@ -1760,7 +1760,7 @@ h2_request_emergency :: proc(task: ^Connection_Task, status: HTTP_Status) -> boo
 	request := task.http2_request
 	drop_deferred(task)
 	drop_response_stream(task)
-	discard_response(&request.response)
+	discard_request_response(task, &request.response)
 
 	if request.headers_sent {
 		request.failed = true
@@ -1789,13 +1789,13 @@ h2_queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 
 	if request == nil {
 		discarded := response
-		discard_response(&discarded)
+		discard_request_response(task, &discarded)
 		return false
 	}
 
 	if resource_pressure(task) {
 		discarded := response
-		discard_response(&discarded)
+		discard_request_response(task, &discarded)
 		return h2_request_emergency(task, .Service_Unavailable)
 	}
 
@@ -1814,14 +1814,14 @@ h2_queue_response :: proc(task: ^Connection_Task, response: Response) -> bool {
 	   prepared.upgrade.drop != nil ||
 	   prepared.upgrade.data != nil ||
 	   prepared.status == .Switching_Protocols {
-		discard_response(&prepared)
+		discard_request_response(task, &prepared)
 		prepared = {
 			status = .Not_Implemented,
 		}
 	}
 
 	if !resource_copy_response(task, &prepared) {
-		discard_response(&prepared)
+		discard_request_response(task, &prepared)
 		return h2_request_emergency(task, .Service_Unavailable)
 	}
 

@@ -75,6 +75,11 @@ dependencies, not sibling working copies. `--shared PATH` (or
 - **Deprecated blocking helpers.** The facade's `read_connection`,
   `write_connection` and `send_response` block the calling worker on the raw
   socket and fail on TLS connections. Return a `Response` instead.
+- **Programs the server starts** (a tool run from a handler, a development
+  build) do not inherit its listening sockets or its accepted connections:
+  they are close-on-exec, so such a program cannot keep the port bound or a
+  client's connection open after the server stops. Connections the upstream
+  client opens are created by async and are still inherited.
 - **`backlog`** sets the listen queue length. Zero keeps 128; the kernel may
   clamp larger values.
 - **`dedicated_poller`** (off by default) runs the reactor on its own thread,
@@ -99,7 +104,7 @@ dependencies, not sibling working copies. `--shared PATH` (or
 ### Upstream HTTP
 
 `attach` in `shared:saba/upstream` initializes the Surf client from the
-`client.Client_Config` it is given, then dispatches its completions; the
+`surf.Client_Config` it is given, then dispatches its completions; the
 application closes the client, calls `detach` and destroys it. Outbound URLs
 often carry request data, so by default the client refuses any upstream
 address that is not global unicast (`address_policy_public_only`: loopback,

@@ -1,8 +1,14 @@
+// A server that prints one line per completed request. Each of its four
+// timeouts is a minute unless the test names it, in milliseconds:
+// SABA_OBSERVE_HEADER_MS, SABA_OBSERVE_BODY_MS, SABA_OBSERVE_RESPONSE_MS and
+// SABA_OBSERVE_IDLE_MS. On stdin, m prints a "snapshot" of the metrics and
+// any other byte prints the "metrics" line and stops the server.
 package main
 
 import server "shared:saba"
 import "core:fmt"
 import "core:os"
+import "core:strconv"
 import "core:sync"
 import "core:thread"
 import "core:time"
@@ -14,6 +20,33 @@ State :: struct {
 }
 
 state: State
+
+timeout :: proc(name: string) -> time.Duration {
+	milliseconds, _ := strconv.parse_int(os.get_env(name, context.temp_allocator))
+	if milliseconds <= 0 {
+		return time.Minute
+	}
+	return time.Duration(milliseconds) * time.Millisecond
+}
+
+report :: proc(label: string) {
+	metrics, valid := server.server_metrics(&state.control)
+	assert(valid)
+	sync.lock(&state.mutex)
+	fmt.printf(
+		"%s %d %d %d %d %d %d %d\n",
+		label,
+		metrics.started,
+		metrics.completed,
+		metrics.active,
+		metrics.timeouts,
+		metrics.cancelled,
+		metrics.bytes_received,
+		metrics.bytes_sent,
+	)
+	os.flush(os.stdout)
+	sync.unlock(&state.mutex)
+}
 
 routes :: proc(_: ^server.Connection, request: ^server.Request) -> server.Response {
 	assert(request.request_id != 0)
@@ -45,10 +78,10 @@ main :: proc() {
 				workers = 2,
 				control = &state.control,
 				timeouts = {
-					header = 200 * time.Millisecond,
-					body = 120 * time.Millisecond,
-					response = 120 * time.Millisecond,
-					idle = 80 * time.Millisecond,
+					header = timeout("SABA_OBSERVE_HEADER_MS"),
+					body = timeout("SABA_OBSERVE_BODY_MS"),
+					response = timeout("SABA_OBSERVE_RESPONSE_MS"),
+					idle = timeout("SABA_OBSERVE_IDLE_MS"),
 				},
 				observability = {
 					enabled = true,
@@ -94,24 +127,19 @@ main :: proc() {
 
 	_, ready := server.server_endpoint(&state.control)
 	assert(ready)
-	command: [1]u8
-	os.read(os.stdin, command[:])
-	metrics, valid := server.server_metrics(&state.control)
-	assert(valid)
-	fmt.printf(
-		"metrics %d %d %d %d %d %d %d\n",
-		metrics.started,
-		metrics.completed,
-		metrics.active,
-		metrics.timeouts,
-		metrics.cancelled,
-		metrics.bytes_received,
-		metrics.bytes_sent,
-	)
+	for {
+		command: [1]u8
+		n, error := os.read(os.stdin, command[:])
+		if n != 1 || error != nil || command[0] != 'm' {
+			break
+		}
+		report("snapshot")
+	}
+	report("metrics")
 	server.stop_server(&state.control)
 	thread.join(worker)
 	thread.destroy(worker)
 	assert(state.result)
-	_, valid = server.server_metrics(&state.control)
+	_, valid := server.server_metrics(&state.control)
 	assert(!valid)
 }

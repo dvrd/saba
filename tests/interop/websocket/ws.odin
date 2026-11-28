@@ -134,11 +134,22 @@ read :: proc(w: ^WS, loc := #caller_location) -> (f: Frame, ok: bool) {
 	return {head[0] & 0x80 != 0, head[0] & 15, payload}, true
 }
 
-// Reads one message, fragments included, and compares it.
+// Reads one message, fragments included, and compares it. A keepalive ping
+// the server puts before or between the fragments is answered, as a peer
+// answers it: a long message read slowly outlasts the ping interval.
 message :: proc(w: ^WS, opcode: u8, expected: []u8, loc := #caller_location) -> bool {
 	body := make([dynamic]u8, context.temp_allocator)
-	for first := true; ; first = false {
+	first := true
+	for {
 		f := read(w, loc) or_return
+		if f.opcode == PING {
+			if !f.final || len(f.payload) > 125 {
+				return fail(w, "ping: final %v, %d bytes", f.final, len(f.payload), loc = loc)
+			}
+			write(w, PONG, true, f.payload, loc) or_return
+			continue
+		}
+		defer first = false
 		if first && f.opcode != opcode {
 			return fail(w, "message opcode %d, want %d", f.opcode, opcode, loc = loc)
 		}

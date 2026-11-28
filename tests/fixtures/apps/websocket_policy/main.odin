@@ -52,6 +52,11 @@ Session_Data :: struct {
 	slow, bytes_queue, noack, combined, combined_started: bool,
 }
 large: [8 * 1024 * 1024]u8
+// The idle, write and close timeouts of /slow, whose sessions are about what
+// an 8 MiB message costs while its reader is slow. How long that reader takes
+// is the machine's business; the combined probes set short timeouts of their
+// own.
+PATIENT :: 2 * time.Minute
 queue_a: [1024]u8
 queue_c: [512]u8
 oversized: [2049]u8
@@ -266,6 +271,9 @@ route :: proc(data: rawptr, conn: ^core.Connection, request: ^core.Request) -> c
 		config.max_frame_bytes = 65536
 		config.max_message_bytes = len(large)
 		config.max_output_bytes = len(large) + 64
+		config.idle_timeout = PATIENT
+		config.write_timeout = PATIENT
+		config.close_timeout = PATIENT
 		owner.max_output = len(large) + 64
 		owner.max_message = len(large)
 		assert(net.set_option(conn.socket, .Send_Buffer_Size, i32(1024)) == nil)

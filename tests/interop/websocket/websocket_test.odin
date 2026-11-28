@@ -308,7 +308,9 @@ noack_mode :: proc(s: Session, server: ^Server) -> bool {
 
 // The peer closes while an 8 MiB message is being sent: the rest of that
 // message and the text queued behind it are discarded, and the close is
-// echoed.
+// echoed. The frame being written when the close arrives is finished first,
+// through a 1 KiB send buffer, so the echo waits on how fast this peer reads:
+// /slow has a patient close timeout, and the 200 ms one is application_noack's.
 @(test)
 peer_close_discard :: proc(t: ^testing.T) {
 	run(t, peer_close_mode)
@@ -418,7 +420,11 @@ combined_mode :: proc(s: Session, server: ^Server, fragment: bool) -> bool {
 
 // While an 8 MiB message waits on a slow reader on the only worker, 24 more
 // sessions open and a plain request is answered: no thread is added and the
-// budget stays bounded. The reader then gets the whole message.
+// budget stays bounded. The reader then gets the whole message. That the
+// worker did all of it beside the waiting message is shown by the server's
+// own counters and not by a clock: once the request is answered, the 25
+// sessions are active, the message is still held in the budget, and no
+// session has ended unclean.
 @(test)
 slow_reader :: proc(t: ^testing.T) {
 	run(t, slow_mode, timed = true)
@@ -457,8 +463,13 @@ slow_mode :: proc(s: Session, server: ^Server) -> bool {
 	peer.close(cheap)
 	testing.expectf(s.t, status == .Ok && response.status == 200 && string(response.body[:]) == "websocket79-ok\n", "cheap request: %v %d %q", status, response.status, string(response.body[:]))
 	elapsed := time.tick_since(started)
-	testing.expectf(s.t, elapsed < 8 * time.Second, "the one worker made no progress for %v", elapsed)
 	held := wait_metrics(s.t, server, proc(m: Metrics) -> bool {return m.active >= 25}) or_return
+	testing.expectf(
+		s.t,
+		held.scope_bytes >= MESSAGE_BOUND && held.unclean == 0 && held.closed == 1,
+		"the large message did not wait beside the 24 sessions and the request: %v",
+		held,
+	)
 	testing.expectf(s.t, held.scope_bytes <= 64 * 1024 * 1024, "%v", held)
 	if count, counted := harness.threads(server.p); counted {
 		testing.expectf(s.t, count == baseline, "%d threads while held, %d before", count, baseline)

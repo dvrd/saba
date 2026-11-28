@@ -2053,7 +2053,9 @@ Deferred_Step :: enum {
 
 // Owned pre-header continuation. poll/drop run serially on the connection owner,
 // outside locks. poll must be bounded and nonblocking; it may submit independent
-// work on its first invocation. Returning transfers ownership even on rejection.
+// work on its first invocation. A poll that answers Waiting runs again once
+// Deferred_IO.wake is raised, on every protocol: it may run sooner, but nothing
+// calls it on a clock. Returning transfers ownership even on rejection.
 // No response fields may accompany it. A zero timeout uses the response timeout;
 // the request deadline always caps it. Pending pipeline input is bounded by the
 // ordinary header limit; exceeding it closes the connection without dispatch.

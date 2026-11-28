@@ -12,6 +12,7 @@ import "shared:async/quic"
 import "core:strings"
 import "core:strconv"
 import "core:sync"
+import "core:sys/posix"
 import "core:time"
 import credential_store "shared:async/tls/credentials/store"
 import async "shared:async"
@@ -145,7 +146,25 @@ Http3 :: struct {
 	calls:    int,
 	rejected: bool,
 	_pending: bool,
+	// A duplicate of the listener's socket that the runtime watches for the
+	// task, so the task sleeps until a datagram or a timer needs a step.
+	// _polled: the socket could not be watched, and the task steps every
+	// millisecond as it used to.
+	_watch:   async.Datagram_Socket,
+	_watched: bool,
+	_polled:  bool,
+	// Turns in a row that found a listener timer already due.
+	_due:     int,
+	// Set during a step by a handler that has more to do than the step gave
+	// it room for: the listener steps again at once.
+	_again:   bool,
+	// Turns the listener's task has run. An idle listener takes none.
+	_turns:   u64,
 }
+
+// A timer the step left due is served by the next step. One that stays due
+// for this many turns is polled a millisecond apart instead.
+HTTP3_DUE_YIELDS :: 8
 
 Http3_Request :: struct {
 	owner:                      ^Http3,
@@ -229,6 +248,7 @@ http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
 
 http3_resume :: proc(data: rawptr) -> async.Resume_Result {
 	state := cast(^Http3)data
+	sync.atomic_add(&state._turns, 1)
 	if async.cancelled(&state.task) {
 		return .Done
 	}
@@ -239,7 +259,9 @@ http3_resume :: proc(data: rawptr) -> async.Resume_Result {
 	// Drain reads only this atomic snapshot, never mutable QUIC state.
 	sync.atomic_store(&state._pending, true)
 
-	if !http3.listener_step(&state.live) {
+	state._again = false
+	alive, drained := http3.listener_step_drained(&state.live)
+	if !alive {
 		state.runtime.listener_failed = true
 		shutdown_runtime(state.runtime)
 		return .Done
@@ -249,14 +271,99 @@ http3_resume :: proc(data: rawptr) -> async.Resume_Result {
 	if server_is_draining(state.runtime) && !sync.atomic_load(&state._pending) {
 		async.wake(&state.runtime.executor, &state.runtime.accept_task)
 	}
-	// UDP is nonblocking. A bounded poll also observes deferred wakes and applies
-	// producer backpressure; never replace an earlier stream/deferred watchdog.
-	error := async.sleep_until_earlier(
-		&state.runtime.executor,
-		async.deadline_after(&state.runtime.executor, time.Millisecond),
-	)
+
+	// The step stopped with datagrams still queued, or a handler asked for
+	// another one: step again before waiting.
+	if !drained || state._again {
+		return .Yield
+	}
+
+	return http3_wait(state)
+}
+
+// Ends a turn of the listener task. Everything the listener waits for wakes
+// the task by itself: a datagram, or room for one the socket refused, through
+// the watched socket; a QUIC, request or handshake timer through the wait's
+// deadline; a deferred response through its signal; the server's drain
+// through its wake; and a tunnel or stream producer through the timer it
+// armed while it was polled this turn, which this wait leaves in place. A
+// producer or tunnel with more to do now never gets here: http3_resume steps
+// again for it.
+http3_wait :: proc(state: ^Http3) -> async.Resume_Result {
+	executor := &state.runtime.executor
+
+	if !state._watched && !state._polled {
+		state._watched = http3_watch(state)
+		state._polled = !state._watched
+	}
+
+	if state._watched {
+		wait, armed, write := http3.listener_next_wait(&state.live)
+
+		// The socket refused a datagram. Its readiness says when it takes one
+		// again, where the refusal came from a full send buffer; a refusal
+		// from further down (ENOBUFS) is followed by no such event, so the
+		// datagram is also offered again a millisecond from now.
+		if write && (!armed || wait > time.Millisecond) {
+			wait, armed = time.Millisecond, true
+		}
+
+		if armed && wait <= 0 {
+			if state._due < HTTP3_DUE_YIELDS {
+				state._due += 1
+				return .Yield
+			}
+			wait = time.Millisecond
+		} else {
+			state._due = 0
+		}
+
+		deadline: async.Deadline
+		if armed {
+			deadline = async.deadline_after(executor, wait)
+		}
+
+		#partial switch async.wait_datagram(state._watch, true, write, deadline).kind {
+		case .Pending:
+			return .Waiting
+		case .None, .Timeout:
+			// Readable or writable, or a timer is due: step again.
+			return .Yield
+		}
+
+		// The socket cannot be waited on any more: poll it from here on.
+		_ = async.close(state._watch)
+		state._watch = {}
+		state._watched, state._polled = false, true
+	}
+
+	// Never replace an earlier stream or deferred watchdog.
+	error := async.sleep_until_earlier(executor, async.deadline_after(executor, time.Millisecond))
 
 	return .Waiting if error.kind == .Pending else .Yield
+}
+
+// Hands the runtime a close-on-exec duplicate of the listener's socket to
+// watch: the runtime owns and closes what it watches, and the listener keeps
+// reading its own descriptor.
+http3_watch :: proc(state: ^Http3) -> bool {
+	socket, bound := http3.listener_socket(&state.live)
+	if !bound {
+		return false
+	}
+
+	duplicate := posix.fcntl(posix.FD(socket), .DUPFD_CLOEXEC, i32(0))
+	if duplicate < 0 {
+		return false
+	}
+
+	watch, error := async.adopt_udp(&state.runtime.executor, &state.task, net.UDP_Socket(duplicate))
+	if error.kind != .None {
+		return false
+	}
+
+	state._watch = watch
+	return true
 }
 http3_retire :: proc(data: rawptr) {
 	state := cast(^Http3)data
@@ -651,6 +758,10 @@ http3_stream_next :: proc(data: rawptr, dst: []u8) -> (int, http3.Stream_Status)
 		}
 
 		if !stream.pending && !stream.terminal {
+			// A producer that yields armed no timer: it asks for another turn.
+			if result == .Yield {
+				state.owner._again = true
+			}
 			return 0, .Pending
 		}
 	}
@@ -768,6 +879,8 @@ http3_phase_policy :: proc(config: Http3_Phase_Config, timeouts: Resolved_Timeou
 Http3_Upgrade_IO :: struct {
 	state:    ^Http3_Request,
 	endpoint: ^http3.Connect_Stream,
+	// The handler took input or queued output during this resume.
+	moved:    bool,
 }
 http3_upgrade_response :: proc(
 	owner: ^Http3,
@@ -850,7 +963,10 @@ http3_upgrade_resume :: proc(data: rawptr, endpoint: ^http3.Connect_Stream) -> h
 		return .Done
 	}
 
-	transport := Http3_Upgrade_IO{state, endpoint}
+	transport := Http3_Upgrade_IO {
+		state    = state,
+		endpoint = endpoint,
+	}
 	io := Upgrade_IO {
 		runtime      = &state.owner.runtime.executor,
 		connection   = &task.connection,
@@ -861,6 +977,15 @@ http3_upgrade_resume :: proc(data: rawptr, endpoint: ^http3.Connect_Stream) -> h
 	}
 
 	result := task.upgrade.resume(task.upgrade.data, &io)
+
+	// The listener moves a tunnel's bytes once a step, around this call: one
+	// buffer in before it and one out after it. A handler that took input,
+	// queued output or asked to run again may have more to do than that step
+	// had room for, and no datagram announces it: the listener steps again.
+	// A step that moves nothing for the handler ends the chain.
+	if result == .Yield || transport.moved {
+		state.owner._again = true
+	}
 
 	return .Done if result == .Done else .Pending
 }
@@ -890,6 +1015,7 @@ http3_upgrade_read :: proc(data: rawptr, dst: []u8, deadline: async.Deadline) ->
 	}
 
 	n, status := http3.connect_read(io.endpoint, dst)
+	io.moved ||= n > 0
 
 	return n, http3_upgrade_error(status)
 }
@@ -901,6 +1027,7 @@ http3_upgrade_write :: proc(data: rawptr, src: []u8, deadline: async.Deadline) -
 	}
 
 	n, status := http3.connect_write(io.endpoint, src)
+	io.moved ||= n > 0
 
 	return n, http3_upgrade_error(status)
 }

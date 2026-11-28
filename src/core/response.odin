@@ -285,7 +285,9 @@ stream_wait :: proc(io: ^Stream_IO, deadline: async.Deadline) -> async.Error {
 	}
 	bounded := deadline
 	bounded.at = min(bounded.at, io._deadline.at)
-	error := async.sleep_until(io.runtime, bounded)
+	// One task serves every stream of an HTTP/2 or HTTP/3 connection, so a
+	// producer must not replace the earlier timer another one armed this turn.
+	error := async.sleep_until_earlier(io.runtime, bounded)
 	if error.kind == .Pending {
 		io._waiting = true
 	}

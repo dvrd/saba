@@ -30,11 +30,18 @@ H2W_Server :: struct {
 	// Nonzero replaces H2W_IDLE, for tests that are not about the idle
 	// timeout: a peer starved on a loaded machine must not lose its connection.
 	idle:     time.Duration,
+	// Nonzero replaces the header timeout, which a connection's first read
+	// waits out before it takes a turn by itself.
+	header:   time.Duration,
 	// Nonzero replaces H2W_RESPONSE, which also bounds how long a closing
 	// connection waits for the peer to acknowledge its GOAWAY.
 	response: time.Duration,
 	// The connection that served /refuse over an ordinary HTTP/2 stream.
 	refused:  ^Connection_Task,
+	// The connection that served the last request of an HTTP/2 stream.
+	parent:   ^Connection_Task,
+	// /later answers once this gate is opened.
+	gate:     Waiting_Gate,
 }
 
 H2W_Frame :: struct {
@@ -72,10 +79,17 @@ h2w_tunnel :: proc(data: rawptr, io: ^Upgrade_IO) -> async.Resume_Result {
 h2w_handler :: proc(data: rawptr, conn: ^Connection, request: ^Request) -> Response {
 	state := cast(^H2W_Server)data
 	sync.atomic_add(&state.handled, 1)
+	if conn != nil && conn._task != nil && conn._task.http2_request != nil {
+		sync.atomic_store(&state.parent, conn._task.http2_request.parent)
+	}
 
 	switch request.path {
 	case "/hold":
 		return {deferred = {poll = h2w_hold, drop = proc(_: rawptr) {}, timeout = 3 * time.Second}}
+	case "/later":
+		return waiting_later(&state.gate, H2W_PATIENCE - time.Second)
+	case "/yields":
+		return waiting_yields()
 	case "/refuse":
 		if conn != nil && conn._task != nil && conn._task.http2_request != nil {
 			sync.atomic_store(&state.refused, conn._task.http2_request.parent)
@@ -180,6 +194,9 @@ h2w_run :: proc(t: ^testing.T, state: ^H2W_Server, exchange: proc(t: ^testing.T,
 	if state.idle != 0 {
 		state.config.timeouts.idle = state.idle
 	}
+	if state.header != 0 {
+		state.config.timeouts.header = state.header
+	}
 	if state.response != 0 {
 		state.config.timeouts.response = state.response
 	}
@@ -223,6 +240,7 @@ h2w_run :: proc(t: ^testing.T, state: ^H2W_Server, exchange: proc(t: ^testing.T,
 	defer _ = tls.abort(&peer.conn)
 	assert(tls.set_deadline(&peer.conn, time.time_add(time.now(), H2W_PATIENCE)) == nil)
 	exchange(t, state, peer)
+	waiting_gate_close(&state.gate)
 }
 
 h2w_send :: proc(peer: ^H2W_Peer, bytes: []u8) -> bool {

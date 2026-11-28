@@ -3,6 +3,7 @@ package saba_core
 import h2 "shared:async/http/v2"
 import "core:mem"
 import "core:strings"
+import "core:sync"
 import budget "shared:async/budget"
 import "core:time"
 import async "shared:async"
@@ -65,6 +66,14 @@ HTTP2_Session :: struct {
 	close_deadline, wake_deadline:             time.Tick,
 	reset_refill:                              time.Tick,
 	read_deadline:                             async.Deadline,
+	// Turns in a row that ended with nothing to do: paces the heartbeat of
+	// h2_arm_timers.
+	stalls:                                    uint,
+	// Turns the connection's task has run. A waiting connection takes few.
+	turns:                                     u64,
+	// Set during a pass by a stream producer that yielded: it armed no timer
+	// and asks for another turn.
+	yielded:                                   bool,
 	// The final GOAWAY is written and the connection waits for the peer to
 	// close (H2_LINGER).
 	lingering:                                 bool,
@@ -441,12 +450,10 @@ h2_earlier :: proc(deadline: ^time.Tick, candidate: time.Tick) {
 	}
 }
 
-// The earliest pending stream or connection deadline. The idle deadline counts
-// only while no stream is open, and the close deadline replaces it once the
-// connection is closing. An already expired deadline is never returned: the
-// owner retires it in this same turn, and a zero transport budget would make
-// every read and write time out before it could run.
-h2_next_deadline :: proc(task: ^Connection_Task) -> time.Tick {
+// The earliest pending stream or connection deadline, expired or not; zero
+// when none is set. The idle deadline counts only while no stream is open,
+// and the close deadline replaces it once the connection is closing.
+h2_earliest_deadline :: proc(task: ^Connection_Task) -> time.Tick {
 	session := task.http2
 	deadline: time.Tick
 	streams := false
@@ -470,6 +477,17 @@ h2_next_deadline :: proc(task: ^Connection_Task) -> time.Tick {
 	} else if !streams {
 		h2_earlier(&deadline, session.idle_deadline)
 	}
+
+	return deadline
+}
+
+// The deadline the transport reads up to: h2_earliest_deadline, or a wake of
+// its own when that is unset or already expired. An expired deadline is never
+// returned: the owner retires it in this same turn, and a zero transport
+// budget would make every read and write time out before it could run.
+h2_next_deadline :: proc(task: ^Connection_Task) -> time.Tick {
+	session := task.http2
+	deadline := h2_earliest_deadline(task)
 
 	if deadline == (time.Tick{}) || deadline_expired(deadline) {
 		if session.wake_deadline == (time.Tick{}) || deadline_expired(session.wake_deadline) {
@@ -809,6 +827,54 @@ h2_finished :: proc(task: ^Connection_Task) -> bool {
 // close before it closes the connection itself.
 H2_LINGER :: time.Second
 
+// The longest heartbeat of a waiting connection: a millisecond shifted this far.
+H2_HEARTBEAT_SHIFT :: 10
+
+// Arms the timers of a turn that ended with nothing to do, and reports whether
+// one is pending. Everything a connection waits for wakes its task by itself:
+// the peer through the armed read or write, a deferred response through its
+// signal, the server's drain through the wake every HTTP/2 connection is
+// registered for, and time through the timers the tunnels and stream
+// producers armed while they were polled this turn and the ones armed here.
+//
+// Here: the earliest deadline of a request, a tunnel or the connection, and a
+// heartbeat. A connection whose input or output is stuck inside this turn (the
+// engine has not taken the bytes read, queued frames were neither written nor
+// refused, or the read gave up at its deadline and is not armed) is polled
+// again a millisecond from now, since no event announces the end of such a
+// state. A connection that only waits beats slower each idle turn, from a
+// millisecond to about a second: the beat is a net under the wakes above, not
+// one of them.
+h2_arm_timers :: proc(task: ^Connection_Task, read_armed, write_armed: bool) -> bool {
+	session := task.http2
+	executor := &task.runtime.executor
+	timed := false
+
+	if deadline := h2_earliest_deadline(task); deadline != (time.Tick{}) {
+		// A deadline that passed since this pass looked at it is acted on a
+		// millisecond from now rather than in a turn that would not end.
+		left := max(time.Millisecond, time.tick_diff(time.tick_now(), deadline))
+		timed = async.sleep_until_earlier(executor, async.deadline_after(executor, left)).kind == .Pending
+	}
+
+	reading := read_armed || session.failed || session.peer_gone || session.ingress_len == len(session.ingress)
+	stuck := session.ingress_len > 0 || !reading || !write_armed && h2_output_pending(session)
+	beat := time.Duration(0)
+
+	if stuck {
+		beat = time.Millisecond
+	} else if h2_has_streams(task) {
+		beat = time.Millisecond << min(session.stalls, H2_HEARTBEAT_SHIFT)
+		session.stalls = min(session.stalls + 1, H2_HEARTBEAT_SHIFT)
+	}
+
+	if beat > 0 && async.sleep_until_earlier(executor, async.deadline_after(executor, beat)).kind == .Pending {
+		timed = true
+	}
+
+	return timed
+}
+
 h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	session := task.http2
 	if session == nil || !session.engine_ready {
@@ -822,12 +888,14 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		return .Done
 	}
 
+	sync.atomic_add(&session.turns, 1)
 	waiting := false
 	// Set while every pass of the turn moved something.
 	moving := true
 
 	for _ in 0 ..< 8 {
 		progress := false
+		session.yielded = false
 		h2_settle(task)
 		if h2_check_deadlines(task) {
 			progress = true
@@ -868,21 +936,19 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 			return .Done
 		}
 		if progress {
+			session.stalls = 0
 			continue
 		}
 
-		// Nothing moved this pass. With no read armed (a full ingress buffer the
-		// engine cannot take yet) the timer is the only wake: wait for it rather
-		// than yield straight back into the same stalled pass.
-		timed := false
-		if h2_has_streams(task) {
-			timed =
-				async.sleep_until_earlier(
-					&task.runtime.executor,
-					async.deadline_after(&task.runtime.executor, time.Millisecond),
-				).kind ==
-				.Pending
+		// A producer that yielded is asked again after the worker's other
+		// tasks, as it would be on a connection of its own.
+		if session.yielded {
+			return .Yield
 		}
+
+		// Nothing moved this pass: the turn ends, and the task sleeps until
+		// something it waits for wakes it.
+		timed := h2_arm_timers(task, read_wait, write_wait)
 
 		if waiting || timed {
 			return .Waiting
@@ -1974,9 +2040,15 @@ h2_request_output :: proc(request: ^H2_Request) -> bool {
 		stream := task.streaming
 
 		if !stream.pending && !stream.terminal {
-			if produce_stream(task) == .Done {
+			step := produce_stream(task)
+
+			if step == .Done {
 				request.failed = true
 				return false
+			}
+
+			if step == .Yield && !stream.pending && !stream.terminal {
+				request.parent.http2.yielded = true
 			}
 		}
 

@@ -1017,6 +1017,12 @@ handle_connection :: proc(data: rawptr) -> async.Resume_Result {
 					tls_start_close(task, false)
 				} else {
 					task.phase = .HTTP2
+					// When the server starts to drain, an HTTP/2 connection has
+					// a GOAWAY to send and no event of its own to tell it so. It
+					// is woken with the idle HTTP/1.1 connections; a false
+					// result means the drain began already, which its first turn
+					// sees.
+					_ = keep_alive_enter_idle(task)
 				}
 			} else {
 				begin_http_headers(task)
@@ -1418,9 +1424,11 @@ response_can_reuse :: proc(task: ^Connection_Task, status: HTTP_Status) -> bool 
 	return true
 }
 
-// Only idle tasks are listed. Drain wakes them once, rather than adding a timer
-// poll or a per-connection thread. Runtime drain_mutex is always released before
-// drain takes this list lock, so admission may check drain while holding it.
+// The connections a drain has to tell: idle HTTP/1.1 connections, and every
+// HTTP/2 connection for as long as it lives. Drain wakes them once, rather than
+// adding a timer poll or a per-connection thread. Runtime drain_mutex is always
+// released before drain takes this list lock, so admission may check drain
+// while holding it.
 keep_alive_remove_idle_locked :: proc(task: ^Connection_Task) {
 	if !task.idle_registered {
 		return

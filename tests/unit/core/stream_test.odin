@@ -4,6 +4,7 @@ import exchange "shared:async/http/exchange"
 import "core:mem"
 import owned "shared:async/owned"
 import "core:strings"
+import "core:sync"
 import "core:testing"
 import "core:time"
 import async "shared:async"
@@ -240,4 +241,59 @@ stream_wait_and_write_budget_inherit_request_deadline :: proc(t: ^testing.T) {
 	testing.expect(t, time.tick_diff(deadline, task.streaming.expires) <= 0)
 	testing.expect(t, time.tick_diff(time.tick_now(), task.streaming.expires) <= time.Second)
 	drop_response_stream(&task)
+}
+
+Stream_Wait_Probe :: struct {
+	runtime: ^async.Runtime,
+	started: time.Tick,
+	armed:   bool,
+	woken:   time.Duration,
+	done:    sync.Sema,
+}
+
+// One task serves every stream of an HTTP/2 or HTTP/3 connection. A producer
+// that waits must not push back the timer another producer armed in the same
+// turn: the task wakes for the earlier of the two.
+@(test)
+stream_waits_of_one_turn_keep_the_earlier_timer :: proc(t: ^testing.T) {
+	executor: async.Runtime
+	assert(async.init(&executor, {workers = 1, task_capacity = 1, io_capacity = 1}).kind == .None)
+	defer async.destroy(&executor)
+	probe := Stream_Wait_Probe {
+		runtime = &executor,
+	}
+	task := async.Task {
+		data = &probe,
+		resume = proc(data: rawptr) -> async.Resume_Result {
+			probe := cast(^Stream_Wait_Probe)data
+			if probe.armed {
+				probe.woken = time.tick_since(probe.started)
+				return .Done
+			}
+			probe.armed = true
+			probe.started = time.tick_now()
+			lifetime := async.deadline_after(probe.runtime, time.Hour)
+			near := Stream_IO {
+				runtime   = probe.runtime,
+				_deadline = lifetime,
+			}
+			far := Stream_IO {
+				runtime   = probe.runtime,
+				_deadline = lifetime,
+			}
+			first := stream_wait(&near, async.deadline_after(probe.runtime, 50 * time.Millisecond))
+			second := stream_wait(&far, async.deadline_after(probe.runtime, 30 * time.Second))
+			assert(first.kind == .Pending && second.kind == .Pending)
+
+			return .Waiting
+		},
+		on_done = proc(data: rawptr) {
+			sync.post(&(cast(^Stream_Wait_Probe)data).done)
+		},
+	}
+	assert(async.start(&executor).kind == .None)
+	assert(async.spawn(&executor, &task).kind == .None)
+	if testing.expect(t, sync.sema_wait_with_timeout(&probe.done, 20 * time.Second), "the later wait replaced the earlier timer") {
+		testing.expectf(t, probe.woken < 10 * time.Second, "woken after %v", probe.woken)
+	}
 }

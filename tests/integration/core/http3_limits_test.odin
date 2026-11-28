@@ -259,4 +259,8 @@ http3_limits_resolve_to_production_defaults :: proc(t: ^testing.T) {
 	testing.expect(t, !http3_limits_valid({max_connections = http3.MAX_LISTENER_CONNECTIONS + 1}))
 	testing.expect(t, !http3_limits_valid({max_connections = 8, retry_above = 9}))
 	testing.expect(t, !http3_limits_valid({retry_above = 4, retry_every_connection = true}))
+	testing.expect(t, http3_limits_valid({receive_buffer_bytes = http3.LISTENER_RECEIVE_BUFFER_OFF}))
+	testing.expect(t, http3_limits_valid({receive_buffer_bytes = 64 * 1024}))
+	testing.expect(t, !http3_limits_valid({receive_buffer_bytes = -2}))
+	testing.expect(t, !http3_limits_valid({receive_buffer_bytes = http3.LISTENER_RECEIVE_BUFFER_MAX + 1}))
 }

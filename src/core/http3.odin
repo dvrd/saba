@@ -46,6 +46,13 @@ Http3_Config :: struct {
 	// every new connection instead. Both are ignored without retry.
 	retry_above:             int,
 	retry_every_connection:  bool,
+	// The UDP receive buffer the listener asks its socket for, in bytes. A
+	// burst of handshakes that arrives while the listener is busy waits
+	// there, and what does not fit is dropped. Zero asks for 4 MiB
+	// (http3.LISTENER_RECEIVE_BUFFER); http3.LISTENER_RECEIVE_BUFFER_OFF keeps
+	// the system's default. The system caps the request (net.core.rmem_max on
+	// Linux, about 208 KiB unless raised) and a refusal is not an error.
+	receive_buffer_bytes:    int,
 	early_request_policy:    proc(_: rawptr, _: ^Request) -> bool,
 	early_request_data:      rawptr,
 	reset:                   ^quic.Reset_Secrets,
@@ -90,7 +97,8 @@ http3_limits_valid :: proc(config: Http3_Config) -> bool {
 		config.max_connections_per_address >= 0 &&
 		config.retry_above >= 0 &&
 		config.retry_above <= table &&
-		!(config.retry_every_connection && config.retry_above > 0) \
+		!(config.retry_every_connection && config.retry_above > 0) &&
+		http3.receive_buffer_valid(config.receive_buffer_bytes) \
 	)
 }
 
@@ -208,6 +216,7 @@ http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
 		max_request_field_bytes = limits.max_request_field_bytes,
 		max_connections_per_address = limits.max_connections_per_address,
 		retry_above             = limits.retry_above,
+		receive_buffer_bytes    = state.config.receive_buffer_bytes,
 	}
 
 	port, ok = http3.listener_listen(&state.live)

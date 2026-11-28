@@ -96,6 +96,12 @@ dependencies, not sibling working copies. `--shared PATH` (or
   connections skip the Retry round trip while fewer than `retry_above` are
   held (default half the table) and are challenged after that;
   `retry_every_connection` challenges every new connection instead.
+- **HTTP/3 receive buffer.** The listener asks the system for a 4 MiB UDP
+  receive buffer (`Http3_Config.receive_buffer_bytes`; -1 keeps the system's
+  default): handshakes that arrive in a burst wait there while the listener
+  is busy, and what does not fit is dropped. The system caps the request. On
+  Linux the cap is `net.core.rmem_max`, about 208 KiB unless raised, so set it
+  to at least the size asked for (`sysctl -w net.core.rmem_max=4194304`).
 - **Served paths are typed without opening them.** Asset, module and page
   lookups name each entry with `lstat(2)` (and `stat(2)` for a symbolic link)
   before resolving it. Only a regular file or a directory is resolved and

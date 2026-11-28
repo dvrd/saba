@@ -23,18 +23,15 @@ H2_BODY_BUFFER :: 64 * 1024
 H2_BODY_CHUNKS :: 8
 H2_EVENTS :: 16
 H2_CONTROL_FRAMES :: 8
-// One slot of the engine's output queue holds one frame: its 9-byte header
-// and its payload. The engine cuts DATA to fit a slot, so the slot size is
-// also the largest DATA frame Saba sends, and with it how many frames, TLS
-// records and writes a body costs. H2_CONTROL_FRAMES slots are allocated for
-// every connection: 8 KiB slots carry a body about as fast as 16 KiB ones
-// for half their memory.
-H2_OUTPUT_SLOT_BYTES :: 8192
-// The DATA payload that fills one slot.
-H2_DATA_BYTES :: H2_OUTPUT_SLOT_BYTES - 9
-// Bodies reach the engine in chunks of a whole number of full DATA frames,
-// so no chunk leaves a short frame behind it.
-H2_SEND_CHUNK_BYTES :: (H2_FRAME_BYTES / H2_DATA_BYTES) * H2_DATA_BYTES
+// The engine queues a DATA frame as two parts: its 9-byte header, and its
+// payload, sent from the body chunk itself. One write carries one part, so a
+// queue of H2_CONTROL_FRAMES frames is at most this many writes.
+H2_WRITES :: 2 * H2_CONTROL_FRAMES
+// Bodies reach the engine in chunks of one full DATA frame. The engine cuts
+// a frame to the chunk, the peer's SETTINGS_MAX_FRAME_SIZE (never below
+// H2_FRAME_BYTES) and the flow-control windows, so a chunk leaves no short
+// frame behind it.
+H2_SEND_CHUNK_BYTES :: H2_FRAME_BYTES
 H2_INGRESS :: 16 * 1024
 // Response field tables cover the request-side header count limit plus the
 // generated :status and content-length. Larger responses become a 500.
@@ -161,7 +158,6 @@ h2_begin :: proc(task: ^Connection_Task) -> bool {
 	if ready {
 		options := h2.Engine_Options {
 			max_stream_capacity     = capacity,
-			control_frame_bytes     = H2_OUTPUT_SLOT_BYTES,
 			header_sections         = 4,
 			enable_push             = false,
 			promise_policy          = .Decline,
@@ -634,7 +630,7 @@ h2_output_pending :: proc(session: ^HTTP2_Session) -> bool {
 // transport would block. Returns whether bytes moved and whether the write
 // is waiting for the transport.
 h2_write :: proc(task: ^Connection_Task) -> (progress: bool, waiting: bool) {
-	for _ in 0 ..< H2_CONTROL_FRAMES {
+	for _ in 0 ..< H2_WRITES {
 		moved, blocked := h2_write_frame(task)
 		progress ||= moved
 

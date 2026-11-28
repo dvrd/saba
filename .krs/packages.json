@@ -4,37 +4,37 @@
     {
       "name": "async",
       "source": "https://github.com/dvrd/async.git",
-      "tag": "v0.4.0",
-      "commit": "5052c582ac9d03f2e92fd96a50868f15a24cc447",
-      "hash": "58932e02587d7592ad453163b3966df726fec074f78f05b1a496afb852ddac70"
+      "tag": "v0.6.0",
+      "commit": "a6b7129bd211647bf54637accfea6d0516a7f9f6",
+      "hash": "05282ba53dcbd74baddd812504765f31ae6564082805595a73caec509f565995"
     },
     {
       "name": "aws",
       "source": "https://github.com/dvrd/aws.git",
-      "tag": "v0.2.0",
-      "commit": "19a1a8550a72e15923b8edf037cd0d6db4bf2a6a",
-      "hash": "01a5feac363e8d767caa2b9a4ef6bc7143204631b43e6e5abb437ef0560af0f1"
+      "tag": "v0.4.0",
+      "commit": "6c5710cc509f1dfb4496f5d75f76db8f552d12ca",
+      "hash": "af93dd78604b4e59e0db654664311fb371938831d8e028ac2be481f95108fbaa"
     },
     {
       "name": "kakunou",
       "source": "https://github.com/dvrd/kakunou.git",
-      "tag": "v0.2.3",
-      "commit": "2b479e74cb30b831111519d3dff8b61b1b246fd6",
-      "hash": "aaa48d0fb0c0464303162f21974aeb922b1da9cdc86a0f09a832ee1bd06683a8"
+      "tag": "v0.2.8",
+      "commit": "dc698e2b4dbd39fd861c445e674bc44105c46982",
+      "hash": "62a7a1fc3c01845f705dd6fc443b6e0b04f6ad058472b800d5ad63bb3a6652b0"
     },
     {
       "name": "kessel",
       "source": "https://github.com/dvrd/kessel.git",
-      "tag": "v0.21.0",
-      "commit": "a9ba38301296771ce512f64063e7286844a86679",
-      "hash": "80aa6d59edd17676d0bae28378106d96c52e49214679a91aaf53cab1522c38a3"
+      "tag": "v0.22.0",
+      "commit": "eb1e8aa3f38dc285931394bf62900ca293920ee4",
+      "hash": "0a152bc771877ca4c400ce4f957bf8c87c3f602987f050d936c21f25c5183a62"
     },
     {
       "name": "surf",
       "source": "https://github.com/dvrd/surf.git",
-      "tag": "v0.3.0",
-      "commit": "4570cf9477e52f97fd6ae93e914ce9d7c24c77b7",
-      "hash": "fd0057099d1b62c2ad3a3288a679631ca07bec4af8038309a9bb72769e85e978"
+      "tag": "v0.5.0",
+      "commit": "e40eee471b083cbdca31cb6186576b973e329ae3",
+      "hash": "be94be831ab897081dbcc4cfbbb3150cbaa603fa98db42f486532470f92eb516"
     }
   ]
 }

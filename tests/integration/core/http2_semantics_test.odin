@@ -589,10 +589,10 @@ h2_field_section_limit_boundary :: proc(t: ^testing.T) {
 	})
 }
 
-// A body goes out in DATA frames that fill the engine's output slots: every
-// frame but the last carries H2_DATA_BYTES. Small frames cost a write and a
-// TLS record each, and once made a download seventy times slower than over
-// HTTP/1.1.
+// A body goes out in full DATA frames: every frame but the last carries
+// H2_FRAME_BYTES, the SETTINGS_MAX_FRAME_SIZE of a peer that did not raise
+// it. Small frames cost a write and a TLS record each, and once made a
+// download seventy times slower than over HTTP/1.1.
 @(test)
 h2_bodies_are_sent_in_full_frames :: proc(t: ^testing.T) {
 	state := H2W_Server {
@@ -623,17 +623,17 @@ h2_bodies_are_sent_in_full_frames :: proc(t: ^testing.T) {
 			if len(frame.payload) > 0 {
 				frames += 1
 				total += len(frame.payload)
-				if len(frame.payload) < H2_DATA_BYTES {
+				if len(frame.payload) < H2_FRAME_BYTES {
 					short += 1
 				}
 			}
-			testing.expect(t, len(frame.payload) <= H2_DATA_BYTES, "a DATA frame larger than an output slot")
+			testing.expect(t, len(frame.payload) <= H2_FRAME_BYTES, "a DATA frame larger than the peer's SETTINGS_MAX_FRAME_SIZE")
 			if frame.flags & 1 != 0 {
 				break
 			}
 		}
 		testing.expect_value(t, total, BODY)
-		testing.expect_value(t, frames, (BODY + H2_DATA_BYTES - 1) / H2_DATA_BYTES)
+		testing.expect_value(t, frames, (BODY + H2_FRAME_BYTES - 1) / H2_FRAME_BYTES)
 		testing.expect(t, short <= 1, "more than the last frame was short")
 	})
 }

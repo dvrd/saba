@@ -34,8 +34,13 @@ h3_semantics_handler :: proc(data: rawptr, _: ^Connection, request: ^Request) ->
 
 	switch request.path {
 	case "/trailers":
-		trailers := make([]Header, 1, request.allocator)
-		trailers[0] = {"Grpc-Status", "0"}
+		// Fields RFC 9110 keeps out of trailers are dropped, not sent: the
+		// HTTP/3 layer would reset the stream for them.
+		trailers := make([]Header, 4, request.allocator)
+		trailers[0] = {"Content-Length", "4"}
+		trailers[1] = {"Grpc-Status", "0"}
+		trailers[2] = {"Set-Cookie", "session=1"}
+		trailers[3] = {"Connection", "close"}
 		return {status = .OK, body = transmute([]u8)string("body"), trailers = trailers}
 	case "/refuse-upgrade":
 		return {status = .Forbidden, upgrade = {data = probe, resume = h3_semantics_resume, drop = h3_semantics_drop}}
@@ -163,7 +168,8 @@ http3_websocket_refusals_open_no_tunnel :: proc(t: ^testing.T) {
 	testing.expect_value(t, runtime.active_connections, 0)
 }
 
-// RFC 9114 section 4.2: field names are lowercase on the wire, trailers too.
+// RFC 9114 section 4.2: field names are lowercase on the wire, trailers too,
+// and the fields RFC 9110 section 6.5.1 forbids in trailers are dropped.
 // A HEAD response carries the length a GET would have and no content.
 @(test)
 http3_response_trailers_are_lowercased_and_head_keeps_the_length :: proc(t: ^testing.T) {

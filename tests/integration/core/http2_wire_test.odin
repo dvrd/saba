@@ -93,6 +93,14 @@ h2w_handler :: proc(data: rawptr, conn: ^Connection, request: ^Request) -> Respo
 		trailers := make([]Header, 1, request.allocator)
 		trailers[0] = {"grpc-status", "0"}
 		return {status = .OK, body = transmute([]u8)string("body"), trailers = trailers}
+	case "/forbidden-trailers":
+		trailers := make([]Header, 5, request.allocator)
+		trailers[0] = {"Set-Cookie", "session=1"}
+		trailers[1] = {"grpc-status", "0"}
+		trailers[2] = {"Authorization", "Bearer x"}
+		trailers[3] = {"Cache-Control", "no-store"}
+		trailers[4] = {"Content-Type", "text/plain"}
+		return {status = .OK, body = transmute([]u8)string("body"), trailers = trailers}
 	case "/echo":
 		return {status = .OK, body = request.body}
 	case "/empty":

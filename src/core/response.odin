@@ -14,6 +14,23 @@ import async "shared:async"
 
 RESPONSE_HEADER_LIMIT :: 8192
 
+// A response trailer field a handler may not send, by its lowercase name: a
+// pseudo-header, a connection-specific field, or one RFC 9110 section 6.5.1
+// keeps out of trailers because a recipient must act on it before the body
+// (framing, routing, authentication, content and cache metadata, cookies).
+// HTTP/2 and HTTP/3 drop these and send the rest, so a handler sees the same
+// result on both.
+trailer_field_forbidden :: proc(lower: string) -> bool {
+	switch lower {
+	case "connection", "proxy-connection", "keep-alive", "upgrade", "te", "transfer-encoding",
+	     "content-length", "content-type", "content-encoding", "content-range", "trailer", "host",
+	     "authorization", "proxy-authorization", "www-authenticate", "proxy-authenticate",
+	     "cache-control", "max-forwards", "set-cookie":
+		return true
+	}
+	return len(lower) > 0 && lower[0] == ':'
+}
+
 // Header values and body must survive until the server finishes sending.
 // Use request.allocator for dynamic response data.
 Response :: struct {

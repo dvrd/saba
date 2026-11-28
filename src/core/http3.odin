@@ -542,20 +542,25 @@ http3_poll :: proc(user: rawptr, wire: ^http3.Server_Request, out: ^http3.Server
 		return .Failed
 	}
 
-	for field, i in response.trailers {
+	kept := 0
+	for field in response.trailers {
 		name, error := strings.to_lower(field.name, task.request.allocator)
 
 		if error != nil {
 			return .Failed
 		}
+		if trailer_field_forbidden(name) {
+			continue
+		}
 
-		trailers[i] = {
+		trailers[kept] = {
 			name  = name,
 			value = field.value,
 		}
+		kept += 1
 	}
 
-	out.trailers = trailers
+	out.trailers = trailers[:kept]
 
 	if stream_present(response.stream) {
 		stream := response.stream

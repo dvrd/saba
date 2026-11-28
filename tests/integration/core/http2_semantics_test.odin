@@ -122,6 +122,58 @@ h2_no_content_and_head_responses_carry_the_right_content_length :: proc(t: ^test
 	})
 }
 
+// RFC 9110 section 6.5.1: framing, routing, authentication, content metadata,
+// cache directives and cookies are not trailer fields. A handler's are dropped
+// (HTTP/3 drops the same ones) and the rest of the trailer section is sent.
+@(test)
+h2_forbidden_trailer_fields_are_dropped :: proc(t: ^testing.T) {
+	state: H2W_Server
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		decoder: H2W_Decoder
+		h2w_decoder_init(&decoder)
+		defer h2w_decoder_destroy(&decoder)
+		wire: [dynamic]u8
+		defer delete(wire)
+		h2w_get(&wire, 1, "/forbidden-trailers")
+		if !testing.expect(t, h2w_preface(peer) && h2w_send(peer, wire[:])) {
+			return
+		}
+		sections := 0
+		for {
+			frame, ok := h2w_next(peer, true)
+			if !testing.expect(t, ok && frame.kind != 7, "connection ended before the trailers") {
+				return
+			}
+			if frame.stream != 1 {
+				continue
+			}
+			if !testing.expect(t, frame.kind != 3, "a response with trailers was reset") {
+				return
+			}
+			if frame.kind == 1 {
+				fields, decoded := h2w_decode(&decoder, frame)
+				if !testing.expect(t, decoded, "undecodable field section") {
+					return
+				}
+				sections += 1
+				if sections == 2 {
+					testing.expect_value(t, len(fields), 1)
+					value, found := h2w_field(fields, "grpc-status")
+					testing.expect(t, found && value == "0", "the allowed trailer was not sent")
+					for name in ([]string{"set-cookie", "authorization", "cache-control", "content-type"}) {
+						_, sent := h2w_field(fields, name)
+						testing.expectf(t, !sent, "forbidden trailer %s was sent", name)
+					}
+				}
+			}
+			if frame.kind <= 1 && frame.flags & 1 != 0 {
+				break
+			}
+		}
+		testing.expect_value(t, sections, 2)
+	})
+}
+
 // Connection-specific fields are not HTTP/2 fields (RFC 9113 section 8.2.2).
 // A handler's Connection or Transfer-Encoding is dropped, never sent, and the
 // rest of its response is delivered.

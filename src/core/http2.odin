@@ -1269,6 +1269,7 @@ h2_append_response_fields :: proc(
 	used: ^int,
 	headers: []Header,
 	never_index_set_cookie: bool,
+	trailers := false,
 ) -> bool {
 	for header in headers {
 		if count^ == len(fields) || len(header.name) > len(names) - used^ {
@@ -1277,7 +1278,7 @@ h2_append_response_fields :: proc(
 
 		lower := h2_append_lower(names, used, header.name)
 
-		if h2_skip_response_header(lower) {
+		if h2_skip_response_header(lower) || trailers && trailer_field_forbidden(lower) {
 			continue
 		}
 
@@ -1823,7 +1824,7 @@ h2_request_headers :: proc(request: ^H2_Request, trailers: bool) -> h2.Error {
 		headers = request.response.trailers
 	}
 
-	if !h2_append_response_fields(fields[:], &count, names[:], &used, headers, false) {
+	if !h2_append_response_fields(fields[:], &count, names[:], &used, headers, false, trailers) {
 		if trailers {
 			// Unrepresentable trailers are dropped; the caller then ends with DATA.
 			request.response.trailers = nil

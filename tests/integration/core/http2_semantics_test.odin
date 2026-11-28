@@ -458,6 +458,46 @@ h2_close_connection_response_sends_goaway :: proc(t: ^testing.T) {
 	})
 }
 
+// After its final GOAWAY the server keeps the connection open for the peer to
+// close. Closing at once resets a connection whose peer has sent anything the
+// server did not read, and the reset takes the unread GOAWAY with it: the
+// test above then never saw which stream was the last one processed.
+@(test)
+h2_connection_waits_for_the_peer_after_its_final_goaway :: proc(t: ^testing.T) {
+	state := H2W_Server {
+		idle     = H2W_PATIENCE,
+		response = H2W_PATIENCE - time.Second,
+	}
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		wire: [dynamic]u8
+		defer delete(wire)
+		h2w_get(&wire, 1, "/close")
+		if !testing.expect(t, h2w_preface(peer) && h2w_send(peer, wire[:])) {
+			return
+		}
+		// The final GOAWAY names stream 1; the one before it names every stream.
+		for {
+			frame, ok := h2w_next(peer, true)
+			if !testing.expect(t, ok, "connection ended before the final GOAWAY") {
+				return
+			}
+			if frame.kind == 7 && len(frame.payload) >= 8 && frame.payload[0] & 0x7f == 0 && frame.payload[3] == 1 {
+				break
+			}
+		}
+		final := time.tick_now()
+		for {
+			if _, ok := h2w_next(peer, true); !ok {
+				break
+			}
+		}
+		// The peer never closed, so the server waited out H2_LINGER. A machine
+		// under load only makes this longer.
+		waited := time.tick_since(final)
+		testing.expectf(t, waited >= H2_LINGER / 2, "the server closed %v after its final GOAWAY", waited)
+	})
+}
+
 // Request trailers (RFC 9113 section 8.1) reach the handler beside the body.
 @(test)
 h2_request_trailers_reach_the_handler :: proc(t: ^testing.T) {

@@ -65,6 +65,9 @@ HTTP2_Session :: struct {
 	close_deadline, wake_deadline:             time.Tick,
 	reset_refill:                              time.Tick,
 	read_deadline:                             async.Deadline,
+	// The final GOAWAY is written and the connection waits for the peer to
+	// close (H2_LINGER).
+	lingering:                                 bool,
 	ingress:                                   [H2_INGRESS]u8,
 	ingress_len:                               int,
 	upgrades:                                  []^H2_Upgrade,
@@ -779,8 +782,32 @@ h2_finished :: proc(task: ^Connection_Task) -> bool {
 		return false
 	}
 
-	return stats.phase == .Draining || stats.phase == .Complete || stats.phase == .Aborted
+	if stats.phase == .Aborted {
+		return true
+	}
+
+	if stats.phase != .Draining && stats.phase != .Complete {
+		return false
+	}
+
+	// The final GOAWAY is written. Closing now would reset the connection if
+	// the peer has sent anything this side did not read, and a reset discards
+	// what the peer has not read yet either, that GOAWAY included. The peer
+	// closes once it has read it: the connection waits for that, reading and
+	// ignoring what still arrives, until the close deadline says the peer is
+	// gone.
+	if !session.lingering {
+		session.lingering = true
+		linger := time.tick_add(time.tick_now(), H2_LINGER)
+		h2_earlier(&session.close_deadline, linger)
+	}
+
+	return false
 }
+
+// How long a connection that has sent its final GOAWAY waits for the peer to
+// close before it closes the connection itself.
+H2_LINGER :: time.Second
 
 h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	session := task.http2

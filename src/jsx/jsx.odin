@@ -899,7 +899,7 @@ emits_one_child :: proc(p: ^Emitter, children: []k.JSXChild) -> bool {
 	for child in children {
 		#partial switch v in child {
 		case ^k.JSXText:
-			if jsx_clean_text(p.source[v.loc.start:v.loc.end]) == "" {continue}
+			if jsx_text_is_empty(p.source[v.loc.start:v.loc.end]) {continue}
 		case ^k.JSXExpressionContainer:
 			if _, empty := v.expression^.(^k.JSXEmptyExpression); empty {continue}
 		}

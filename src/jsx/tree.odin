@@ -258,7 +258,7 @@ whitespace_only :: proc(p: ^Emitter, el: ^k.JSXElement) -> bool {
 	for child in el.children {
 		#partial switch v in child {
 		case ^k.JSXText:
-			if jsx_clean_text(p.source[v.loc.start:v.loc.end]) != "" {
+			if !jsx_text_is_empty(p.source[v.loc.start:v.loc.end]) {
 				return false
 			}
 		case ^k.JSXExpressionContainer:

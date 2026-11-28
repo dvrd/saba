@@ -1512,11 +1512,20 @@ jsx_keeps_a_mount_with_jsx_in_its_signature_on_the_runtime :: proc(t: ^testing.T
 
 @(test)
 jsx_text_lines_end_at_any_newline_and_keep_no_break_spaces :: proc(t: ^testing.T) {
-	testing.expect_value(t, jsx.jsx_clean_text("a\rb"), "a b")
-	testing.expect_value(t, jsx.jsx_clean_text("\r\n  Hello\r\n  world\r\n"), "Hello world")
-	testing.expect_value(t, jsx.jsx_clean_text("\n  Hello\n  \u00a0\n"), "Hello \u00a0")
-	testing.expect_value(t, jsx.jsx_clean_text("  one line  "), "  one line  ")
-	testing.expect_value(t, jsx.jsx_clean_text("\n\t \n"), "")
+	testing.expect_value(t, jsx.jsx_clean_text("a\rb", context.temp_allocator), "a b")
+	testing.expect_value(t, jsx.jsx_clean_text("\r\n  Hello\r\n  world\r\n", context.temp_allocator), "Hello world")
+	testing.expect_value(t, jsx.jsx_clean_text("\n  Hello\n  \u00a0\n", context.temp_allocator), "Hello \u00a0")
+	testing.expect_value(t, jsx.jsx_clean_text("  one line  ", context.temp_allocator), "  one line  ")
+	testing.expect_value(t, jsx.jsx_clean_text("\n\t \n", context.temp_allocator), "")
+	// The emptiness check agrees with the cleaned text without building it.
+	for text in ([]string{"", "a\rb", "\n\t \n", "  one line  ", "\r\n  \r\n", "\n  \u00a0\n", " "}) {
+		testing.expectf(
+			t,
+			jsx.jsx_text_is_empty(text) == (jsx.jsx_clean_text(text, context.temp_allocator) == ""),
+			"%q: is_empty disagrees with the cleaned text",
+			text,
+		)
+	}
 }
 
 @(test)

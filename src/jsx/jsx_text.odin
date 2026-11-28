@@ -133,8 +133,26 @@ jsx_text_child :: proc(p: ^Emitter, text: string, span: k.Loc = {}) {
 	}
 }
 
-jsx_clean_text :: proc(text: string) -> string {
-	b := strings.builder_make()
+// True when jsx_clean_text(text) is "": the text is empty, or it spans
+// lines and holds only spaces, tabs and line ends. A single line keeps its
+// spaces. Allocates nothing, for callers that only ask whether a child exists.
+jsx_text_is_empty :: proc(text: string) -> bool {
+	multiline := false
+	for c in transmute([]u8)text {
+		switch c {
+		case '\n', '\r':
+			multiline = true
+		case ' ', '\t':
+		case:
+			return false
+		}
+	}
+	return text == "" || multiline
+}
+
+// The result belongs to allocator.
+jsx_clean_text :: proc(text: string, allocator := context.allocator) -> string {
+	b := strings.builder_make(allocator)
 	// JSX ends a line at LF, CRLF or a lone CR, and only spaces and tabs are
 	// insignificant: a no-break space is content.
 	unix, unix_owned := strings.replace_all(text, "\r\n", "\n")

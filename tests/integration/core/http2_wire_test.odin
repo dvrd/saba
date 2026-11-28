@@ -27,6 +27,12 @@ H2W_Server :: struct {
 	// Nonzero replaces the default body timeout; observed turns on observability.
 	body:     time.Duration,
 	observed: bool,
+	// Nonzero replaces H2W_IDLE, for tests that are not about the idle
+	// timeout: a peer starved on a loaded machine must not lose its connection.
+	idle:     time.Duration,
+	// Nonzero replaces H2W_RESPONSE, which also bounds how long a closing
+	// connection waits for the peer to acknowledge its GOAWAY.
+	response: time.Duration,
 	// The connection that served /refuse over an ordinary HTTP/2 stream.
 	refused:  ^Connection_Task,
 }
@@ -168,6 +174,12 @@ h2w_run :: proc(t: ^testing.T, state: ^H2W_Server, exchange: proc(t: ^testing.T,
 	}
 	if state.body != 0 {
 		state.config.timeouts.body = state.body
+	}
+	if state.idle != 0 {
+		state.config.timeouts.idle = state.idle
+	}
+	if state.response != 0 {
+		state.config.timeouts.response = state.response
 	}
 	state.config.observability.enabled = state.observed
 

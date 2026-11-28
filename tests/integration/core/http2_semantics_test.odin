@@ -2,6 +2,7 @@ package saba_core
 
 import "core:sync"
 import "core:testing"
+import "core:time"
 import hpack "shared:async/http/hpack"
 
 // HTTP semantics of the HTTP/2 owner as a hand-framed peer sees them: field
@@ -77,7 +78,9 @@ h2w_field :: proc(fields: []hpack.Field, name: string) -> (string, bool) {
 // Saba that added one would reset the stream instead of answering.
 @(test)
 h2_no_content_and_head_responses_carry_the_right_content_length :: proc(t: ^testing.T) {
-	state: H2W_Server
+	state := H2W_Server {
+		idle = H2W_PATIENCE,
+	}
 	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
 		decoder: H2W_Decoder
 		h2w_decoder_init(&decoder)
@@ -122,12 +125,60 @@ h2_no_content_and_head_responses_carry_the_right_content_length :: proc(t: ^test
 	})
 }
 
+// A HEAD request answered 204 is still a 204: no Content-Length, although
+// other HEAD responses carry one. With one, the engine would refuse the
+// response and the stream would be reset.
+@(test)
+h2_head_answered_no_content_carries_no_content_length :: proc(t: ^testing.T) {
+	state := H2W_Server {
+		idle = H2W_PATIENCE,
+	}
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		decoder: H2W_Decoder
+		h2w_decoder_init(&decoder)
+		defer h2w_decoder_destroy(&decoder)
+		wire: [dynamic]u8
+		defer delete(wire)
+		h2w_headers(&wire, 1, true, {{":method", "HEAD"}, {":scheme", "https"}, {":authority", "localhost"}, {":path", "/empty"}})
+		if !testing.expect(t, h2w_preface(peer) && h2w_send(peer, wire[:])) {
+			return
+		}
+		for {
+			frame, ok := h2w_next(peer, true)
+			if !testing.expect(t, ok && frame.kind != 7, "connection ended before the response") {
+				return
+			}
+			if frame.stream != 1 {
+				continue
+			}
+			if !testing.expect(t, frame.kind != 3, "a HEAD answered 204 was reset") {
+				return
+			}
+			if frame.kind == 1 {
+				fields, decoded := h2w_decode(&decoder, frame)
+				if !testing.expect(t, decoded, "undecodable response field section") {
+					return
+				}
+				status, _ := h2w_field(fields, ":status")
+				_, has_length := h2w_field(fields, "content-length")
+				testing.expect_value(t, status, "204")
+				testing.expect(t, !has_length, "a 204 answer to HEAD carries content-length")
+			}
+			if frame.kind <= 1 && frame.flags & 1 != 0 {
+				return
+			}
+		}
+	})
+}
+
 // RFC 9110 section 6.5.1: framing, routing, authentication, content metadata,
 // cache directives and cookies are not trailer fields. A handler's are dropped
 // (HTTP/3 drops the same ones) and the rest of the trailer section is sent.
 @(test)
 h2_forbidden_trailer_fields_are_dropped :: proc(t: ^testing.T) {
-	state: H2W_Server
+	state := H2W_Server {
+		idle = H2W_PATIENCE,
+	}
 	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
 		decoder: H2W_Decoder
 		h2w_decoder_init(&decoder)
@@ -179,7 +230,9 @@ h2_forbidden_trailer_fields_are_dropped :: proc(t: ^testing.T) {
 // rest of its response is delivered.
 @(test)
 h2_connection_specific_response_headers_are_dropped :: proc(t: ^testing.T) {
-	state: H2W_Server
+	state := H2W_Server {
+		idle = H2W_PATIENCE,
+	}
 	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
 		decoder: H2W_Decoder
 		h2w_decoder_init(&decoder)
@@ -236,7 +289,9 @@ h2_connection_specific_response_headers_are_dropped :: proc(t: ^testing.T) {
 // keeps serving.
 @(test)
 h2_unusable_extended_connect_is_refused_before_the_handler :: proc(t: ^testing.T) {
-	state: H2W_Server
+	state := H2W_Server {
+		idle = H2W_PATIENCE,
+	}
 	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
 		wire: [dynamic]u8
 		defer delete(wire)
@@ -296,7 +351,9 @@ h2_unusable_extended_connect_is_refused_before_the_handler :: proc(t: ^testing.T
 // HTTP/2 representation and is answered 501.
 @(test)
 h2_upgrades_without_a_2xx_tunnel_are_answered_501 :: proc(t: ^testing.T) {
-	state: H2W_Server
+	state := H2W_Server {
+		idle = H2W_PATIENCE,
+	}
 	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
 		decoder: H2W_Decoder
 		h2w_decoder_init(&decoder)
@@ -348,7 +405,12 @@ h2_upgrades_without_a_2xx_tunnel_are_answered_501 :: proc(t: ^testing.T) {
 // client sends afterwards is not processed.
 @(test)
 h2_close_connection_response_sends_goaway :: proc(t: ^testing.T) {
-	state: H2W_Server
+	// The final GOAWAY follows the peer's PING acknowledgement, which a
+	// starved test thread can delay past the fixture's one-second bound.
+	state := H2W_Server {
+		idle     = H2W_PATIENCE,
+		response = H2W_PATIENCE - time.Second,
+	}
 	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
 		wire: [dynamic]u8
 		defer delete(wire)
@@ -356,6 +418,9 @@ h2_close_connection_response_sends_goaway :: proc(t: ^testing.T) {
 		if !testing.expect(t, h2w_preface(peer) && h2w_send(peer, wire[:])) {
 			return
 		}
+		// The final GOAWAY names the last stream processed. The server may
+		// write it before the last frame of the response that asked for it.
+		goaways, last := 0, max(u32)
 		ended := false
 		for !ended {
 			frame, ok := h2w_next(peer, true)
@@ -363,13 +428,16 @@ h2_close_connection_response_sends_goaway :: proc(t: ^testing.T) {
 				return
 			}
 			testing.expect(t, frame.kind != 3, "the closing response was reset")
+			if frame.kind == 7 && len(frame.payload) >= 8 {
+				goaways += 1
+				last = (u32(frame.payload[0]) << 24 | u32(frame.payload[1]) << 16 | u32(frame.payload[2]) << 8 | u32(frame.payload[3])) & 0x7fffffff
+				testing.expect_value(t, h2w_code(frame), u32(0))
+			}
 			ended = frame.stream == 1 && frame.kind <= 1 && frame.flags & 1 != 0
 		}
 		clear(&wire)
 		h2w_get(&wire, 3, "/")
 		_ = h2w_send(peer, wire[:])
-		// The final GOAWAY names the last stream processed.
-		goaways, last := 0, max(u32)
 		for {
 			frame, ok := h2w_next(peer, true)
 			if !ok {
@@ -393,7 +461,9 @@ h2_close_connection_response_sends_goaway :: proc(t: ^testing.T) {
 // Request trailers (RFC 9113 section 8.1) reach the handler beside the body.
 @(test)
 h2_request_trailers_reach_the_handler :: proc(t: ^testing.T) {
-	state: H2W_Server
+	state := H2W_Server {
+		idle = H2W_PATIENCE,
+	}
 	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
 		wire: [dynamic]u8
 		defer delete(wire)

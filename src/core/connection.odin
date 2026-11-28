@@ -569,6 +569,10 @@ accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 		}
 
 		runtime.accepted = true
+		// A program the application starts (a development build, a tool) must
+		// not inherit this connection: it would hold the peer open after
+		// Saba closed it.
+		_ = posix.fcntl(posix.FD(client), .SETFD, i32(posix.FD_CLOEXEC))
 		server_admit_connection(runtime, client)
 	}
 
@@ -1383,6 +1387,9 @@ request_wants_close :: proc(request: ^Request) -> bool {
 			continue
 		}
 		remaining := strings.trim_space(header.value)
+		// RFC 9110 lets a recipient ignore empty list elements. Saba closes
+		// instead, which is always allowed: the split below would not see a
+		// trailing empty element.
 		if remaining == "" || strings.has_suffix(remaining, ",") {
 			return true
 		}

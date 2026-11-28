@@ -1,9 +1,12 @@
 package saba_core
 
 import "core:log"
+import "core:net"
 import "core:strings"
 import "core:sync"
+import "core:sys/posix"
 import "core:testing"
+import "core:time"
 
 @(test)
 listen_backlog_defaults_and_rejects_values_core_net_cannot_take :: proc(t: ^testing.T) {
@@ -88,4 +91,45 @@ dedicated_poller_is_opt_in_and_reaches_the_runtime :: proc(t: ^testing.T) {
 		}
 		h1_stop(&fixture)
 	}
+}
+
+// A program the application starts must not inherit accepted connections: it
+// would keep the peer's connection open after Saba closed it.
+@(test)
+accepted_connections_are_close_on_exec :: proc(t: ^testing.T) {
+	fixture: H1_Fixture
+	endpoint, ready := h1_start(t, &fixture, {})
+	defer h1_stop(&fixture)
+	if !testing.expect(t, ready) {
+		return
+	}
+	client, dialed := net.dial_tcp(endpoint)
+	if !testing.expect(t, dialed == nil) {
+		return
+	}
+	defer net.close(client)
+	local, bound := net.bound_endpoint(client)
+	if !testing.expect(t, bound == nil) {
+		return
+	}
+
+	// The accepted end is the descriptor in this process whose peer is the
+	// client's local port.
+	deadline := time.tick_add(time.tick_now(), 30 * time.Second)
+	for time.tick_since(deadline) < 0 {
+		for fd in 3 ..< 1024 {
+			if fd == int(client) {
+				continue
+			}
+			peer, known := net.peer_endpoint(net.TCP_Socket(fd))
+			if known != nil || peer.port != local.port {
+				continue
+			}
+			if posix.fcntl(posix.FD(fd), .GETFD) & i32(posix.FD_CLOEXEC) != 0 {
+				return
+			}
+		}
+		time.sleep(time.Millisecond)
+	}
+	testing.expect(t, false, "the accepted connection is inherited by programs the process starts")
 }

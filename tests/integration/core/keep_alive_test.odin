@@ -40,8 +40,11 @@ keep_alive_close_tokens_caps_and_wire_policy :: proc(t: ^testing.T) {
 			{"Upgrade, cLoSe", true},
 			{"close", true},
 			{"keep-alive, close", true},
+			// Empty list elements close too: closing is always allowed, and a
+			// malformed Connection field is no promise of a next request.
 			{"", true},
 			{",", true},
+			{"keep-alive,", true},
 			{"invalid token", true},
 		}) {
 		request := Request {

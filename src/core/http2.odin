@@ -23,6 +23,18 @@ H2_BODY_BUFFER :: 64 * 1024
 H2_BODY_CHUNKS :: 8
 H2_EVENTS :: 16
 H2_CONTROL_FRAMES :: 8
+// One slot of the engine's output queue holds one frame: its 9-byte header
+// and its payload. The engine cuts DATA to fit a slot, so the slot size is
+// also the largest DATA frame Saba sends, and with it how many frames, TLS
+// records and writes a body costs. H2_CONTROL_FRAMES slots are allocated for
+// every connection: 8 KiB slots carry a body about as fast as 16 KiB ones
+// for half their memory.
+H2_OUTPUT_SLOT_BYTES :: 8192
+// The DATA payload that fills one slot.
+H2_DATA_BYTES :: H2_OUTPUT_SLOT_BYTES - 9
+// Bodies reach the engine in chunks of a whole number of full DATA frames,
+// so no chunk leaves a short frame behind it.
+H2_SEND_CHUNK_BYTES :: (H2_FRAME_BYTES / H2_DATA_BYTES) * H2_DATA_BYTES
 H2_INGRESS :: 16 * 1024
 // Response field tables cover the request-side header count limit plus the
 // generated :status and content-length. Larger responses become a 500.
@@ -149,7 +161,7 @@ h2_begin :: proc(task: ^Connection_Task) -> bool {
 	if ready {
 		options := h2.Engine_Options {
 			max_stream_capacity     = capacity,
-			control_frame_bytes     = 256,
+			control_frame_bytes     = H2_OUTPUT_SLOT_BYTES,
 			header_sections         = 4,
 			enable_push             = false,
 			promise_policy          = .Decline,
@@ -618,7 +630,27 @@ h2_output_pending :: proc(session: ^HTTP2_Session) -> bool {
 	return ok && (stats.output_count > 0 || stats.output_borrowed)
 }
 
-h2_write :: proc(task: ^Connection_Task) -> (bool, bool) {
+// Writes the frames the engine has queued until the queue is empty or the
+// transport would block. Returns whether bytes moved and whether the write
+// is waiting for the transport.
+h2_write :: proc(task: ^Connection_Task) -> (progress: bool, waiting: bool) {
+	for _ in 0 ..< H2_CONTROL_FRAMES {
+		moved, blocked := h2_write_frame(task)
+		progress ||= moved
+
+		if blocked {
+			return progress, true
+		}
+
+		if !moved {
+			break
+		}
+	}
+
+	return progress, false
+}
+
+h2_write_frame :: proc(task: ^Connection_Task) -> (bool, bool) {
 	session := task.http2
 	state := task.tls_state
 	if state == nil {
@@ -768,6 +800,8 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 	}
 
 	waiting := false
+	// Set while every pass of the turn moved something.
+	moving := true
 
 	for _ in 0 ..< 8 {
 		progress := false
@@ -830,14 +864,22 @@ h2_step :: proc(task: ^Connection_Task) -> async.Resume_Result {
 		if waiting || timed {
 			return .Waiting
 		}
+		moving = false
 		break
 	}
 
 	if h2_finished(task) {
 		return .Done
 	}
-	// The bounded turn may exhaust its work while the read is still armed. Ready
-	// response queues need another owner turn even when the peer sends no bytes.
+
+	// The bounded turn ran out while its work was still moving: more is ready
+	// now, whether or not the peer sends another byte. Yielding lets the other
+	// tasks of the worker run first and then continues; waiting for a timer
+	// here would cap a connection at one turn of output per tick.
+	if moving {
+		return .Yield
+	}
+
 	if h2_has_streams(task) || h2_output_pending(session) {
 		_ = async.sleep_until_earlier(
 			&task.runtime.executor,
@@ -1179,13 +1221,13 @@ h2_upgrade_write :: proc(data: rawptr, source: []u8, deadline: async.Deadline) -
 		return 0, {kind = .Closed}
 	}
 
-	amount := min(len(source), H2_FRAME_BYTES)
+	amount := min(len(source), H2_SEND_CHUNK_BYTES)
 
 	if amount == 0 {
 		return 0, {}
 	}
 
-	chunk, e := owned.copy_bounded(source[:amount], H2_FRAME_BYTES, connection_storage_allocator(&stream.connection))
+	chunk, e := owned.copy_bounded(source[:amount], H2_SEND_CHUNK_BYTES, connection_storage_allocator(&stream.connection))
 
 	if e.kind != .None {
 		return 0, {kind = .Allocation_Failed}
@@ -1374,7 +1416,7 @@ h2_upgrade_pump :: proc(parent: ^Connection_Task) -> bool {
 		if !stream.accepted {
 			if stream.body_sent < len(stream.response.body) {
 				part := stream.response.body[stream.body_sent:][:min(
-					H2_FRAME_BYTES,
+					H2_SEND_CHUNK_BYTES,
 					len(stream.response.body) - stream.body_sent,
 				)]
 				n, e := h2_upgrade_write(stream, part, {})
@@ -1933,8 +1975,8 @@ h2_request_output :: proc(request: ^H2_Request) -> bool {
 	}
 
 	if len(source) > 0 {
-		amount := min(len(source), H2_FRAME_BYTES)
-		chunk, e := owned.copy_bounded(source[:amount], H2_FRAME_BYTES, request.parent.http2.allocator)
+		amount := min(len(source), H2_SEND_CHUNK_BYTES)
+		chunk, e := owned.copy_bounded(source[:amount], H2_SEND_CHUNK_BYTES, request.parent.http2.allocator)
 
 		if e.kind != .None {
 			request.failed = true

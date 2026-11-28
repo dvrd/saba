@@ -107,6 +107,8 @@ h2w_handler :: proc(data: rawptr, conn: ^Connection, request: ^Request) -> Respo
 		trailers[3] = {"Cache-Control", "no-store"}
 		trailers[4] = {"Content-Type", "text/plain"}
 		return {status = .OK, body = transmute([]u8)string("body"), trailers = trailers}
+	case "/blob":
+		return {status = .OK, body = make([]u8, 4 * 1024 * 1024, request.allocator)}
 	case "/echo":
 		return {status = .OK, body = request.body}
 	case "/empty":

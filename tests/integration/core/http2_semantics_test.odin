@@ -588,3 +588,52 @@ h2_field_section_limit_boundary :: proc(t: ^testing.T) {
 		testing.expect_value(t, sync.atomic_load(&state.handled), 2)
 	})
 }
+
+// A body goes out in DATA frames that fill the engine's output slots: every
+// frame but the last carries H2_DATA_BYTES. Small frames cost a write and a
+// TLS record each, and once made a download seventy times slower than over
+// HTTP/1.1.
+@(test)
+h2_bodies_are_sent_in_full_frames :: proc(t: ^testing.T) {
+	state := H2W_Server {
+		idle     = H2W_PATIENCE,
+		response = H2W_PATIENCE - time.Second,
+	}
+	h2w_run(t, &state, proc(t: ^testing.T, state: ^H2W_Server, peer: ^H2W_Peer) {
+		BODY :: 4 * 1024 * 1024
+		wire: [dynamic]u8
+		defer delete(wire)
+		// The peer grants all the credit at once: SETTINGS_INITIAL_WINDOW_SIZE
+		// for the stream and a WINDOW_UPDATE for the connection.
+		h2w_frame(&wire, 8, 0, 0, []u8{0x7f, 0xff, 0, 0})
+		h2w_get(&wire, 1, "/blob")
+		if !testing.expect(t, h2w_preface(peer, []u8{0, 4, 0x7f, 0xff, 0xff, 0xff}) && h2w_send(peer, wire[:])) {
+			return
+		}
+		frames, total, short := 0, 0, 0
+		for {
+			frame, ok := h2w_next(peer, true)
+			if !testing.expect(t, ok && frame.kind != 7, "connection ended before the body") {
+				return
+			}
+			if frame.stream != 1 || frame.kind != 0 {
+				continue
+			}
+			// The stream may end on an empty frame of its own; it is not counted.
+			if len(frame.payload) > 0 {
+				frames += 1
+				total += len(frame.payload)
+				if len(frame.payload) < H2_DATA_BYTES {
+					short += 1
+				}
+			}
+			testing.expect(t, len(frame.payload) <= H2_DATA_BYTES, "a DATA frame larger than an output slot")
+			if frame.flags & 1 != 0 {
+				break
+			}
+		}
+		testing.expect_value(t, total, BODY)
+		testing.expect_value(t, frames, (BODY + H2_DATA_BYTES - 1) / H2_DATA_BYTES)
+		testing.expect(t, short <= 1, "more than the last frame was short")
+	})
+}

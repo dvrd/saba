@@ -2623,24 +2623,24 @@ const tracePrograms = (() => {
         [0.78, 1001, "Call the configured handler through the shared wrapper and return its response."]
       ]
     ),
-    "open.h2": program("Saba server", "Repository source", "src/core/http2.odin", "../src/core/http2.odin", [[1662, "  task.request.body = task.request.body[:request.body_len]"], [1663, "  request.response_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.response)"], [1664, "  response := dispatch_request(task)"], [1665, ""], [1666, "  if !h2_queue_response(task, response) {"], [1667, "    request.failed = true"]], [[0, 1662, "Trim this stream’s request body to the bytes received. For this GET it is empty."], [0.34, 1663, "Set this stream’s response deadline: now plus the configured response timeout."], [0.78, 1664, "Dispatch the completed HTTP/2 request and queue its response on the stream."]]),
+    "open.h2": program("Saba server", "Repository source", "src/core/http2.odin", "../src/core/http2.odin", [[1724, "  task.request.body = task.request.body[:request.body_len]"], [1725, "  request.response_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.response)"], [1726, "  response := dispatch_request(task)"], [1727, ""], [1728, "  if !h2_queue_response(task, response) {"], [1729, "    request.failed = true"]], [[0, 1724, "Trim this stream’s request body to the bytes received. For this GET it is empty."], [0.34, 1725, "Set this stream’s response deadline: now plus the configured response timeout."], [0.78, 1726, "Dispatch the completed HTTP/2 request and queue its response on the stream."]]),
     "open.h3": program(
       "Saba server", "Repository source", "src/core/http3.odin",
       "../src/core/http3.odin", [
-        [366, "state := cast(^Http3_Request)wire.user_data"],
-        [367, ""],
-        [368, "if state == nil {"],
-        [369, "  state = http3_create_request(owner, wire)"],
-        [370, "  if state == nil {"],
-        [371, "    return .Failed"],
-        [372, "  }"],
-        [373, "  wire.user_data = state"],
-        [374, "}"],
-        [401, "    response = call_request_handler(task, owner.config.handler, owner.config.handler_data)"]
+        [470, "state := cast(^Http3_Request)wire.user_data"],
+        [471, ""],
+        [472, "if state == nil {"],
+        [473, "  state = http3_create_request(owner, wire)"],
+        [474, "  if state == nil {"],
+        [475, "    return .Failed"],
+        [476, "  }"],
+        [477, "  wire.user_data = state"],
+        [478, "}"],
+        [505, "    response = call_request_handler(task, owner.config.handler, owner.config.handler_data)"]
       ], [
-        [0, 366, "Read the Saba request state attached to this HTTP/3 exchange. On the first poll, the pointer is empty."],
-        [0.34, 369, "Create the server-side request state for this new HTTP/3 exchange."],
-        [0.78, 401, "Call the configured handler for this HTTP/3 request and save the response it returns."]
+        [0, 470, "Read the Saba request state attached to this HTTP/3 exchange. On the first poll, the pointer is empty."],
+        [0.34, 473, "Create the server-side request state for this new HTTP/3 exchange."],
+        [0.78, 505, "Call the configured handler for this HTTP/3 request and save the response it returns."]
       ]
     ),
     "html": program("Saba server", "Repository source", "src/pages/build.odin", "../src/pages/build.odin", [[886, "serve_document :: proc(request: ^Request, doc: Compiled_Document, development := false) -> Response {"], [888, "    denial, allowed := authorize(request)"], [895, "    if selected := select_language(request); selected in doc.variants {"], [902, "    policy = .Private_No_Store if doc.config.authorize != nil else .No_Store"], [916, "  return assets.prepared_representation_response(request, &rep, policy, vary)"]], [[0, 886, "serve_prepared_pages matched /inbox to a compiled document of the active build."], [0.25, 888, "Run the page’s authorize callback first, when it has one. This example has none."], [0.5, 895, "Pick the language variant the application selects; otherwise the first, English."], [0.8, 916, "Send the prepared bytes with no-store. “Inbox” and the reload link work before any script runs."]]),

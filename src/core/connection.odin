@@ -11,7 +11,6 @@ import rt "base:runtime"
 import budget "shared:async/budget"
 import "core:sync"
 import async "shared:async"
-import async_runtime "shared:async/runtime"
 import store "shared:async/tls/credentials/store"
 import bridge "shared:async/connection"
 import "core:strings"
@@ -470,18 +469,7 @@ serve :: proc(config: Server) -> bool {
 		return false
 	}
 
-	// async.listen creates the socket where Saba cannot reach its descriptor.
-	// Saba creates it instead, marks it, and hands it to the runtime as a
-	// listener, which is all async.listen does with it.
-	socket, bind_error := net.listen_tcp({address, config.port}, backlog)
-
-	if bind_error != nil {
-		log.error("Could not start server:", async.Error{kind = .Network_Error, network_cause = bind_error})
-		return false
-	}
-
-	close_on_exec(posix.FD(socket))
-	listener, listen_error := async_runtime.adopt_socket(&runtime.executor, &runtime.accept_task, socket, .Listener)
+	listener, listen_error := async.listen(&runtime.executor, &runtime.accept_task, {address, config.port}, backlog)
 
 	if listen_error.kind != .None {
 		log.error("Could not start server:", listen_error)
@@ -581,21 +569,10 @@ accept_connections :: proc(data: rawptr) -> async.Resume_Result {
 		}
 
 		runtime.accepted = true
-		close_on_exec(posix.FD(client))
 		server_admit_connection(runtime, client)
 	}
 
 	return .Yield
-}
-
-// Keeps a socket out of every program the process starts afterwards (a
-// development build, a tool the application runs). An inherited listening
-// socket would keep the port bound, and collect connections nobody accepts,
-// after the server stopped; an inherited connection would stay open after
-// Saba closed it. core:net creates sockets without the flag, so there is a
-// moment between creating one and marking it.
-close_on_exec :: proc(fd: posix.FD) {
-	_ = posix.fcntl(fd, .SETFD, i32(posix.FD_CLOEXEC))
 }
 
 // Resolves the listen(2) backlog. core:net requires a value below max(i32).

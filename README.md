@@ -76,10 +76,10 @@ dependencies, not sibling working copies. `--shared PATH` (or
   `write_connection` and `send_response` block the calling worker on the raw
   socket and fail on TLS connections. Return a `Response` instead.
 - **Programs the server starts** (a tool run from a handler, a development
-  build) do not inherit its listening sockets or its accepted connections:
-  they are close-on-exec, so such a program cannot keep the port bound or a
-  client's connection open after the server stops. Connections the upstream
-  client opens are created by async and are still inherited.
+  build) inherit none of its sockets. The listening sockets, the accepted
+  connections, the HTTP/3 socket and the connections the upstream client
+  opens are all close-on-exec, so such a program cannot keep a port bound or
+  a connection open after the server stops.
 - **`backlog`** sets the listen queue length. Zero keeps 128; the kernel may
   clamp larger values.
 - **`dedicated_poller`** (off by default) runs the reactor on its own thread,

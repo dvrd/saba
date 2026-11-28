@@ -3,6 +3,7 @@
 // behind in that program.
 package saba_e2e_inheritance_test
 
+import "core:fmt"
 import "core:net"
 import "core:os"
 import "core:strconv"
@@ -54,6 +55,32 @@ started_programs_inherit_none_of_the_servers_sockets :: proc(t: ^testing.T) {
 		return
 	}
 
+	// A connection the server's upstream client has opened and keeps: this
+	// test is the origin it asks.
+	origin, listening := net.listen_tcp({net.IP4_Loopback, 0})
+	if !testing.expectf(t, listening == nil, "the origin could not listen: %v", listening) {
+		return
+	}
+	defer net.close(origin)
+	asked_at, _ := net.bound_endpoint(origin)
+	// Bounds the accept below.
+	_ = net.set_option(origin, .Receive_Timeout, 30 * time.Second)
+	harness.send_text(connection, fmt.tprintf("GET /fetch?%d HTTP/1.1\r\nHost: a\r\n\r\n", asked_at.port))
+	outbound, _, accepted := net.accept_tcp(origin)
+	if !testing.expectf(t, accepted == nil, "the upstream client never connected: %v", accepted) {
+		return
+	}
+	defer net.close(outbound)
+	_ = net.set_option(outbound, .Receive_Timeout, 30 * time.Second)
+	if _, asked := harness.read_head(t, outbound); !asked {
+		return
+	}
+	harness.send_text(outbound, "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nup")
+	fetched, relayed := harness.read_response(t, connection)
+	if !relayed || !testing.expect_value(t, fetched.status, 200) {
+		return
+	}
+
 	// The server starts a program that outlives it, then exits.
 	if !harness.send_input(t, input, "s") {
 		return
@@ -67,6 +94,15 @@ started_programs_inherit_none_of_the_servers_sockets :: proc(t: ^testing.T) {
 		return
 	}
 	defer posix.kill(posix.pid_t(pid), .SIGKILL)
+	// The upstream client still held its connection when the program started:
+	// what ends it below is the server's exit.
+	if !testing.expect(
+		t,
+		harness.quiet(outbound, 200 * time.Millisecond, 30 * time.Second),
+		"the upstream client did not keep its connection",
+	) {
+		return
+	}
 	if !harness.send_input(t, input, "q") || !harness.exited_cleanly(t, p) {
 		return
 	}
@@ -76,6 +112,13 @@ started_programs_inherit_none_of_the_servers_sockets :: proc(t: ^testing.T) {
 		t,
 		harness.await_close(connection, 30 * time.Second),
 		"the started program holds the accepted connection open",
+	)
+
+	// So did the connection to the origin.
+	testing.expect(
+		t,
+		harness.await_close(outbound, 30 * time.Second),
+		"the started program holds the upstream connection open",
 	)
 
 	// The TCP port is closed: the program holds no copy of the listening socket.

@@ -12,7 +12,6 @@ import "shared:async/quic"
 import "core:strings"
 import "core:strconv"
 import "core:sync"
-import "core:sys/posix"
 import "core:time"
 import credential_store "shared:async/tls/credentials/store"
 import async "shared:async"
@@ -214,9 +213,6 @@ http3_listen :: proc(state: ^Http3) -> (port: int, ok: bool) {
 	port, ok = http3.listener_listen(&state.live)
 	if ok {
 		state.config.endpoint.port = port
-		if socket, bound := http3.listener_socket(&state.live); bound {
-			close_on_exec(posix.FD(socket))
-		}
 	}
 
 	return

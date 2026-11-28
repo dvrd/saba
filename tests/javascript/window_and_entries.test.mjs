@@ -160,6 +160,36 @@ test('the template entry keeps a page that the browser only puts in its back-for
   assert.equal(disposed, 1);
 });
 
+test('the append-style entry keeps a page that the browser only puts in its back-forward cache', async () => {
+  const events = pageEvents();
+  const page = documentOf({ page: 'data:text/javascript,export default () => globalThis.pageNode; export const title = "Kept"' });
+  // The least DOM mount needs: a fragment to build in and one node to remove.
+  const saved = { Node: globalThis.Node, Element: globalThis.Element, DocumentFragment: globalThis.DocumentFragment };
+  globalThis.Node = class Node {};
+  globalThis.Element = class Element extends globalThis.Node {};
+  globalThis.DocumentFragment = class DocumentFragment extends globalThis.Node {};
+  let removed = 0;
+  globalThis.pageNode = Object.assign(new globalThis.Node(), { nodeType: 8, childNodes: [], remove() { removed++; } });
+  Object.setPrototypeOf(page.app, globalThis.Element.prototype);
+  page.app.append = (...nodes) => page.app.childNodes.push(...nodes.flatMap(node => node.childNodes ?? [node]));
+  page.createDocumentFragment = () => {
+    const fragment = Object.assign(new globalThis.DocumentFragment(), { nodeType: 11, childNodes: [] });
+    fragment.append = fragment.appendChild = (...nodes) => { fragment.childNodes.push(...nodes); };
+    return fragment;
+  };
+  try {
+    await loadFresh('page-entry.js');
+    assert.equal(page.title, 'Kept');
+    events.dispatch('pagehide', { persisted: true });
+    assert.equal(removed, 0, 'a page kept for back-forward navigation was disposed');
+    events.dispatch('pagehide', { persisted: false });
+    assert.equal(removed, 1);
+  } finally {
+    Object.assign(globalThis, saved);
+    delete globalThis.pageNode;
+  }
+});
+
 test('the template entry starts only on a path its route matches', async () => {
   const { startPage } = await load('template-entry.js');
   for (const pathname of ['/other/42', '/items/', '/items/a%2Fb', '/items/a%5Cb']) {

@@ -1669,7 +1669,7 @@ const detailGraph = (() => {
   // dependency or retained value; only a transfer moves a packet along the edge.
   const links = {
     author:[["authoring", "Write the literal heading inside the h1 element in inbox.jsx."], ["authoring", "Write {label()} in the paragraph. Its value comes from the unread signal."]],
-    install:[["requirements", "Read the pinned libraries from .krs/packages.json."], ["requirements", "The lock records Kessel v0.21.0 for the compiler.", true], ["tool", "Install each library at its recorded commit; a moved tag stops the install."], ["tool", "The Odin root now holds exactly the locked sources.", true]],
+    install:[["requirements", "Read the pinned libraries from .krs/packages.json."], ["requirements", "The lock records Kessel v0.22.0 for the compiler.", true], ["tool", "Install each library at its recorded commit; a moved tag stops the install."], ["tool", "The Odin root now holds exactly the locked sources.", true]],
     parse:[["read", "Pass web/inbox.jsx to compile_page_template."], ["buildTree", "Kessel turns source text into a syntax tree with byte spans."], ["inspect", "The checker resolves which names the module owns.", true], ["inspect", "extract_page finds the default export and its returned element.", true]],
     emit:[["static", "Send proven markup down the HTML branch with numbered targets."], ["dynamic", "Record a manifest of targets for the browser to verify."], ["dynamic", "Append __sabaAttach to the view module.", true], ["static", "Return the HTML; the author’s code stays in the module.", true]],
     stage:[["stageJS", "Store the view and the generated entry for this route and language.", true], ["stageJS", "Link every import to a build URL; an unresolved one fails the build."], ["stageHTML", "Name the generation by SHA-256 and switch the route table to it."]],
@@ -2041,7 +2041,7 @@ const compilerLens = (() => {
     packages: {
       title: "krs packages", region: "Build machine",
       design: "krs installs the libraries pinned in .krs/packages.json into an Odin root. Each entry records a tag, its commit and a hash of the package tree; a frozen install refuses a tag that now points elsewhere.",
-      current: "The lock pins async, aws, kakunou, kessel v0.21.0, surf and websocket. task test installs them into a private root, so it never sees sibling working copies.",
+      current: "The lock pins async, aws, kakunou, kessel v0.22.0 and surf. task test installs them into a private root, so it never sees sibling working copies.",
       links: ["lock", "distribution"]
     },
     source: {
@@ -2477,7 +2477,7 @@ function makeTrace({heading, route, protocol}, messages) {
     'The heading is literal text. The paragraph shows label(), computed from an unread signal that the API and incoming messages fill in.',
     1800, []);
   beat('install', 'Build', 'packages', 'Install the toolchain',
-    'krs install --frozen copies the libraries pinned in .krs/packages.json into the Odin root and refuses any tag that has moved. The compiler parses with Kessel v0.21.0.',
+    'krs install --frozen copies the libraries pinned in .krs/packages.json into the Odin root and refuses any tag that has moved. The compiler parses with Kessel v0.22.0.',
     2350, [wire('install', 'shared/')], [put(.95, {installed:true})]);
   beat('parse', 'Build', 'compiler', 'Parse the component',
     'compile_page_template hands the module to Kessel, which returns a checked syntax tree with source spans. extract_page finds the default export and the element it returns.',
@@ -2603,7 +2603,7 @@ const tracePrograms = (() => {
   const generated = (numbers, stops) => program('Browser', 'Compiler output', 'web/.saba-view-0-0.js · this generation',
     '#client-module-response', numbers.map(n => [n, emittedLines[n - 1]]), stops);
   return {
-    "install": program("Build machine", "Repository source", ".krs/packages.json", "../.krs/packages.json", [[25, "    {"], [26, "      \"name\": \"kessel\","], [27, "      \"source\": \"https://github.com/dvrd/kessel.git\","], [28, "      \"tag\": \"v0.21.0\","], [29, "      \"commit\": \"a9ba38301296771ce512f64063e7286844a86679\","], [30, "      \"hash\": \"80aa6d59edd17676d0bae28378106d96c52e49214679a91aaf53cab1522c38a3\""], [31, "    },"]], [[0, 26, "krs reads the project lock. Each library is pinned by tag, commit and content hash."], [0.33, 28, "The JSX compiler parses with Kessel v0.21.0, the tag this lock records."], [0.62, 29, "krs install --frozen refuses a tag that now resolves to another commit, so a moved tag cannot change a build."], [0.95, 30, "The hash covers the installed package tree. The Odin root now holds exactly these sources."]]),
+    "install": program("Build machine", "Repository source", ".krs/packages.json", "../.krs/packages.json", [[25, "    {"], [26, "      \"name\": \"kessel\","], [27, "      \"source\": \"https://github.com/dvrd/kessel.git\","], [28, "      \"tag\": \"v0.22.0\","], [29, "      \"commit\": \"eb1e8aa3f38dc285931394bf62900ca293920ee4\","], [30, "      \"hash\": \"0a152bc771877ca4c400ce4f957bf8c87c3f602987f050d936c21f25c5183a62\""], [31, "    },"]], [[0, 26, "krs reads the project lock. Each library is pinned by tag, commit and content hash."], [0.33, 28, "The JSX compiler parses with Kessel v0.22.0, the tag this lock records."], [0.62, 29, "krs install --frozen refuses a tag that now resolves to another commit, so a moved tag cannot change a build."], [0.95, 30, "The hash covers the installed package tree. The Odin root now holds exactly these sources."]]),
     "parse": program("Build machine", "Repository source", "src/jsx/jsx.odin", "../src/jsx/jsx.odin", [[408, "compile_page_template :: proc("], [415, "  return compile_module(source, file, true, allocator)"], [455, "  if !k.parse_job_open_inline(&job, source, config, file) {"], [460, "  k.parse_job_run(&job)"], [461, "  if len(job.parser.errors) == 0 {"], [462, "    k.checker_run_for_job(&job)"], [463, "  }"], [515, "  if template {"], [516, "    page = extract_page(&p, job.program, allocator)"]], [[0, 408, "prepare_templates calls compile_page_template with the source of web/inbox.jsx."], [0.36, 460, "Kessel parses the module into a syntax tree. Every node keeps its byte span in the original source."], [0.64, 462, "The checker resolves names, so the compiler knows which identifiers are the module’s own."], [0.95, 516, "Hand the tree to extract_page, which looks for the default export and the element it returns."]]),
     "emit": program("Build machine", "Repository source", "src/jsx/template.odin", "../src/jsx/template.odin", [[222, "  setup := template_instance(&b, root, -1)"], [226, "  manifest, marshal_error := json.marshal(b.targets[:])"], [230, "  jsx_emit(p, fmt.tprintf(\"\\nimport * as %s from \\\"/__saba/attach.js\\\";\\n\", b.attach))"], [231, "  jsx_emit(p, strings.to_string(b.declarations))"], [232, "  jsx_emit(p, \"export function __sabaAttach(host, props) { return \")"], [233, "  jsx_emit(p, fmt.tprintf(\"%s.attach(host, %s, () => \", b.attach, string(manifest)))"], [236, "  return {"], [237, "    supported = true,"], [238, "    html = strings.clone(strings.to_string(b.html), allocator),"]], [[0, 222, "Walk the returned \u003cmain>. Proven markup goes to HTML with a numbered target per element; {label()} becomes an empty range."], [0.2, 226, "Record each target’s tag, parent and instance as a manifest for the browser to check."], [0.76, 232, "Append __sabaAttach to the module. It binds the component’s setup to the served targets."], [0.97, 238, "Return the HTML for the document. The author’s code stays in the module unchanged."]]),
     "stage": program("Saba server", "Repository source", "src/pages/build.odin", "../src/pages/build.odin", [[341, "      linker.input[view] = template.javascript"], [342, "      linker.input[start] = fmt.aprintf("], [349, "      if !link_module(&linker, start) {"], [353, "      document := fmt.aprintf("], [379, "  sha2.init_256(&hasher)"], [400, "  id := hex_string(digest[:BUILD_ID_BYTES], allocator)"], [442, "  cache.build = build"]], [[0, 341, "Store the compiled view and write a two-line entry that calls startPage with this route and language."], [0.26, 349, "Link every import to a build URL. An unresolved build-owned import fails the build here."], [0.98, 400, "Name the generation after a SHA-256 of every file and document. Same sources, same name; any change, a new one."]]),
@@ -2611,36 +2611,36 @@ const tracePrograms = (() => {
     "open.h1": program(
       "Saba server", "Repository source", "src/core/server.odin",
       "../src/core/server.odin", [
-        [997, "dispatch_request :: proc(task: ^Connection_Task) -> Response {"],
-        [998, "  if !begin_request_context(task) {"],
-        [999, "    return Response{status = .Internal_Server_Error, close_connection = true}"],
-        [1000, "  }"],
-        [1001, "  return call_request_handler(task, task.runtime.config.handler, task.runtime.config.handler_data)"],
-        [1002, "}"]
+        [1016, "dispatch_request :: proc(task: ^Connection_Task) -> Response {"],
+        [1017, "  if !begin_request_context(task) {"],
+        [1018, "    return Response{status = .Internal_Server_Error, close_connection = true}"],
+        [1019, "  }"],
+        [1020, "  return call_request_handler(task, task.runtime.config.handler, task.runtime.config.handler_data)"],
+        [1021, "}"]
       ], [
-        [0, 997, "Enter shared dispatch with the connection task for this completed HTTP/1.1 request."],
-        [0.34, 998, "Ensure the request has a cancellation context. If this fails, dispatch returns a server error."],
-        [0.78, 1001, "Call the configured handler through the shared wrapper and return its response."]
+        [0, 1016, "Enter shared dispatch with the connection task for this completed HTTP/1.1 request."],
+        [0.34, 1017, "Ensure the request has a cancellation context. If this fails, dispatch returns a server error."],
+        [0.78, 1020, "Call the configured handler through the shared wrapper and return its response."]
       ]
     ),
-    "open.h2": program("Saba server", "Repository source", "src/core/http2.odin", "../src/core/http2.odin", [[1724, "  task.request.body = task.request.body[:request.body_len]"], [1725, "  request.response_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.response)"], [1726, "  response := dispatch_request(task)"], [1727, ""], [1728, "  if !h2_queue_response(task, response) {"], [1729, "    request.failed = true"]], [[0, 1724, "Trim this stream’s request body to the bytes received. For this GET it is empty."], [0.34, 1725, "Set this stream’s response deadline: now plus the configured response timeout."], [0.78, 1726, "Dispatch the completed HTTP/2 request and queue its response on the stream."]]),
+    "open.h2": program("Saba server", "Repository source", "src/core/http2.odin", "../src/core/http2.odin", [[1751, "  task.request.body = task.request.body[:request.body_len]"], [1752, "  request.response_deadline = time.tick_add(time.tick_now(), task.runtime.timeouts.response)"], [1753, "  response := dispatch_request(task)"], [1754, ""], [1755, "  if !h2_queue_response(task, response) {"], [1756, "    request.failed = true"]], [[0, 1751, "Trim this stream’s request body to the bytes received. For this GET it is empty."], [0.34, 1752, "Set this stream’s response deadline: now plus the configured response timeout."], [0.78, 1753, "Dispatch the completed HTTP/2 request and queue its response on the stream."]]),
     "open.h3": program(
       "Saba server", "Repository source", "src/core/http3.odin",
       "../src/core/http3.odin", [
-        [470, "state := cast(^Http3_Request)wire.user_data"],
-        [471, ""],
-        [472, "if state == nil {"],
-        [473, "  state = http3_create_request(owner, wire)"],
-        [474, "  if state == nil {"],
-        [475, "    return .Failed"],
-        [476, "  }"],
-        [477, "  wire.user_data = state"],
-        [478, "}"],
-        [505, "    response = call_request_handler(task, owner.config.handler, owner.config.handler_data)"]
+        [478, "state := cast(^Http3_Request)wire.user_data"],
+        [479, ""],
+        [480, "if state == nil {"],
+        [481, "  state = http3_create_request(owner, wire)"],
+        [482, "  if state == nil {"],
+        [483, "    return .Failed"],
+        [484, "  }"],
+        [485, "  wire.user_data = state"],
+        [486, "}"],
+        [513, "    response = call_request_handler(task, owner.config.handler, owner.config.handler_data)"]
       ], [
-        [0, 470, "Read the Saba request state attached to this HTTP/3 exchange. On the first poll, the pointer is empty."],
-        [0.34, 473, "Create the server-side request state for this new HTTP/3 exchange."],
-        [0.78, 505, "Call the configured handler for this HTTP/3 request and save the response it returns."]
+        [0, 478, "Read the Saba request state attached to this HTTP/3 exchange. On the first poll, the pointer is empty."],
+        [0.34, 481, "Create the server-side request state for this new HTTP/3 exchange."],
+        [0.78, 513, "Call the configured handler for this HTTP/3 request and save the response it returns."]
       ]
     ),
     "html": program("Saba server", "Repository source", "src/pages/build.odin", "../src/pages/build.odin", [[886, "serve_document :: proc(request: ^Request, doc: Compiled_Document, development := false) -> Response {"], [888, "    denial, allowed := authorize(request)"], [895, "    if selected := select_language(request); selected in doc.variants {"], [902, "    policy = .Private_No_Store if doc.config.authorize != nil else .No_Store"], [916, "  return assets.prepared_representation_response(request, &rep, policy, vary)"]], [[0, 886, "serve_prepared_pages matched /inbox to a compiled document of the active build."], [0.25, 888, "Run the page’s authorize callback first, when it has one. This example has none."], [0.5, 895, "Pick the language variant the application selects; otherwise the first, English."], [0.8, 916, "Send the prepared bytes with no-store. “Inbox” and the reload link work before any script runs."]]),
@@ -3195,7 +3195,7 @@ checkout: [
 
   function distribution(s,p,index) {
     value("sabaTag","tagged src/");
-    value("kesselTag","v0.21.0");
+    value("kesselTag","v0.22.0");
     value("installCall",s.installed?"installed":index===0?"read imports":index===1?"resolve pins":"install files");
     value("sabaPin",s.installed?"shared/saba":"empty",!s.installed,s.installed);
     value("kesselPin",s.installed?"shared/kessel":"empty",!s.installed,s.installed);
